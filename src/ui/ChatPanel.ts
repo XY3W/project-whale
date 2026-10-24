@@ -23,6 +23,7 @@ export class ChatPanel {
 
   onSend: ((text: string) => void) | null = null;
   onTimeout: (() => void) | null = null;
+  onClose: (() => void) | null = null;
 
   constructor() {
     injectStyles();
@@ -32,6 +33,7 @@ export class ChatPanel {
       <div class="chat-head">
         <span>和鲸鱼娘说话</span>
         <span class="chat-state" data-state>未连接</span>
+        <button type="button" class="chat-close" data-close title="关闭">×</button>
       </div>
       <div class="chat-list" data-list></div>
       <div class="chat-status" data-status></div>
@@ -46,6 +48,11 @@ export class ChatPanel {
     this.input = this.root.querySelector("[data-input]")!;
     this.status = this.root.querySelector("[data-status]")!;
     this.sendBtn = this.root.querySelector("[data-send]")!;
+
+    this.root.querySelector("[data-close]")!.addEventListener("click", () => {
+      this.close("manual");
+      this.onClose?.();
+    });
 
     const form = this.root.querySelector("form")!;
     form.addEventListener("submit", (e) => {
@@ -147,7 +154,8 @@ const CSS = `
 .chat-panel.open{display:flex}
 .chat-head{display:flex;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(120,160,230,.18);
   font-size:12px;letter-spacing:.08em;color:#8fa8cc}
-.chat-state{color:#5f7a9e}
+.chat-state{color:#5f7a9e;margin-left:auto}
+.chat-close{background:none;border:0;color:#8fa8cc;font:18px/1 system-ui,sans-serif;cursor:pointer;padding:0 2px}
 .chat-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
 .chat-msg{max-width:88%;padding:8px 10px;border-radius:10px;white-space:pre-wrap;word-break:break-word}
 .chat-user{align-self:flex-end;background:rgba(70,110,190,.35);border:1px solid rgba(120,160,230,.3)}

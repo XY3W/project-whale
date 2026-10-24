@@ -5,8 +5,8 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 5178,
     proxy: {
-      "/ws": { target: "ws://127.0.0.1:8091", ws: true },
-      "/api": { target: "http://127.0.0.1:8091", changeOrigin: true },
+      "/ws": { target: "ws://127.0.0.1:8090", ws: true },
+      "/api": { target: "http://127.0.0.1:8090", changeOrigin: true },
     },
   },
   build: {
