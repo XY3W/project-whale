@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>v7 Lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0d13; overflow: hidden; }
+      canvas { display: block; }
+      #hud {
+        position: fixed; left: 16px; bottom: 16px; z-index: 5;
+        font: 12px/1.6 -apple-system, "PingFang SC", sans-serif;
+        color: rgba(232, 238, 252, 0.7); background: rgba(10, 13, 21, 0.6);
+        border: 1px solid rgba(150, 180, 255, 0.16); border-radius: 10px;
+        padding: 10px 14px; white-space: pre; pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="hud">loading…</div>
+    <script>
+      window.addEventListener("error", (e) => console.log("PAGEERR", e.message));
+      window.addEventListener("unhandledrejection", (e) => console.log("PAGEREJ", e.reason && (e.reason.stack || e.reason.message)));
+    </script>
+    <script type="module" src="/src/lab.ts"></script>
+  </body>
+</html>

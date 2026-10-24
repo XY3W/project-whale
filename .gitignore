@@ -1,0 +1,8 @@
+node_modules/
+dist/
+assets/
+public/models/dev/
+public/models/character.glb
+*.zip
+*.log
+.DS_Store

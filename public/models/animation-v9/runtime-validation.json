@@ -1,0 +1,32 @@
+{
+  "clipCount": 16,
+  "semanticActions": 10,
+  "internalTransitions": 2,
+  "trackPartitionPassed": true,
+  "upperRestoresWalking": true,
+  "interruptPassed": true,
+  "maxQuaternionError": 1.0448744669488974e-7,
+  "lowerWorldMatrixError": 0,
+  "comboBowEdgeRatio": [
+    0.9999999999999962,
+    1.0000000000000067
+  ],
+  "comboBowEdgeCount": 3316,
+  "footSupportAcrossStartWalkStop": [
+    {
+      "speed": 0.75,
+      "maxSupportStepSlipM": 0.000011913217440755344,
+      "supportSamples": 493
+    },
+    {
+      "speed": 1,
+      "maxSupportStepSlipM": 0.000014663719254540092,
+      "supportSamples": 554
+    },
+    {
+      "speed": 1.25,
+      "maxSupportStepSlipM": 0.000016803794378155457,
+      "supportSamples": 445
+    }
+  ]
+}

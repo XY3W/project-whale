@@ -1,0 +1,369 @@
+{
+  "assetVersion": "v9",
+  "rigVersion": "v9-anatomical-baked-1",
+  "rigSignature": "8bac3bb5402a873a74b8d7eef0a1b9c8d6ccfee56c62842a10315ec419d5102e",
+  "model": "character_v9.glb",
+  "fps": 30,
+  "faceEnabled": false,
+  "gazeEnabled": false,
+  "actions": [
+    {
+      "id": "walk_start",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "clips": [
+        "walk_start.lower",
+        "walk_start.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": false,
+      "cooldown": 2,
+      "allowedStates": [
+        "moving"
+      ],
+      "interruptWindows": [],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ],
+      "internal": true,
+      "rootDistanceM": 0.045
+    },
+    {
+      "id": "walk_stop",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "clips": [
+        "walk_stop.lower",
+        "walk_stop.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": false,
+      "cooldown": 2,
+      "allowedStates": [
+        "moving"
+      ],
+      "interruptWindows": [],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ],
+      "internal": true,
+      "rootDistanceM": 0.045
+    },
+    {
+      "id": "idle_stand",
+      "duration": 4,
+      "layer": "base",
+      "loop": true,
+      "clips": [
+        "idle_stand.lower",
+        "idle_stand.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          4
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "walk",
+      "duration": 1.6,
+      "layer": "base",
+      "loop": true,
+      "clips": [
+        "walk.lower",
+        "walk.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          1.6
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ],
+      "speedMps": 0.1125,
+      "strideM": 0.18,
+      "stepM": 0.09,
+      "candidateSpeedRange": [
+        0.75,
+        1.25
+      ],
+      "validatedSpeedRange": [
+        0.75,
+        1.25
+      ],
+      "supportPhase": {
+        "left": [
+          0,
+          0.5
+        ],
+        "right": [
+          0.5,
+          1
+        ]
+      },
+      "turnPolicy": "stop_then_face_then_walk",
+      "startAction": "walk_start",
+      "stopAction": "walk_stop",
+      "stopPolicy": "finish current stride to left-foot landing, then walk_stop",
+      "maxStopLatencySecondsAt1x": 2.4
+    },
+    {
+      "id": "greet",
+      "duration": 3,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "greet"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          3
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "notice",
+      "duration": 1.5,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "notice"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          1.5
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "nod",
+      "duration": 1.5,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "nod"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          1.5
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "look_left",
+      "duration": 2,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "look_left"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          2
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "look_right",
+      "duration": 2,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "look_right"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          2
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "think",
+      "duration": 3,
+      "layer": "upper",
+      "loop": true,
+      "clips": [
+        "think"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          3
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "tail_idle",
+      "duration": 3,
+      "layer": "tail",
+      "loop": true,
+      "clips": [
+        "tail_idle"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          3
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "tail_swish",
+      "duration": 2,
+      "layer": "tail",
+      "loop": true,
+      "clips": [
+        "tail_swish"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          2
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    }
+  ]
+}

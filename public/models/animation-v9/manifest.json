@@ -1,0 +1,29 @@
+{
+  "assetVersion": "v9",
+  "source": "/Users/qiaonan/Documents/Codex/2026-10-22/mac-codex-mac-codex-kipfel-zip/outputs/tail_v8/Character_WhaleTail_Attached_v8.blend",
+  "sourceSha256": "68ce2e97af0f84ef8cc8f661b1ccf6a6631ba4074ddceecb03150a1ab2e7f0dd",
+  "files": {
+    "Character_Animation_v9_EDITABLE.blend": "e969b50faee1a73ee5f59dd0da9c3188e1cd8d520791e12326e7c63a2da747d8",
+    "Character_Animation_v9_BAKED.blend": "ef838ebbdc450e47c88661961eacfe5561773def3bd1f32f4b1307533ea028f2",
+    "character_v9.glb": "8cc255331bb4cf7b8c814dc95f4ed647a7942db0a87a408f99f79183ffba1cb8",
+    "character_v9_full.glb": "d7cbc7b06ad5e80f5403ba3399f1d1ae03d317bae242bfbde453c79f0345715a",
+    "catalog.json": "b082eb7154df21ee0415d79d1db7ca779e4224c8f9a6df77c35952177269a825",
+    "tracks.json": "1ce0d44dc1be0d69f8a10d08cc768c375852c8fb7dae2318ffabcbfa5d82cc96"
+  },
+  "status": "local preview and automated validation; no remote deployment",
+  "faceEnabled": false,
+  "previews": {
+    "walk_start": "1a5f833492bab1a4bddae6c4bf6aac52d47a0ebd3b486f44ce566f6cb5c56c4f",
+    "walk_stop": "95b7edfdf8a758d821841e29a951edd7df04cb9a1abfcec4d07f90f10e55d1ec",
+    "idle_stand": "42981e8e4d267f6f6fc97fdd600469fc9c43cbf5c8b98ed606a65fe01d286e89",
+    "walk": "f06211ece4029a0cf3742b937e8b72b88aab0047e846db071711c67639806b7f",
+    "greet": "c27be07ad4cc9fc45bdd3cb95286bde0c0364c42bbd4228ab6fd0b06db908e41",
+    "notice": "db7fc54fcd30ff40d7bcc0db3a9a0185d09292ac015aed3b67bab8c9a833d69d",
+    "nod": "f5e2b1d0c14c26abf1969cd65d6c090e766453c1aafec6a197b3ae519087ef8a",
+    "look_left": "e832961786bdeab05438e589ca79ad9b1c507307ca8581d1866b908f1276ea53",
+    "look_right": "6b11b43c88283177c59522bfb19e436ca3e4b703845ff81153f6c0d8dc4f44e7",
+    "think": "6f9e110ac7f196405f410889fa9ce1b803db72b160df429c31d40522e21a9aed",
+    "tail_idle": "cc6abcba554107f0a1b48cd757ee7d78118dcd2f08a2087272ae6e28df44c077",
+    "tail_swish": "09f806e876333049604c844b673f592b40b745249fbadfd2dd36450aa8571318"
+  }
+}
