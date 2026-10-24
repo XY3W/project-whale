@@ -27,6 +27,7 @@ export interface ExecutorOptions {
  */
 export class ActionExecutor {
   private cancelled = false;
+  private cancelHooks: Array<() => void> = [];
   private readonly half: number;
   private readonly margin: number;
   private readonly now: () => number;
@@ -40,8 +41,14 @@ export class ActionExecutor {
     this.now = opts.now ?? (() => Date.now());
   }
 
+  /** 注册取消钩子：用于打断正在等待的 locomotion（收步、清手势） */
+  onCancel(fn: () => void) {
+    this.cancelHooks.push(fn);
+  }
+
   cancel() {
     this.cancelled = true;
+    for (const fn of this.cancelHooks) fn();
   }
 
   get distances(): number[] {

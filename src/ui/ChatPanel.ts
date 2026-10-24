@@ -105,7 +105,7 @@ export class ChatPanel {
   }
 
   private submit() {
-    if (!this.open || this.busy) return;
+    if (!this.open) return;
     const text = this.input.value.trim();
     if (!text) return;
     this.input.value = "";
@@ -164,6 +164,10 @@ const CSS = `
   background:rgba(14,22,36,.94);border:1px solid rgba(120,160,230,.35);color:#e6efff;
   font:13px/1.45 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .2s;z-index:15;white-space:pre-wrap}
 .speech-bubble.show{opacity:1}
+.net-error{position:fixed;left:0;top:0;width:64px;height:64px;border-radius:50%;display:none;
+  align-items:center;justify-content:center;background:#e23b3b;color:#fff;font:700 34px/1 system-ui,sans-serif;
+  box-shadow:0 0 24px rgba(226,59,59,.55);border:2px solid rgba(255,180,180,.8);pointer-events:none;z-index:30}
+.net-error.show{display:flex}
 `;
 
 function injectStyles() {

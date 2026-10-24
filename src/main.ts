@@ -76,6 +76,14 @@ async function boot() {
   const chat = new ChatPanel();
   const client = new BrainClient();
   let taskActive = false;
+  let readOnly = false;
+
+  // 头顶红色断连图标：固定屏幕尺寸，跟随角色投影
+  const errIcon = document.createElement("div");
+  errIcon.className = "net-error";
+  errIcon.textContent = "!";
+  document.body.appendChild(errIcon);
+  const setError = (on: boolean) => errIcon.classList.toggle("show", on);
 
   const bubble = document.createElement("div");
   bubble.className = "speech-bubble";
@@ -99,6 +107,12 @@ async function boot() {
   chat.onSend = (text) => {
     if (!client.connected) {
       chat.setError("还没有连上大脑服务");
+      chat.setThinking(false);
+      return;
+    }
+    if (readOnly) {
+      chat.setError("另一个页面正在执行角色，这里只读");
+      chat.setThinking(false);
       return;
     }
     chat.setError(null);
@@ -219,17 +233,25 @@ async function boot() {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   };
   const executor = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  executor.onCancel(() => {
+    player.clearGesture();
+    player.setWalking(false);
+  });
   let roamBusy = false;
+  let planChain: Promise<void> = Promise.resolve();
 
   client.on({
-    onPlan: async (msg) => {
+    onPlan: (msg) => {
       chat.setError(null);
       if (msg.speech) {
         chat.addMessage("whale", msg.speech);
         speak(msg.speech);
       }
-      const result = await executor.run(msg.plan as unknown as Plan);
-      client.sendPlanResult(msg.taskId, result);
+      // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
+      planChain = planChain.then(async () => {
+        const result = await executor.run(msg.plan as unknown as Plan);
+        client.sendPlanResult(msg.taskId, result);
+      });
     },
     onReply: (msg) => {
       chat.addMessage("whale", msg.speech);
@@ -240,14 +262,32 @@ async function boot() {
       chat.setThinking(taskActive);
       if (phase === "idle") chat.setThinking(false);
     },
-    onError: (code, message) => chat.setError(`${code}：${message}`),
+    onError: (code, message) => {
+      chat.setError(`${code}：${message}`);
+      chat.setThinking(false);
+      if (code !== "BUSY") setError(true);
+    },
+    onCancel: () => {
+      executor.cancel();
+      chat.setThinking(false);
+    },
+    onReadOnly: (ro) => {
+      readOnly = ro;
+      chat.setError(ro ? "另一个页面正在执行角色，这里只读" : null);
+    },
+    onReconcile: () => client.sendReconciled(snapshot()),
     onConnection: (ok) => {
       if (!ok) {
         chat.setError("与大脑的连接断开，正在重连…");
         chat.setThinking(false);
         taskActive = false;
+        executor.cancel();
+        player.setWalking(false);
+        setError(true);
       } else {
         chat.setError(null);
+        setError(false);
+        taskActive = false;
       }
     },
   });
@@ -357,6 +397,15 @@ async function boot() {
         const y = (-p.y * 0.5 + 0.5) * innerHeight;
         bubble.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
       }
+    }
+
+    if (errIcon.classList.contains("show")) {
+      const p = root.position.clone();
+      p.y += 1.75;
+      p.project(stage.camera);
+      const x = (p.x * 0.5 + 0.5) * innerWidth;
+      const y = (-p.y * 0.5 + 0.5) * innerHeight;
+      errIcon.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
     }
 
     stage.update();

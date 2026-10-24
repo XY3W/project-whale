@@ -19,6 +19,9 @@ type Handlers = {
   onPlan?: (msg: PlanMessage) => void;
   onReply?: (msg: ReplyMessage) => void;
   onTaskState?: (phase: string) => void;
+  onCancel?: (taskId: string) => void;
+  onReadOnly?: (readOnly: boolean) => void;
+  onReconcile?: () => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -27,6 +30,7 @@ export class BrainClient {
   private ws: WebSocket | null = null;
   private handlers: Handlers = {};
   private retry = 0;
+  private heartbeat: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`) {}
 
@@ -45,6 +49,7 @@ export class BrainClient {
       this.retry = 0;
       this.handlers.onConnection?.(true);
       this.send("hello", {});
+      this.startHeartbeat();
     });
     this.ws.addEventListener("close", () => {
       this.handlers.onConnection?.(false);
@@ -67,11 +72,29 @@ export class BrainClient {
         case "task_state":
           this.handlers.onTaskState?.(String(msg.phase));
           break;
+        case "cancel_plan":
+          this.handlers.onCancel?.(String(msg.taskId));
+          break;
+        case "session_state": {
+          const ro = !!msg.readOnly;
+          this.handlers.onReadOnly?.(ro);
+          if (msg.needsReconcile) this.handlers.onReconcile?.();
+          break;
+        }
         case "error":
           this.handlers.onError?.(String(msg.code), String(msg.message));
           break;
       }
     });
+  }
+
+  private startHeartbeat() {
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = setInterval(() => this.send("heartbeat", {}), 5000);
+  }
+
+  sendReconciled(snapshot: Record<string, unknown>) {
+    return this.send("state_snapshot", { snapshot, reconciled: true });
   }
 
   private scheduleRetry() {
