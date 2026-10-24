@@ -77,6 +77,8 @@ async function boot() {
   const client = new BrainClient();
   let taskActive = false;
   let readOnly = false;
+  let stateApplied = false;
+  let lastReport = 0;
 
   // 头顶红色断连图标：固定屏幕尺寸，跟随角色投影
   const errIcon = document.createElement("div");
@@ -276,6 +278,13 @@ async function boot() {
       chat.setError(ro ? "另一个页面正在执行角色，这里只读" : null);
     },
     onReconcile: () => client.sendReconciled(snapshot()),
+    onSnapshot: (s) => {
+      if (stateApplied) return;
+      stateApplied = true;
+      root.position.x = THREE.MathUtils.clamp(s.x, -AREA_HALF, AREA_HALF);
+      root.position.z = THREE.MathUtils.clamp(s.z, -AREA_HALF, AREA_HALF);
+      root.rotation.y = (s.yawDeg * Math.PI) / 180;
+    },
     onConnection: (ok) => {
       if (!ok) {
         chat.setError("与大脑的连接断开，正在重连…");
@@ -359,7 +368,7 @@ async function boot() {
 
     // ---- 机械漫游门禁 ----
     const canRoam =
-      !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
+      stateApplied && !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
       !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {
@@ -399,6 +408,13 @@ async function boot() {
       }
     }
 
+    // 上报位置：停稳后每 2 秒一次，供刷新恢复
+    const now = performance.now();
+    if (stateApplied && now - lastReport > 2000 && !player.state.walking && phase === "idle" && !taskActive) {
+      lastReport = now;
+      client.sendStateSnapshot(snapshot());
+    }
+
     if (errIcon.classList.contains("show")) {
       const p = root.position.clone();
       p.y += 1.75;
@@ -409,6 +425,11 @@ async function boot() {
     }
 
     stage.update();
+  });
+
+  window.addEventListener("pagehide", () => client.sendStateSnapshot(snapshot()));
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") client.sendStateSnapshot(snapshot());
   });
 
   loading.classList.add("done");

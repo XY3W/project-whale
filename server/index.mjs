@@ -49,6 +49,27 @@ const server = http.createServer(serveStatic);
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 let nextTask = 100;
+const STATE_FILE = path.join(process.cwd(), "data", "state.json");
+function loadCharacter() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
+    if (typeof raw.x === "number" && typeof raw.z === "number" && typeof raw.yawDeg === "number") return raw;
+  } catch {}
+  return { x: 0, z: 0, yawDeg: 0, updatedAt: 0 };
+}
+let character = loadCharacter();
+let lastSave = 0;
+function saveCharacter() {
+  if (Date.now() - lastSave < 1500) return;
+  lastSave = Date.now();
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ ...character, updatedAt: Date.now() }));
+  } catch (err) {
+    console.error("state save failed", err.message);
+  }
+}
+
 const session = {
   id: `s${Date.now()}`,
   lease: null,          // 当前执行端 ws
@@ -73,7 +94,7 @@ function broadcastState() {
     taskId: session.task?.id ?? null,
     hasExecutor: isLeaseAlive(),
   };
-  for (const ws of wss.clients) send(ws, "session_state", { ...payload, readOnly: false });
+  for (const ws of wss.clients) send(ws, "session_state", { ...payload, character, readOnly: false });
 }
 
 function endTask(reason) {
@@ -110,6 +131,7 @@ wss.on("connection", (ws) => {
     taskId: session.task?.id ?? null,
     hasExecutor: true,
     readOnly: false,
+    character,
     needsReconcile: !!session.task && ws === session.lease,
   });
 
@@ -131,6 +153,7 @@ wss.on("connection", (ws) => {
           taskId: session.task?.id ?? null,
           hasExecutor: true,
           readOnly: false,
+          character,
           needsReconcile: !!session.task && ws === session.lease,
         });
         break;
@@ -139,12 +162,21 @@ wss.on("connection", (ws) => {
         if (isLease(ws)) session.leaseAt = Date.now();
         break;
 
-      case "state_snapshot":
+      case "state_snapshot": {
         // 重连后对账：执行端报告实际状态，服务器不盲重播任务
-        if (isLease(ws) && session.task && msg.reconciled) {
-          endTask("reconciled after reconnect");
+        if (isLease(ws) && session.task && msg.reconciled) endTask("reconciled after reconnect");
+        const snap = msg.snapshot;
+        if (snap && Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
+          character = {
+            x: Math.max(-3.7, Math.min(3.7, snap.x)),
+            z: Math.max(-3.7, Math.min(3.7, snap.z)),
+            yawDeg: snap.yawDeg,
+            updatedAt: Date.now(),
+          };
+          saveCharacter();
         }
         break;
+      }
 
       case "user_message": {
         if (!isLease(ws)) {

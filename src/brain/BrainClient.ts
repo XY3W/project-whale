@@ -22,6 +22,7 @@ type Handlers = {
   onCancel?: (taskId: string) => void;
   onReadOnly?: (readOnly: boolean) => void;
   onReconcile?: () => void;
+  onSnapshot?: (s: { x: number; z: number; yawDeg: number }) => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -79,6 +80,10 @@ export class BrainClient {
           const ro = !!msg.readOnly;
           this.handlers.onReadOnly?.(ro);
           if (msg.needsReconcile) this.handlers.onReconcile?.();
+          const ch = msg.character as { x: number; z: number; yawDeg: number } | undefined;
+          if (ch && Number.isFinite(ch.x) && Number.isFinite(ch.z) && Number.isFinite(ch.yawDeg)) {
+            this.handlers.onSnapshot?.(ch);
+          }
           break;
         }
         case "error":
