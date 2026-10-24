@@ -6,3 +6,4 @@ public/models/character.glb
 *.zip
 *.log
 .DS_Store
+.env

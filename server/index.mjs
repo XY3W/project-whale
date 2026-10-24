@@ -12,6 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer } from "ws";
+import { CAPABILITIES, ModelError, callModel, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
 const ROOT = path.resolve(process.cwd(), "dist");
@@ -77,6 +78,7 @@ const session = {
   task: null,           // { id, text, rounds, startedAt, superseded, plan }
   phase: "idle",
   lastResult: null,     // { taskId, round } 用于去重
+  history: [],          // 最近对话（限 12 条）
 };
 
 function send(ws, type, payload = {}) {
@@ -117,6 +119,32 @@ function summary(result) {
   const failed = steps.find((s) => s.status !== "succeeded");
   if (failed) return `动作没有完成（${failed.reasonCode}）。`;
   return `做好了（${steps.filter((s) => s.status === "succeeded").length} 个动作）。`;
+}
+
+function applyOutput(ws, task, out) {
+  if (!session.task || session.task.id !== task.id) return;
+  if (out.type === "finish_task") {
+    const speech = out.speech || (out.outcome === "completed" ? "好了。" : "这个我还做不到。");
+    send(ws, "public_reply", { taskId: task.id, speech });
+    session.history.push({ role: "assistant", content: speech });
+    endTask();
+    return;
+  }
+  task.plan = out.plan;
+  task.rounds += 1;
+  session.phase = "executing";
+  broadcastState();
+  if (out.speech) session.history.push({ role: "assistant", content: out.speech });
+  send(ws, "execute_plan", { taskId: task.id, turnId: task.rounds, speech: out.speech ?? "", plan: out.plan });
+}
+
+function fail(ws, task, err) {
+  const code = err instanceof ModelError ? err.code : "INTERNAL";
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`[model] ${code}: ${message}`);
+  send(ws, "error", { code, message });
+  send(ws, "task_state", { taskId: task?.id ?? null, phase: "error" });
+  endTask("model error");
 }
 
 wss.on("connection", (ws) => {
@@ -193,27 +221,45 @@ wss.on("connection", (ws) => {
 
         const taskId = `t${nextTask++}`;
         session.task = { id: taskId, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null };
+        session.history.push({ role: "user", content: msg.text });
+        if (session.history.length > 12) session.history = session.history.slice(-12);
         session.phase = "thinking";
         broadcastState();
 
-        setTimeout(() => {
-          if (!session.task || session.task.id !== taskId || session.task.superseded) return;
-          const plan = planFor(msg.text);
-          if (!plan) {
-            session.phase = "checking";
+        setTimeout(async () => {
+          const task = session.task;
+          if (!task || task.id !== taskId || task.superseded) return;
+          if (!hasKey()) {
+            // 没有 Key：走本地 FakeBrain，不装作在线
+            const plan = planFor(msg.text);
+            session.phase = plan ? "executing" : "checking";
             broadcastState();
-            setTimeout(() => {
-              if (!session.task || session.task.id !== taskId) return;
+            if (plan) {
+              task.plan = plan;
+              task.rounds = 1;
+              send(ws, "execute_plan", { taskId, turnId: 1, speech: plan.speech, plan: { steps: plan.steps } });
+            } else {
               send(ws, "public_reply", { taskId, speech: `我听到了：${msg.text}` });
               endTask();
-            }, 250);
+            }
             return;
           }
-          session.phase = "executing";
-          session.task.plan = plan;
-          session.task.rounds = 1;
-          broadcastState();
-          send(ws, "execute_plan", { taskId, turnId: 1, speech: plan.speech, plan: { steps: plan.steps } });
+          try {
+            const out = await callModel(
+              planningMessages({
+                taskId,
+                userMessage: msg.text,
+                characterState: character,
+                world: { walkableHalf: 3.7, coordinateSystem: "glTF +Y up, +Z forward" },
+                capabilities: CAPABILITIES,
+                history: session.history.slice(-8),
+                clientSnapshot: msg.snapshot ?? null,
+              }),
+            );
+            applyOutput(ws, task, out);
+          } catch (err) {
+            fail(ws, task, err);
+          }
         }, 300);
         break;
       }
@@ -240,10 +286,39 @@ wss.on("connection", (ws) => {
 
         session.phase = "checking";
         broadcastState();
-        setTimeout(() => {
-          if (!session.task || session.task.id !== task.id) return;
-          send(ws, "public_reply", { taskId: task.id, speech: summary(msg.result) });
-          endTask();
+        setTimeout(async () => {
+          const task = session.task;
+          if (!task || task.id !== msg.taskId) return;
+          if (Date.now() - task.startedAt > BUDGET_MS) {
+            send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，需要新的指示。" });
+            endTask("budget exceeded");
+            return;
+          }
+          if (task.rounds >= MAX_ROUNDS) {
+            send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
+            endTask("round budget");
+            return;
+          }
+          if (!hasKey()) {
+            send(ws, "public_reply", { taskId: task.id, speech: summary(msg.result) });
+            endTask();
+            return;
+          }
+          try {
+            const out = await callModel(
+              reviewMessages({
+                taskId: task.id,
+                turn: task.rounds,
+                executionReport: msg.result,
+                characterState: character,
+                capabilities: CAPABILITIES,
+                history: session.history.slice(-8),
+              }),
+            );
+            applyOutput(ws, task, out);
+          } catch (err) {
+            fail(ws, task, err);
+          }
         }, 250);
         break;
       }
