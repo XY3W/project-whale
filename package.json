@@ -10,7 +10,8 @@
     "assets": "blender -b --python scripts/build_glb.py -- public/models/character.glb"
   },
   "dependencies": {
-    "three": "^0.180.0"
+    "three": "^0.180.0",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/three": "^0.180.0",

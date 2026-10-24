@@ -5,7 +5,8 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
 import { ChatPanel } from "./ui/ChatPanel";
-import { FakeBrain } from "./brain/FakeBrain";
+import { BrainClient } from "./brain/BrainClient";
+import type { Plan } from "./behavior/protocol.ts";
 import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
@@ -73,7 +74,8 @@ async function boot() {
 
   // ---- UI ----
   const chat = new ChatPanel();
-  const brain = new FakeBrain();
+  const client = new BrainClient();
+  let taskActive = false;
 
   const bubble = document.createElement("div");
   bubble.className = "speech-bubble";
@@ -85,18 +87,23 @@ async function boot() {
     bubbleUntil = performance.now() + ms;
   };
 
-  chat.onSend = async (text) => {
-    chat.setThinking(true);
-    chat.setError(null);
-    try {
-      const reply = await brain.reply(text);
-      chat.addMessage("whale", reply.speech);
-      speak(reply.speech);
-    } catch (err) {
-      chat.setError(err instanceof Error ? err.message : "回复失败");
-    } finally {
-      chat.setThinking(false);
+  const snapshot = () => ({
+    x: +root.position.x.toFixed(3),
+    z: +root.position.z.toFixed(3),
+    yawDeg: +((root.rotation.y * 180) / Math.PI).toFixed(1),
+    base: player.state.base,
+    walking: player.state.walking,
+    chatOpen: chat.open,
+  });
+
+  chat.onSend = (text) => {
+    if (!client.connected) {
+      chat.setError("还没有连上大脑服务");
+      return;
     }
+    chat.setError(null);
+    chat.setThinking(true);
+    client.sendUserMessage(text, snapshot());
   };
   chat.onTimeout = () => {
     bubble.classList.remove("show");
@@ -214,6 +221,38 @@ async function boot() {
   const executor = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   let roamBusy = false;
 
+  client.on({
+    onPlan: async (msg) => {
+      chat.setError(null);
+      if (msg.speech) {
+        chat.addMessage("whale", msg.speech);
+        speak(msg.speech);
+      }
+      const result = await executor.run(msg.plan as unknown as Plan);
+      client.sendPlanResult(msg.taskId, result);
+    },
+    onReply: (msg) => {
+      chat.addMessage("whale", msg.speech);
+      speak(msg.speech);
+    },
+    onTaskState: (phase) => {
+      taskActive = phase === "thinking" || phase === "executing" || phase === "checking";
+      chat.setThinking(taskActive);
+      if (phase === "idle") chat.setThinking(false);
+    },
+    onError: (code, message) => chat.setError(`${code}：${message}`),
+    onConnection: (ok) => {
+      if (!ok) {
+        chat.setError("与大脑的连接断开，正在重连…");
+        chat.setThinking(false);
+        taskActive = false;
+      } else {
+        chat.setError(null);
+      }
+    },
+  });
+  client.connect();
+
   // ---- 主循环 ----
   const clock = new THREE.Clock();
 
@@ -280,7 +319,7 @@ async function boot() {
 
     // ---- 机械漫游门禁 ----
     const canRoam =
-      !chat.open && !wantChat && !destination && !roamBusy && phase === "idle" &&
+      !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
       !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {
@@ -327,7 +366,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, executor,
+    stage, root, player, meshes, chat, requestMove, enterChat, executor, client,
   };
 }
 
