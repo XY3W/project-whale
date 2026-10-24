@@ -6,6 +6,9 @@ import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
 import { ChatPanel } from "./ui/ChatPanel";
 import { FakeBrain } from "./brain/FakeBrain";
+import { ActionExecutor } from "./behavior/ActionExecutor";
+import type { Locomotion } from "./behavior/protocol.ts";
+import { cyclesFor } from "./behavior/distances.ts";
 import { Hud } from "./ui/Hud";
 
 const MODEL = "/models/animation-v9/character_v9.glb";
@@ -172,6 +175,45 @@ async function boot() {
     }, ["greet", "notice", "nod", "look_left", "look_right", "think", "tail"]);
   }
 
+  // ---- 精确执行器接线 ----
+  const waiters: { check: () => boolean; done: () => void }[] = [];
+  const waitFor = (check: () => boolean, timeoutMs = 15000) =>
+    new Promise<void>((resolve) => {
+      const w = { check, done: () => { clearTimeout(timer); resolve(); } };
+      const timer = setTimeout(() => {
+        const i = waiters.indexOf(w);
+        if (i >= 0) waiters.splice(i, 1);
+        resolve();
+      }, timeoutMs);
+      waiters.push(w);
+    });
+
+  const loco: Locomotion = {
+    yaw: () => root.rotation.y,
+    position: () => ({ x: root.position.x, z: root.position.z }),
+    walk: async (meters) => {
+      if (cyclesFor(meters) === null) return;
+      player.walkDistance(meters);
+      await waitFor(() => !player.state.walking && player.state.base === "idle_stand");
+    },
+    turn: async (deg) => {
+      startTurn(root.rotation.y + (deg * Math.PI) / 180, null);
+      await waitFor(() => phase !== "turning", 5000);
+    },
+    play: async (id) => {
+      player.gesture(id);
+      await waitFor(() => player.state.upper === null, 8000);
+    },
+    tail: async (style, dur) => {
+      player.setTail(style === "tail_swish");
+      await new Promise((r) => setTimeout(r, dur * 1000));
+      player.setTail(false);
+    },
+    sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+  };
+  const executor = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  let roamBusy = false;
+
   // ---- 主循环 ----
   const clock = new THREE.Clock();
 
@@ -238,24 +280,29 @@ async function boot() {
 
     // ---- 机械漫游门禁 ----
     const canRoam =
-      !chat.open && !wantChat && !destination && phase === "idle" &&
+      !chat.open && !wantChat && !destination && !roamBusy && phase === "idle" &&
       !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {
       roamTimer -= dt;
       if (roamTimer <= 0) {
         roamTimer = 3 + Math.random() * 5;
-        const a = root.rotation.y + (Math.random() - 0.5) * 2.2;
-        const d = Math.random() < 0.5 ? 0.45 : 0.63;
-        const p = root.position
-          .clone()
-          .addScaledVector(new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), d);
-        p.x = THREE.MathUtils.clamp(p.x, -AREA_HALF, AREA_HALF);
-        p.z = THREE.MathUtils.clamp(p.z, -AREA_HALF, AREA_HALF);
-        requestMove(p);
+        roamBusy = true;
+        const angle = (Math.random() - 0.5) * 60;
+        const distance = Math.random() < 0.5 ? 0.27 : 0.45;
+        void executor
+          .run({ steps: [{ action: "turn", angle_deg: Math.round(angle) }, { action: "walk", distance_m: distance }] })
+          .finally(() => { roamBusy = false; });
       }
     } else {
       roamTimer = Math.max(roamTimer, 2 + Math.random() * 3);
+    }
+
+    for (let i = waiters.length - 1; i >= 0; i--) {
+      if (waiters[i].check()) {
+        waiters[i].done();
+        waiters.splice(i, 1);
+      }
     }
 
     root.position.x = THREE.MathUtils.clamp(root.position.x, -AREA_HALF, AREA_HALF);
@@ -280,7 +327,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat,
+    stage, root, player, meshes, chat, requestMove, enterChat, executor,
   };
 }
 

@@ -15,6 +15,7 @@ export class LayeredMotionPlayer {
   private tail = 'tail_idle';
   private tailMix = 0;
   private rate = 1;
+  private cyclesLeft = -1;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
   movementDelta = 0;
   get speed() { return this.rate; }
@@ -35,6 +36,18 @@ export class LayeredMotionPlayer {
     this.base = base; this.baseTime = 0;
     for (const suffix of ['lower','upperBase']) this.get(`${base}.${suffix}`).reset().play();
   }
+  /** 精确走：只接受 0.09 + 0.18n 米，返回是否接受 */
+  walkDistance(meters: number): boolean {
+    const n = Math.round((meters - 0.09) / 0.18);
+    if (!Number.isFinite(meters) || n < 0 || n > 10) return false;
+    if (Math.abs(0.09 + 0.18 * n - meters) > 1e-6) return false;
+    // 循环边界在每圈结束时判定：n 圈需要 n-1 次“继续”
+    this.cyclesLeft = n - 1;
+    this.setWalking(true);
+    if (n === 0) this.setWalking(false); // 起步后直接收步：0.045 + 0.045
+    return true;
+  }
+
   setWalking(value: boolean) {
     this.walking = value;
     if (value && this.base === 'idle_stand') this.setBase('walk_start');
@@ -79,7 +92,10 @@ export class LayeredMotionPlayer {
       if(step>0){this.advance(step);remaining-=step;}
       if(this.baseTime>=duration-1e-8){
         if(this.base==='walk_stop')this.setBase(this.walking?'walk_start':'idle_stand');
-        else if(this.walking)this.setBase('walk');
+        else if(this.walking){
+          if(this.base==='walk'&&this.cyclesLeft>=0){this.cyclesLeft--;if(this.cyclesLeft<0)this.walking=false;}
+          this.setBase(this.walking?'walk':'walk_stop');
+        }
         else this.setBase('walk_stop');
         this.weights();this.mixer.update(0);
       }
