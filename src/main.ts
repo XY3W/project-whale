@@ -4,10 +4,15 @@ import { Stage } from "./core/Stage";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
+import { ChatPanel } from "./ui/ChatPanel";
+import { FakeBrain } from "./brain/FakeBrain";
 import { Hud } from "./ui/Hud";
 
 const MODEL = "/models/animation-v9/character_v9.glb";
-const AREA_HALF = 3.7; // 8m 场地，留出角色半径
+const AREA_HALF = 3.7;
+const DEBUG = new URLSearchParams(location.search).has("debug");
+
+type Phase = "idle" | "stopping" | "turning" | "walking";
 
 async function boot() {
   const stage = new Stage(document.getElementById("app")!);
@@ -16,8 +21,7 @@ async function boot() {
   const bar = loading.querySelector(".loading-bar i") as HTMLElement;
   const note = loading.querySelector(".loading-note") as HTMLElement;
 
-  const loader = new GLTFLoader();
-  const gltf = await loader.loadAsync(MODEL, (e) => {
+  const gltf = await new GLTFLoader().loadAsync(MODEL, (e) => {
     if (e.total > 0) bar.style.width = `${Math.round((e.loaded / e.total) * 100)}%`;
   });
   note.textContent = "正在准备动作…";
@@ -37,19 +41,21 @@ async function boot() {
   });
 
   await enableMultiWeight(gltf, meshes);
-
   const player = new LayeredMotionPlayer(root, gltf.animations);
 
   const box = new THREE.Box3().setFromObject(gltf.scene);
   root.position.y -= box.min.y;
-
   stage.scene.add(root);
   stage.setRoomCamera();
 
-  // ---- 移动与转身 ----
-  type Phase = "idle" | "stopping" | "turning" | "walking";
+  // ---- 状态 ----
   let phase: Phase = "idle";
   let destination: THREE.Vector3 | null = null;
+  let wantChat = false;
+  let chatYaw = 0;
+  let postTurn: (() => void) | null = null;
+  let roamTimer = 4;
+
   const forward = new THREE.Vector3(0, 0, 1);
   const tmp = new THREE.Vector3();
   const turn = { from: 0, to: 0, t: 0, dur: 0.4 };
@@ -62,27 +68,87 @@ async function boot() {
   };
   const yawTo = (p: THREE.Vector3) => Math.atan2(p.x - root.position.x, p.z - root.position.z);
 
+  // ---- UI ----
+  const chat = new ChatPanel();
+  const brain = new FakeBrain();
+
+  const bubble = document.createElement("div");
+  bubble.className = "speech-bubble";
+  document.body.appendChild(bubble);
+  let bubbleUntil = 0;
+  const speak = (text: string, ms = 5000) => {
+    bubble.textContent = text;
+    bubble.classList.add("show");
+    bubbleUntil = performance.now() + ms;
+  };
+
+  chat.onSend = async (text) => {
+    chat.setThinking(true);
+    chat.setError(null);
+    try {
+      const reply = await brain.reply(text);
+      chat.addMessage("whale", reply.speech);
+      speak(reply.speech);
+    } catch (err) {
+      chat.setError(err instanceof Error ? err.message : "回复失败");
+    } finally {
+      chat.setThinking(false);
+    }
+  };
+  chat.onTimeout = () => {
+    bubble.classList.remove("show");
+  };
+
+  // ---- 移动 ----
   const requestMove = (point: THREE.Vector3) => {
     tmp.copy(point).sub(root.position).setY(0);
     if (tmp.lengthSq() < 0.0025) return;
     destination = point.clone();
     if (phase === "walking") {
-      player.setWalking(false); // 先停稳，再由转身阶段接管
+      player.setWalking(false);
       phase = "stopping";
     } else if (phase === "turning") {
-      phase = "idle"; // 落点变了，重新算朝向
+      phase = "idle";
     }
   };
 
-  // ---- 输入：点击与拖动分流 ----
+  const startTurn = (toYaw: number, then: (() => void) | null) => {
+    turn.from = root.rotation.y;
+    turn.to = toYaw;
+    turn.t = 0;
+    turn.dur = THREE.MathUtils.clamp(0.3 + Math.abs(toYaw - root.rotation.y) * 0.45, 0.3, 1.15);
+    postTurn = then;
+    phase = "turning";
+  };
+
+  const enterChat = () => {
+    if (chat.open) {
+      chat.openPanel();
+      return;
+    }
+    destination = null;
+    if (phase === "walking" || player.state.walking) {
+      player.setWalking(false);
+      phase = "stopping";
+    }
+    chatYaw = Math.atan2(
+      stage.camera.position.x - root.position.x,
+      stage.camera.position.z - root.position.z,
+    );
+    wantChat = true;
+  };
+
+  // ---- 输入：只识别角色点击 ----
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
-  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   let downAt: { x: number; y: number; t: number } | null = null;
 
   const canvas = stage.renderer.domElement;
   canvas.addEventListener("pointerdown", (e) => {
     downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
+  });
+  canvas.addEventListener("pointercancel", () => {
+    downAt = null;
   });
   canvas.addEventListener("pointerup", (e) => {
     if (!downAt) return;
@@ -93,73 +159,54 @@ async function boot() {
 
     ndc.set((e.clientX / innerWidth) * 2 - 1, -((e.clientY / innerHeight) * 2 - 1));
     raycaster.setFromCamera(ndc, stage.camera);
-
-    if (raycaster.intersectObjects(meshes, true).length > 0) {
-      player.gesture("notice");
-      return;
-    }
-    const hit = new THREE.Vector3();
-    if (!raycaster.ray.intersectPlane(plane, hit)) return;
-    hit.x = THREE.MathUtils.clamp(hit.x, -AREA_HALF, AREA_HALF);
-    hit.z = THREE.MathUtils.clamp(hit.z, -AREA_HALF, AREA_HALF);
-    requestMove(hit);
+    if (raycaster.intersectObjects(meshes, true).length === 0) return; // 地面点击不做事
+    enterChat();
   });
 
-  // ---- HUD ----
-  const hud = new Hud(
-    (id) => {
-      switch (id) {
-        case "walk": {
-          if (phase === "walking" || player.state.walking) {
-            destination = null;
-            player.setWalking(false);
-            phase = "stopping";
-          } else {
-            const dir = new THREE.Vector3(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
-            requestMove(root.position.clone().addScaledVector(dir, 2.4));
-          }
-          break;
-        }
-        case "tail":
-          player.setTail(player.state.tail !== "tail_swish");
-          break;
-        default:
-          player.gesture(id);
-      }
-    },
-    ["walk", "greet", "notice", "nod", "look_left", "look_right", "think", "tail"],
-  );
+  // ---- 调试 HUD（仅 ?debug）----
+  if (DEBUG) {
+    new Hud((id) => {
+      if (id === "walk") requestMove(root.position.clone().add(new THREE.Vector3(0, 0, 0.45)));
+      else if (id === "tail") player.setTail(player.state.tail !== "tail_swish");
+      else player.gesture(id);
+    }, ["greet", "notice", "nod", "look_left", "look_right", "think", "tail"]);
+  }
 
   // ---- 主循环 ----
   const clock = new THREE.Clock();
-  let hudTimer = 0;
 
   stage.renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
-
     player.update(dt);
 
-    // 世界位移只来自片段本身
     forward.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
-    if (player.movementDelta > 0 && phase !== "turning") root.position.addScaledVector(forward, player.movementDelta);
+    if (player.movementDelta > 0 && phase !== "turning") {
+      root.position.addScaledVector(forward, player.movementDelta);
+    }
 
-    // 转身：缓入缓出，站定后再走
     switch (phase) {
       case "stopping":
         if (player.state.base === "idle_stand") phase = "idle";
         break;
       case "idle": {
+        if (wantChat) {
+          wantChat = false;
+          const delta = shortest(root.rotation.y, chatYaw);
+          if (Math.abs(delta) > 0.09) startTurn(chatYaw, () => chat.openPanel());
+          else chat.openPanel();
+          break;
+        }
         if (!destination) break;
         tmp.copy(destination).sub(root.position).setY(0);
-        if (tmp.length() < 0.08) { destination = null; break; }
+        if (tmp.length() < 0.08) {
+          destination = null;
+          player.setWalking(false);
+          phase = "stopping";
+          break;
+        }
         const delta = shortest(root.rotation.y, yawTo(destination));
-        if (Math.abs(delta) > 0.09) {
-          turn.from = root.rotation.y;
-          turn.to = root.rotation.y + delta;
-          turn.t = 0;
-          turn.dur = THREE.MathUtils.clamp(0.3 + Math.abs(delta) * 0.45, 0.3, 1.15);
-          phase = "turning";
-        } else {
+        if (Math.abs(delta) > 0.09) startTurn(root.rotation.y + delta, null);
+        else {
           phase = "walking";
           player.setWalking(true);
         }
@@ -170,10 +217,15 @@ async function boot() {
         const u = Math.min(1, turn.t / turn.dur);
         const e = u * u * (3 - 2 * u);
         root.rotation.y = turn.from + (turn.to - turn.from) * e;
-        if (u >= 1) phase = "idle";
+        if (u >= 1) {
+          phase = "idle";
+          const next = postTurn;
+          postTurn = null;
+          next?.();
+        }
         break;
       }
-      case "walking": {
+      case "walking":
         if (!destination) break;
         tmp.copy(destination).sub(root.position).setY(0);
         if (tmp.length() < 0.08) {
@@ -182,18 +234,43 @@ async function boot() {
           phase = "stopping";
         }
         break;
-      }
     }
 
+    // ---- 机械漫游门禁 ----
+    const canRoam =
+      !chat.open && !wantChat && !destination && phase === "idle" &&
+      !player.state.walking && player.state.base === "idle_stand";
+
+    if (canRoam) {
+      roamTimer -= dt;
+      if (roamTimer <= 0) {
+        roamTimer = 3 + Math.random() * 5;
+        const a = root.rotation.y + (Math.random() - 0.5) * 2.2;
+        const d = Math.random() < 0.5 ? 0.45 : 0.63;
+        const p = root.position
+          .clone()
+          .addScaledVector(new THREE.Vector3(Math.sin(a), 0, Math.cos(a)), d);
+        p.x = THREE.MathUtils.clamp(p.x, -AREA_HALF, AREA_HALF);
+        p.z = THREE.MathUtils.clamp(p.z, -AREA_HALF, AREA_HALF);
+        requestMove(p);
+      }
+    } else {
+      roamTimer = Math.max(roamTimer, 2 + Math.random() * 3);
+    }
 
     root.position.x = THREE.MathUtils.clamp(root.position.x, -AREA_HALF, AREA_HALF);
     root.position.z = THREE.MathUtils.clamp(root.position.z, -AREA_HALF, AREA_HALF);
 
-    hudTimer -= dt;
-    if (hudTimer <= 0) {
-      hudTimer = 0.15;
-      const s = player.state;
-      hud.setStatus(s.walking ? "走路" : "待机", s.upper ?? "—", s.tail);
+    if (bubble.classList.contains("show")) {
+      if (performance.now() > bubbleUntil) bubble.classList.remove("show");
+      else {
+        const p = root.position.clone();
+        p.y += 1.35;
+        p.project(stage.camera);
+        const x = (p.x * 0.5 + 0.5) * innerWidth;
+        const y = (-p.y * 0.5 + 0.5) * innerHeight;
+        bubble.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
+      }
     }
 
     stage.update();
@@ -202,7 +279,9 @@ async function boot() {
   loading.classList.add("done");
   setTimeout(() => loading.remove(), 900);
 
-  (window as unknown as Record<string, unknown>).whale = { stage, root, player, meshes, requestMove };
+  (window as unknown as Record<string, unknown>).whale = {
+    stage, root, player, meshes, chat, requestMove, enterChat,
+  };
 }
 
 boot().catch((err) => {
