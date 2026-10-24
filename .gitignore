@@ -7,3 +7,4 @@ public/models/character.glb
 *.log
 .DS_Store
 .env
+data/
