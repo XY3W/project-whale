@@ -93,7 +93,13 @@ const store = createStore(path.join(process.cwd(), "data", "brain-state.json"));
 const storeSeed = reconcileOnLoad(store.state);
 for (const [planId, entry] of Object.entries(storeSeed.ledger ?? {})) session.ledger.set(planId, entry);
 session.history = Array.isArray(storeSeed.history) ? storeSeed.history.slice(-12) : [];
-if (storeSeed.session?.phase === "unknown") session.phase = "unknown";
+if (storeSeed.session?.phase === "unknown") {
+  session.phase = "unknown";
+  if (storeSeed.task) {
+    session.task = { ...storeSeed.task, unknown: true, superseded: false, startedAt: Date.now(), rounds: storeSeed.task.rounds ?? 0, originWs: null };
+    console.log(`[reconcile] restored unknown task ${storeSeed.task.id}`);
+  }
+}
 
 function persist() {
   store.update((st) => {
@@ -101,6 +107,9 @@ function persist() {
     st.history = session.history.slice(-12);
     st.ledger = Object.fromEntries(session.ledger);
     st.session = { id: session.id, phase: session.phase, taskId: session.task?.id ?? null };
+    st.task = session.task
+      ? { id: session.task.id, generation: session.task.generation, text: session.task.text, rounds: session.task.rounds, planId: session.task.planId ?? null }
+      : null;
   });
 }
 
@@ -132,7 +141,7 @@ function statePayload(ws) {
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,
-    needsReconcile: !!session.task && ws === session.lease && session.task.originWs !== ws,
+    needsReconcile: !!session.task && ws === session.lease && (session.task.unknown || session.task.originWs !== ws),
   };
 }
 
@@ -146,6 +155,7 @@ function broadcastState() {
 }
 
 function endTask(reason) {
+  if (session.budgetTimer) { clearTimeout(session.budgetTimer); session.budgetTimer = null; }
   session.task = null;
   session.phase = "idle";
   persist();
@@ -215,6 +225,10 @@ function applyOutput(ws, task, out) {
 }
 
 function fail(ws, task, err) {
+  if (!session.task || session.task.id !== task?.id || session.task.generation !== task?.generation) {
+    console.log("[model] stale error ignored");
+    return;
+  }
   const code = err instanceof ModelError ? err.code : "INTERNAL";
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[model] ${code}: ${message}`);
@@ -260,8 +274,8 @@ wss.on("connection", (ws, req) => {
         }
         // 重连后对账：执行端报告实际状态，服务器不盲重播任务
         // 只有“不是本连接创建的任务”才需要对账结束；否则会把刚发的消息杀掉
-        if (isLease(ws) && session.task && msg.reconciled && session.task.originWs !== ws) {
-          endTask("reconciled after reconnect");
+        if (isLease(ws) && session.task && msg.reconciled && (session.task.unknown || session.task.originWs !== ws)) {
+          endTask("reconciled after restart/reconnect");
         }
         const snap = msg.snapshot;
         if (snap && Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
@@ -303,6 +317,12 @@ wss.on("connection", (ws, req) => {
 
         const taskId = `t${nextTask++}`;
         const generation = ++session.generation;
+        session.budgetTimer = setTimeout(() => {
+          if (session.task?.id !== taskId) return;
+          session.phase = "blocked";
+          send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
+          endTask("budget timer");
+        }, BUDGET_MS);
         session.task = { id: taskId, generation, text: msg.text, messageId: `msg-${taskId}`, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null, originWs: ws };
         session.history.push({ role: "user", content: msg.text });
         if (session.history.length > 12) session.history = session.history.slice(-12);
