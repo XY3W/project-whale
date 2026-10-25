@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Steel Basin Sandbox</title>
+    <style>
+      body{margin:0;background:#0b1018;font:14px/1.5 system-ui,sans-serif;color:#dfe9ff}
+      #app{position:fixed;inset:0}
+      #hud{position:fixed;left:16px;top:16px;z-index:5;background:rgba(10,16,26,.86);
+        border:1px solid rgba(120,160,230,.25);border-radius:10px;padding:12px;max-width:320px}
+      #status{font-size:13px;color:#9fb4d4;margin-bottom:8px}
+      #buttons{display:flex;flex-wrap:wrap;gap:6px}
+      #buttons button{background:rgba(70,110,190,.35);border:1px solid rgba(120,160,230,.4);
+        color:#e6efff;border-radius:6px;padding:6px 10px;cursor:pointer;font:12px system-ui}
+      #back{display:block;margin-top:10px;color:#7fa0cc;font-size:12px;text-decoration:none}
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud">
+      <div id="status">loading…</div>
+      <div id="buttons"></div>
+      <a href="/" id="back">← 返回</a>
+    </div>
+    <script type="module" src="/src/basin.ts"></script>
+  </body>
+</html>

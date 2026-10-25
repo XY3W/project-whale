@@ -1,0 +1,225 @@
+{
+  "assetVersion": "basin-actions-v2",
+  "character": "character_basin_actions.glb",
+  "basin": "steel_basin_v2.glb",
+  "fps": 30,
+  "units": "meters",
+  "coordinateSystem": "glTF +Y up, +Z forward",
+  "authoringStyle": "User-approved light cartoon toss for wear/unwear; no limb scaling",
+  "bindings": {
+    "hand": {
+      "bone": "hand.r",
+      "matrixColumnMajor": [
+        0.6179637908935547,
+        -0.7848879098892212,
+        0.045514997094869614,
+        0.0,
+        -0.7505469918251038,
+        -0.6061826348304749,
+        -0.26310089230537415,
+        0.0,
+        0.23409466445446014,
+        0.12842561304569244,
+        -0.9636933207511902,
+        0.0,
+        -0.12296568602323532,
+        0.4022511839866638,
+        0.023735400289297104,
+        1.0
+      ]
+    },
+    "head": {
+      "bone": "head.x",
+      "matrixColumnMajor": [
+        1.0000001192092896,
+        3.821363307032885e-15,
+        -1.6703710625142072e-22,
+        0.0,
+        3.821376859560041e-15,
+        -1.0000001192092896,
+        8.742277657347586e-08,
+        0.0,
+        3.340753989496429e-22,
+        -8.742277657347586e-08,
+        -1.0000001192092896,
+        0.0,
+        0.0020000003278255463,
+        0.34478265047073364,
+        -0.0006382715655490756,
+        1.0
+      ]
+    }
+  },
+  "wearMorph": "Basin_v2_Wear_Crown_Tuck",
+  "actions": [
+    {
+      "id": "pickup_basin",
+      "duration": 3.1,
+      "layer": "full",
+      "events": [
+        {
+          "time": 1.05,
+          "type": "grasp",
+          "from": "resting",
+          "to": "held",
+          "normalizedTime": 0.33870967741935487,
+          "frameAt30fps": 32.5
+        }
+      ],
+      "clips": [
+        "pickup_basin"
+      ],
+      "entryState": "resting",
+      "exitState": "held",
+      "locks": [
+        "motion",
+        "upper",
+        "object"
+      ],
+      "rootTranslation": "in_place; skeletal crouch only; world position unchanged",
+      "blendInSeconds": 0.15,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "hold_basin",
+      "duration": 2.0,
+      "layer": "right_arm",
+      "loop": true,
+      "events": [],
+      "clips": [
+        "hold_basin"
+      ],
+      "entryState": "held",
+      "exitState": "held",
+      "locks": [
+        "right_arm"
+      ],
+      "rootTranslation": "in_place; skeletal crouch only; world position unchanged",
+      "blendInSeconds": 0.15,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "throw_basin",
+      "duration": 2.3,
+      "layer": "full",
+      "events": [
+        {
+          "time": 0.88,
+          "type": "release",
+          "from": "held",
+          "to": "flying",
+          "normalizedTime": 0.3826086956521739,
+          "frameAt30fps": 27.4
+        }
+      ],
+      "clips": [
+        "throw_basin"
+      ],
+      "entryState": "held",
+      "exitState": "flying",
+      "locks": [
+        "motion",
+        "upper",
+        "object"
+      ],
+      "rootTranslation": "in_place; skeletal crouch only; world position unchanged",
+      "blendInSeconds": 0.15,
+      "blendOutSeconds": 0.15,
+      "completionStatePolicy": "preserve_latest_authoritative_state; never force flying at clip end"
+    },
+    {
+      "id": "wear_basin",
+      "duration": 3.0,
+      "layer": "full",
+      "events": [
+        {
+          "time": 0.7,
+          "type": "hand_release_to_transfer",
+          "from": "held",
+          "to": "transferring",
+          "normalizedTime": 0.2333333333333333,
+          "frameAt30fps": 22.0
+        },
+        {
+          "time": 1.95,
+          "type": "head_attach",
+          "from": "transferring",
+          "to": "worn",
+          "normalizedTime": 0.65,
+          "frameAt30fps": 59.5
+        }
+      ],
+      "clips": [
+        "wear_basin"
+      ],
+      "entryState": "held",
+      "exitState": "worn",
+      "locks": [
+        "motion",
+        "upper",
+        "object"
+      ],
+      "rootTranslation": "in_place; skeletal crouch only; world position unchanged",
+      "blendInSeconds": 0.15,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "unwear_basin",
+      "duration": 3.0,
+      "layer": "full",
+      "events": [
+        {
+          "time": 0.65,
+          "type": "head_release_to_transfer",
+          "from": "worn",
+          "to": "transferring",
+          "normalizedTime": 0.21666666666666667,
+          "frameAt30fps": 20.5
+        },
+        {
+          "time": 2.0,
+          "type": "hand_catch",
+          "from": "transferring",
+          "to": "held",
+          "normalizedTime": 0.6666666666666666,
+          "frameAt30fps": 61.0
+        }
+      ],
+      "clips": [
+        "unwear_basin"
+      ],
+      "entryState": "worn",
+      "exitState": "held",
+      "locks": [
+        "motion",
+        "upper",
+        "object"
+      ],
+      "rootTranslation": "in_place; skeletal crouch only; world position unchanged",
+      "blendInSeconds": 0.15,
+      "blendOutSeconds": 0.15
+    }
+  ],
+  "runtimeIntegrationVerified": false,
+  "pickupReference": {
+    "time": 0.0,
+    "position": [
+      -0.5460312366485596,
+      0.1336599439382553,
+      0.2100873738527298
+    ],
+    "quaternion": [
+      5.246640100153854e-08,
+      0.21643953025341034,
+      1.1073486660961862e-07,
+      0.976296067237854
+    ],
+    "wearMorph": 0,
+    "space": "character-root-local glTF",
+    "basinCondition": "upright, opening up, stationary, level floor",
+    "alignment": "actor moves to align this offset with basin; never teleport basin to guide",
+    "validatedTolerance": "canonical pose only; wider reach and tilted pickup need runtime validation or new animation"
+  },
+  "attachmentsApplyTo": "identity parent of the entire steel_basin_v2 glTF scene; no extra scale or rotation",
+  "previewThrowFlight": "not included; prop hidden at release to mark runtime physics handoff"
+}
