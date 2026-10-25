@@ -61,6 +61,7 @@ export class ChatPanel {
     });
     this.input.addEventListener("keydown", (e) => {
       this.markActivity();
+      if (e.isComposing) return; // 中文输入法组词时不提交
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.submit();

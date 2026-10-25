@@ -1,0 +1,27 @@
+/** 上下文预算与裁剪（E 批）。无准确 tokenizer，使用保守字符估算。 */
+export function estimateTokens(text) {
+  return Math.ceil(String(text ?? "").length * 0.6);
+}
+
+export function buildHistory(history, budgetTokens = 1200) {
+  const out = [];
+  let used = 0;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const item = history[i];
+    const cost = estimateTokens(item.content);
+    if (used + cost > budgetTokens) break;
+    out.unshift(item);
+    used += cost;
+  }
+  return { messages: out, tokens: used, dropped: history.length - out.length };
+}
+
+export function contextBudget({ history, budgetTokens = 1200 } = {}) {
+  const trimmed = buildHistory(history ?? [], budgetTokens);
+  return {
+    history: trimmed.messages,
+    contextTokens: trimmed.tokens,
+    droppedMessages: trimmed.dropped,
+    estimator: "chars*0.6",
+  };
+}

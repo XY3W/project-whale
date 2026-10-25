@@ -13,6 +13,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
+import { contextBudget } from "./context.mjs";
+import { confirmedMemories } from "./memory.mjs";
 import { CAPABILITY_VERSION, ModelError, callModel, describeCapabilities, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
@@ -309,7 +311,8 @@ wss.on("connection", (ws) => {
                 world: { walkableHalf: 3.7, coordinateSystem: "glTF +Y up, +Z forward" },
                 capabilities: describeCapabilities(),
                 capabilityVersion: CAPABILITY_VERSION,
-                history: session.history.slice(-8),
+                ...contextBudget({ history: session.history }),
+                memory: confirmedMemories(storeSeed.memories),
                 clientSnapshot: msg.snapshot ?? null,
               }),
             );
@@ -380,7 +383,8 @@ wss.on("connection", (ws) => {
                 characterState: character,
                 capabilities: describeCapabilities(),
                 capabilityVersion: CAPABILITY_VERSION,
-                history: session.history.slice(-8),
+                ...contextBudget({ history: session.history }),
+                memory: confirmedMemories(storeSeed.memories),
               }),
             );
             applyOutput(ws, task, out);
