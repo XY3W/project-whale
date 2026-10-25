@@ -47,12 +47,22 @@ export function validatePlan(plan) {
     if (!["completed", "cannot_complete", "cancelled"].includes(plan.outcome)) {
       throw new ModelError("INVALID_SCHEMA", "finish_task.outcome 非法", 0);
     }
-    return { type: "finish_task", outcome: plan.outcome, speech: String(plan.speech ?? "").slice(0, 200) };
+    return {
+      type: "finish_task",
+      outcome: plan.outcome,
+      speech: String(plan.speech ?? "").slice(0, 200),
+      memoryProposals: Array.isArray(plan.memory_proposals) ? plan.memory_proposals : [],
+    };
   }
   if (plan.type !== "execute_plan") throw new ModelError("INVALID_SCHEMA", "type 必须是 execute_plan 或 finish_task", 0);
   const steps = Array.isArray(plan.steps) ? plan.steps : [];
   if (!steps.length || steps.length > 6) throw new ModelError("INVALID_SCHEMA", "steps 数量必须是 1..6", 0);
-  return { type: "execute_plan", speech: String(plan.speech ?? "").slice(0, 200), plan: { steps: steps.map((s, i) => validateStep(s, `s${i + 1}`)) } };
+  return {
+    type: "execute_plan",
+    speech: String(plan.speech ?? "").slice(0, 200),
+    plan: { steps: steps.map((s, i) => validateStep(s, `s${i + 1}`)) },
+    memoryProposals: Array.isArray(plan.memory_proposals) ? plan.memory_proposals : [],
+  };
 }
 
 export function validateStep(step, id = "step") {

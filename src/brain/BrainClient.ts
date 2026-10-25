@@ -146,6 +146,10 @@ export class BrainClient {
     });
   }
 
+  setChatOpen(open: boolean) {
+    return this.send(open ? "chat_opened" : "chat_closed", {});
+  }
+
   sendStateSnapshot(snapshot: Record<string, unknown>) {
     return this.send("state_snapshot", { snapshot });
   }

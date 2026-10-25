@@ -129,7 +129,9 @@ async function boot() {
   // 关闭聊天：没有进行中的任务时，漫游门禁会自动放行（chat.open 为 false）
   chat.onClose = () => {
     bubble.classList.remove("show");
+    client.setChatOpen(false);
   };
+  chat.onOpen = () => client.setChatOpen(true);
 
   // ---- 移动 ----
   const requestMove = (point: THREE.Vector3) => {

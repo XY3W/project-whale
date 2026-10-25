@@ -24,6 +24,7 @@ export class ChatPanel {
   onSend: ((text: string) => void) | null = null;
   onTimeout: (() => void) | null = null;
   onClose: (() => void) | null = null;
+  onOpen: (() => void) | null = null;
 
   constructor() {
     injectStyles();
@@ -97,6 +98,7 @@ export class ChatPanel {
     }
     this.open = true;
     this.root.classList.add("open");
+    this.onOpen?.();
     this.input.value = this.draft;
     this.deadline = performance.now() + IDLE_MS;
     requestAnimationFrame(() => this.input.focus());

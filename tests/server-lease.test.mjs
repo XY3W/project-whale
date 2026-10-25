@@ -57,12 +57,18 @@ test("租约、代际与重复结果去重", async (t) => {
   const bState = await waitFor(b.inbox, (m) => m.type === "session_state");
   assert.equal(bState.readOnly, true, "第二个连接应只读");
 
+  // 未打开聊天时拒绝发送
+  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "user_message", text: "挥挥手", leaseEpoch: aState.leaseEpoch }));
+  const closed = await waitFor(a.inbox, (m) => m.type === "error");
+  assert.equal(closed.code, "CHAT_CLOSED");
+
   // 只读端发消息被拒绝
   b.ws.send(JSON.stringify({ protocolVersion: 1, type: "user_message", text: "挥挥手" }));
   const denied = await waitFor(b.inbox, (m) => m.type === "error");
   assert.equal(denied.code, "NOT_EXECUTOR");
 
-  // 执行端拿计划
+  // 打开聊天后执行端拿计划
+  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));
   a.ws.send(JSON.stringify({ protocolVersion: 1, type: "user_message", text: "挥挥手", leaseEpoch: aState.leaseEpoch }));
   const plan = await waitFor(a.inbox, (m) => m.type === "execute_plan");
   assert.ok(plan, "应收到 execute_plan");

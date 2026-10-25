@@ -14,7 +14,7 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { contextBudget } from "./context.mjs";
-import { confirmedMemories } from "./memory.mjs";
+import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
 import { CAPABILITY_VERSION, ModelError, callModel, describeCapabilities, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
@@ -83,6 +83,7 @@ const session = {
   leaseAt: 0,
   task: null,           // { id, text, rounds, startedAt, superseded, plan }
   phase: "idle",
+  chatOpen: false,
   lastResult: null,     // { taskId, round } 用于去重
   history: [],          // 最近对话（限 12 条）
 };
@@ -96,6 +97,7 @@ if (storeSeed.session?.phase === "unknown") session.phase = "unknown";
 
 function persist() {
   store.update((st) => {
+    st.memories = st.memories ?? [];
     st.history = session.history.slice(-12);
     st.ledger = Object.fromEntries(session.ledger);
     st.session = { id: session.id, phase: session.phase, taskId: session.task?.id ?? null };
@@ -164,8 +166,18 @@ function summary(result) {
   return `做好了（${steps.filter((s) => s.status === "succeeded").length} 个动作）。`;
 }
 
+function absorbMemory(task, out) {
+  const { accepted, rejected } = validateProposals(out.memoryProposals ?? [], task.messageId);
+  if (accepted.length) {
+    store.update((st) => { st.memories = addCandidates(st.memories, accepted); });
+    persist();
+  }
+  if (rejected.length) console.warn("[memory] rejected", JSON.stringify(rejected));
+}
+
 function applyOutput(ws, task, out) {
   if (!session.task || session.task.id !== task.id) return;
+  absorbMemory(task, out);
   if (out.type === "finish_task") {
     const speech = out.speech || (out.outcome === "completed" ? "好了。" : "这个我还做不到。");
     send(ws, "public_reply", { taskId: task.id, speech });
@@ -258,6 +270,10 @@ wss.on("connection", (ws) => {
           return;
         }
         if (!msg.text || typeof msg.text !== "string") return;
+        if (!session.chatOpen) {
+          send(ws, "error", { code: "CHAT_CLOSED", message: "聊天框没有打开，不能发送消息" });
+          return;
+        }
 
         // 抢占：取消旧任务未执行步骤，旧结果随后被丢弃
         if (session.task) {
@@ -271,7 +287,7 @@ wss.on("connection", (ws) => {
 
         const taskId = `t${nextTask++}`;
         const generation = ++session.generation;
-        session.task = { id: taskId, generation, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null, originWs: ws };
+        session.task = { id: taskId, generation, text: msg.text, messageId: `msg-${taskId}`, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null, originWs: ws };
         session.history.push({ role: "user", content: msg.text });
         if (session.history.length > 12) session.history = session.history.slice(-12);
         persist();
@@ -396,7 +412,11 @@ wss.on("connection", (ws) => {
       }
 
       case "chat_opened":
+        session.chatOpen = true;
+        broadcastState();
+        break;
       case "chat_closed":
+        session.chatOpen = false;
         broadcastState();
         break;
     }
