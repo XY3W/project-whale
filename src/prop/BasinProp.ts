@@ -301,6 +301,30 @@ export class BasinProp {
     return this.uprightResult;
   }
 
+  /** 回到“当前站位对应的标准静置姿态”（调试台与沙盒用） */
+  resetToReference(): Pose {
+    this.physics.stop();
+    this.actionId = null;
+    const reference = this.catalog.pickupReference;
+    const target = BasinProp.toWorld(this.charRoot, reference.position, reference.quaternion);
+    this.state = "resting";
+    this.mode = "world";
+    this.applyPose(target);
+    this.setMorph(0);
+    this.bump();
+    return target;
+  }
+
+  /** 调试用：摆成侧躺，用来检查自动扶正 */
+  tiltOver(radians = Math.PI / 2): void {
+    this.physics.stop();
+    this.actionId = null;
+    this.state = "resting";
+    this.mode = "world";
+    this.object.quaternion.setFromEuler(new THREE.Euler(0, 0.4, radians));
+    this.bump();
+  }
+
   /** 回到场地正中心、正放静止 */
   resetToCenter(): Pose {
     this.physics.stop();

@@ -38,6 +38,10 @@ export class LayeredMotionPlayer {
   private rate = 1;
   private cyclesLeft = -1;
   private perf: Performance | null = null;
+  private soloAction: THREE.AnimationAction | null = null;
+  private soloName: string | null = null;
+  private soloPaused = false;
+  private soloLoop = false;
   private hold: PoseOverlay | null = null;
   private holdTime = 0;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
@@ -63,6 +67,7 @@ export class LayeredMotionPlayer {
   /** 精确走：只接受 0.09 + 0.18n 米，返回是否接受 */
   walkDistance(meters: number): boolean {
     if (this.perf) return false;
+    if (this.soloAction) this.stopSolo();
     const n = Math.round((meters - 0.09) / 0.18);
     if (!Number.isFinite(meters) || n < 0 || n > 10) return false;
     if (Math.abs(0.09 + 0.18 * n - meters) > 1e-6) return false;
@@ -97,6 +102,7 @@ export class LayeredMotionPlayer {
     const action = this.actions.get(name);
     if (!action) return Promise.resolve(false);
     if (this.perf) return Promise.resolve(false);
+    if (this.soloAction) this.stopSolo();
     this.clearGesture();
     this.walking = false;
     for (const base of ['idle_stand','walk_start','walk','walk_stop'] as Base[]) {
@@ -122,6 +128,88 @@ export class LayeredMotionPlayer {
     this.perf.cancelled = true;
     this.perf.ending = true;
     return true;
+  }
+
+  /**
+   * 调试用：独占播放任意片段，不经过分层状态机。
+   * 用于逐个检查烘焙片段本身（含 .lower/.upperBase 这类分层片段）。
+   */
+  soloClip(name: string, options: { loop?: boolean; time?: number } = {}): boolean {
+    const action = this.actions.get(name);
+    if (!action) return false;
+    if (this.perf) {
+      const running = this.perf;
+      this.perf = null;
+      running.action.stop();
+      running.action.setEffectiveWeight(0);
+      running.resolve(false);
+    }
+    for (const base of ['idle_stand','walk_start','walk','walk_stop'] as Base[]) {
+      for (const suffix of ['lower','upperBase']) this.get(`${base}.${suffix}`).setEffectiveWeight(0);
+    }
+    if (this.upper) this.get(this.upper).setEffectiveWeight(0);
+    this.get('tail_idle').setEffectiveWeight(0);
+    this.get('tail_swish').setEffectiveWeight(0);
+    this.upper = null;
+    this.upperWeight = 0;
+    this.walking = false;
+    if (this.soloAction && this.soloAction !== action) {
+      this.soloAction.stop();
+      this.soloAction.setEffectiveWeight(0);
+    }
+    this.soloLoop = options.loop ?? false;
+    action.reset();
+    action.setLoop(this.soloLoop ? THREE.LoopRepeat : THREE.LoopOnce, this.soloLoop ? Infinity : 1);
+    action.clampWhenFinished = !this.soloLoop;
+    action.enabled = true;
+    action.paused = false;
+    action.setEffectiveTimeScale(1);
+    action.setEffectiveWeight(1);
+    action.time = options.time ?? 0;
+    action.play();
+    this.soloAction = action;
+    this.soloName = name;
+    this.soloPaused = false;
+    this.mixer.update(0);
+    return true;
+  }
+
+  stopSolo() {
+    if (this.soloAction) {
+      this.soloAction.stop();
+      this.soloAction.setEffectiveWeight(0);
+    }
+    this.soloAction = null;
+    this.soloName = null;
+    this.soloPaused = false;
+    this.weights();
+    this.mixer.update(0);
+  }
+
+  setSoloTime(time: number) {
+    if (!this.soloAction) return;
+    const duration = this.soloAction.getClip().duration;
+    this.soloAction.time = THREE.MathUtils.clamp(time, 0, duration);
+    this.soloPaused = true;
+    this.soloAction.paused = true;
+    this.soloAction.setEffectiveWeight(1);
+    this.mixer.update(0);
+  }
+
+  setSoloPaused(paused: boolean) {
+    this.soloPaused = paused;
+    if (this.soloAction) this.soloAction.paused = paused;
+  }
+
+  get solo(): { name: string; time: number; duration: number; paused: boolean; loop: boolean } | null {
+    if (!this.soloAction || !this.soloName) return null;
+    return {
+      name: this.soloName,
+      time: this.soloAction.time,
+      duration: this.soloAction.getClip().duration,
+      paused: this.soloPaused,
+      loop: this.soloLoop,
+    };
   }
 
   get performing(): string | null { return this.perf?.name ?? null; }
@@ -217,6 +305,10 @@ export class LayeredMotionPlayer {
 
   update(dt: number) {
     this.movementDelta=0;
+    if (this.soloAction) {
+      if (!this.soloPaused) this.mixer.update(dt);
+      return;
+    }
     if (this.perf) { this.advancePerformance(dt); return; }
     let remaining=Math.max(0,dt);
     while(remaining>1e-9){
