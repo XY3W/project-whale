@@ -8,6 +8,14 @@ const MAX_PARALLEL = 3;
 const MAX_WAIT_S = 5;
 
 /** 角度归一化到 (-180, 180] */
+/** 有符号角差：保留 -180 与 180 的区别，用于验证转动方向 */
+export function signedDeltaDeg(from: number, to: number): number {
+  let d = (to - from) % 360;
+  if (d > 180) d -= 360;
+  if (d < -180) d += 360;
+  return d;
+}
+
 export function normalizeDeg(deg: number): number {
   let d = deg % 360;
   if (d > 180) d -= 360;
@@ -81,11 +89,34 @@ export class ActionExecutor {
       if (r.status !== "succeeded") failed = true;
     }
 
+    const moving = this.loco.isMoving?.() ?? false;
     return {
       status: this.cancelled ? "cancelled" : failed ? "failed" : "completed",
       steps: results,
-      stopped: true,
+      stopped: !moving,
     };
+  }
+
+  private withTimeout<T>(p: Promise<T>, ms: number): Promise<{ ok: true; value: T } | { ok: false }> {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        resolve({ ok: false });
+      }, ms);
+      p.then((value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok: true, value });
+      }).catch(() => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok: false });
+      });
+    });
   }
 
   private voidResult(stepId: string, step: Step, reason: ReasonCode): StepResult {
@@ -135,18 +166,30 @@ export class ActionExecutor {
     switch (step.action) {
       case "turn": {
         const deg = step.angle_deg;
-        if (!Number.isFinite(deg) || Math.abs(deg) > 180) {
+        if (typeof deg !== "number" || !Number.isFinite(deg) || Math.abs(deg) > 180) {
           return done("failed", null, "PRECONDITION_FAILED");
         }
         const before = this.state().yawDeg;
-        await this.loco.turn(deg);
+        const raced = await this.withTimeout(this.loco.turn(deg), 2000 + Math.abs(deg) * 20);
         const after = this.state().yawDeg;
-        const actual = round(normalizeDeg(after - before));
+        const actual = round(signedDeltaDeg(before, after));
+        if (!raced.ok) {
+          return done("timeout", { angle_deg: actual, partial: true }, "TIMEOUT");
+        }
+        if (this.cancelled) {
+          return done("cancelled", { angle_deg: actual, partial: true }, "CANCELLED");
+        }
+        if (Math.abs(actual - deg) > 0.5) {
+          return done("failed", { requested_deg: deg, angle_deg: actual }, "ANGLE_MISMATCH");
+        }
         return done("succeeded", { angle_deg: actual }, "OK");
       }
 
       case "walk": {
         const meters = step.distance_m;
+        if (typeof meters !== "number" || !Number.isFinite(meters)) {
+          return done("unsupported", null, "UNSUPPORTED_DISTANCE");
+        }
         const n = cyclesFor(meters);
         if (n === null) {
           return done("unsupported", { supported: this.distances, nearest: nearestSupported(meters) }, "UNSUPPORTED_DISTANCE");
@@ -161,17 +204,31 @@ export class ActionExecutor {
         if (Math.abs(target.x) > limit || Math.abs(target.z) > limit) {
           return done("failed", { target }, "OUT_OF_BOUNDS");
         }
-        await this.loco.walk(meters);
+        // 预算：起步 0.8 + n 圈 * 1.6 / 速率 + 收步 0.8 + 余量
+        const budget = 2500 + 800 + n * 1600 + 800;
+        const raced = await this.withTimeout(this.loco.walk(meters), budget);
         const after = this.loco.position();
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
-        return done("succeeded", { distance_m: round(moved), dx: round(after.x - before.x), dz: round(after.z - before.z) }, "OK");
+        const actual = { distance_m: round(moved), dx: round(after.x - before.x), dz: round(after.z - before.z) };
+        if (!raced.ok) {
+          return done("unknown", { ...actual, partial: true }, "TIMEOUT");
+        }
+        if (this.cancelled) {
+          return done("cancelled", { ...actual, partial: moved > 0 }, "CANCELLED");
+        }
+        if (Math.abs(moved - meters) > 0.001) {
+          return done("failed", { requested_m: meters, ...actual }, "DISPLACEMENT_MISMATCH");
+        }
+        return done("succeeded", actual, "OK");
       }
 
       case "play": {
         if (!PLAYABLE.has(step.action_id)) {
           return done("unsupported", { supported: [...PLAYABLE] }, "CAPABILITY_DISABLED");
         }
-        await this.loco.play(step.action_id);
+        const raced = await this.withTimeout(this.loco.play(step.action_id), 6000);
+        if (!raced.ok) return done("timeout", { action_id: step.action_id }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { action_id: step.action_id }, "CANCELLED");
         return done("succeeded", { action_id: step.action_id }, "OK");
       }
 
@@ -179,14 +236,22 @@ export class ActionExecutor {
         if (!TAIL_STYLES.has(step.style)) {
           return done("unsupported", { supported: [...TAIL_STYLES] }, "CAPABILITY_DISABLED");
         }
-        const dur = Math.max(0, Math.min(step.duration_s, 10));
-        await this.loco.tail(step.style, dur);
+        if (typeof step.duration_s !== "number" || !Number.isFinite(step.duration_s) || step.duration_s < 0 || step.duration_s > 10) {
+          return done("failed", null, "PRECONDITION_FAILED");
+        }
+        const dur = step.duration_s;
+        const raced = await this.withTimeout(this.loco.tail(step.style, dur), dur * 1000 + 1500);
+        if (!raced.ok) return done("timeout", { style: step.style, duration_s: dur }, "TIMEOUT");
         return done("succeeded", { style: step.style, duration_s: dur }, "OK");
       }
 
       case "wait": {
-        const dur = Math.max(0, Math.min(step.duration_s, MAX_WAIT_S));
-        await this.loco.sleep(dur * 1000);
+        if (typeof step.duration_s !== "number" || !Number.isFinite(step.duration_s) || step.duration_s < 0 || step.duration_s > MAX_WAIT_S) {
+          return done("failed", null, "PRECONDITION_FAILED");
+        }
+        const dur = step.duration_s;
+        const raced = await this.withTimeout(this.loco.sleep(dur * 1000), dur * 1000 + 800);
+        if (!raced.ok) return done("timeout", { duration_s: dur }, "TIMEOUT");
         return done("succeeded", { duration_s: dur }, "OK");
       }
 

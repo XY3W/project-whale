@@ -1,6 +1,6 @@
 /** 行为协议：原因码、步骤结果、计划结构。字段命名对齐 NEXT_PHASE_LLM_PLAN.md §7.3。 */
 
-export type StepStatus = "succeeded" | "failed" | "cancelled" | "unsupported";
+export type StepStatus = "succeeded" | "failed" | "cancelled" | "unsupported" | "timeout" | "unknown";
 
 export type ReasonCode =
   | "OK"
@@ -12,7 +12,9 @@ export type ReasonCode =
   | "SUPERSEDED"
   | "CLIENT_DISCONNECTED"
   | "CANCELLED"
-  | "TIMEOUT";
+  | "TIMEOUT"
+  | "DISPLACEMENT_MISMATCH"
+  | "ANGLE_MISMATCH";
 
 export interface StepResult {
   stepId: string;
@@ -53,4 +55,6 @@ export interface Locomotion {
   play(actionId: string): Promise<void>;
   tail(style: "tail_idle" | "tail_swish", durationS: number): Promise<void>;
   sleep(ms: number): Promise<void>;
+  /** 可选：身体是否仍在运动，用于 stopped 证据 */
+  isMoving?(): boolean;
 }

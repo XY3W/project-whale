@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ActionExecutor, normalizeDeg } from "../src/behavior/ActionExecutor.ts";
+import { ActionExecutor, normalizeDeg, signedDeltaDeg } from "../src/behavior/ActionExecutor.ts";
 import { cyclesFor, nearestSupported, supportedDistances } from "../src/behavior/distances.ts";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -186,4 +186,84 @@ test("超过 6 步直接失败", async () => {
   const steps = Array.from({ length: 7 }, () => ({ action: "wait", duration_s: 0 }));
   const r = await ex.run({ steps });
   assert.equal(r.status, "failed");
+});
+
+function makeLocoBroken(kind) {
+  const pos = { x: 0, z: 0 };
+  let yaw = 0;
+  return {
+    yaw: () => yaw,
+    position: () => ({ ...pos }),
+    walk: async (m) => {
+      if (kind === "stuck") await new Promise(() => {});
+      if (kind === "nomove") return;
+      pos.x += Math.sin(yaw) * m;
+      pos.z += Math.cos(yaw) * m;
+    },
+    turn: async (deg) => {
+      if (kind === "stuck") await new Promise(() => {});
+      yaw += ((kind === "halfturn" ? deg / 2 : deg) * Math.PI) / 180;
+    },
+    play: async () => {
+      if (kind === "stuck") await new Promise(() => {});
+    },
+    tail: async () => {},
+    sleep: async () => {},
+  };
+}
+
+test("底层不移动但正常返回：walk 必须失败而不是成功", async () => {
+  const loco = makeLocoBroken("nomove");
+  const ex = new ActionExecutor(loco, { half: 4 });
+  const r = await ex.run({ steps: [{ action: "walk", distance_m: 0.27 }] });
+  assert.equal(r.steps[0].status, "failed");
+  assert.equal(r.steps[0].reasonCode, "DISPLACEMENT_MISMATCH");
+  assert.equal(r.steps[0].actual.distance_m, 0);
+});
+
+test("转角只完成一半：必须报 ANGLE_MISMATCH", async () => {
+  const loco = makeLocoBroken("halfturn");
+  const ex = new ActionExecutor(loco, { half: 4 });
+  const r = await ex.run({ steps: [{ action: "turn", angle_deg: 45 }] });
+  assert.equal(r.steps[0].status, "failed");
+  assert.equal(r.steps[0].reasonCode, "ANGLE_MISMATCH");
+});
+
+test("底层永不返回：turn 超时，不得报成功", async () => {
+  const loco = makeLocoBroken("stuck");
+  const ex = new ActionExecutor(loco, { half: 4 });
+  const r = await ex.run({ steps: [{ action: "turn", angle_deg: 10 }] });
+  assert.ok(["timeout", "unknown"].includes(r.steps[0].status));
+  assert.equal(r.steps[0].reasonCode, "TIMEOUT");
+});
+
+test("0.449 与字符串数字必须拒绝", async () => {
+  const loco = makeLocoBroken("ok");
+  const ex = new ActionExecutor(loco, { half: 4 });
+  const r1 = await ex.run({ steps: [{ action: "walk", distance_m: 0.449 }] });
+  assert.equal(r1.steps[0].status, "unsupported");
+  const r2 = await ex.run({ steps: [{ action: "walk", distance_m: "0.45" }] });
+  assert.equal(r2.steps[0].status, "unsupported");
+});
+
+test("全部 11 个合法距离都能成功且 actual 一致", async () => {
+  const loco = makeLocoBroken("ok");
+  const ex = new ActionExecutor(loco, { half: 100 });
+  for (const d of [0.09, 0.27, 0.45, 0.63, 0.81, 0.99, 1.17, 1.35, 1.53, 1.71, 1.89]) {
+    const r = await ex.run({ steps: [{ action: "walk", distance_m: d }] });
+    assert.equal(r.steps[0].status, "succeeded", `distance ${d}`);
+    assert.equal(r.steps[0].actual.distance_m, d);
+  }
+});
+
+test("±180 方向符号正确（-180 不被归一成 +180）", async () => {
+  for (const deg of [180, -180]) {
+    const loco = makeLocoBroken("ok");
+    const ex = new ActionExecutor(loco, { half: 4 });
+    const r = await ex.run({ steps: [{ action: "turn", angle_deg: deg }] });
+    assert.equal(r.steps[0].status, "succeeded", `turn ${deg}`);
+    assert.equal(r.steps[0].actual.angle_deg, deg);
+  }
+  assert.equal(signedDeltaDeg(0, -180), -180);
+  assert.equal(signedDeltaDeg(0, 180), 180);
 });
