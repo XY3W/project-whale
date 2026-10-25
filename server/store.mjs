@@ -12,8 +12,12 @@ export function createStore(file, debounceMs = 300) {
     try {
       const raw = JSON.parse(fs.readFileSync(file, "utf8"));
       return { ...EMPTY(), ...raw };
-    } catch {
-      return EMPTY();
+    } catch (err) {
+      try {
+        fs.renameSync(file, `${file}.corrupt-${Date.now()}`);
+      } catch {}
+      console.error("store load failed (kept corrupt copy):", err.message);
+      return { ...EMPTY(), loadError: true };
     }
   }
 

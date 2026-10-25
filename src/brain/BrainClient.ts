@@ -61,6 +61,12 @@ export class BrainClient {
       this.handlers.onConnection?.(false);
       this.scheduleRetry();
     });
+    // 页面重新可见/聚焦时重新申请执行权（后台节流会导致心跳断档）
+    const reclaim = () => {
+      if (document.visibilityState === "visible") this.send("hello", {});
+    };
+    document.addEventListener("visibilitychange", reclaim);
+    window.addEventListener("focus", () => this.send("hello", {}));
     this.ws.addEventListener("message", (ev) => {
       let msg: Record<string, unknown>;
       try {

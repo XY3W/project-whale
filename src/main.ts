@@ -246,6 +246,7 @@ async function boot() {
       player.setTail(false);
     },
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+    isMoving: () => player.state.walking || phase !== "idle",
   };
   const executor = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   executor.onCancel(() => {
@@ -339,6 +340,7 @@ async function boot() {
         chat.setError("与大脑的连接断开，正在重连…");
         chat.setThinking(false);
         taskActive = false;
+        errorActive = true;
         executor.cancel();
         player.setWalking(false);
         setError(true);
@@ -417,7 +419,7 @@ async function boot() {
 
     // ---- 机械漫游门禁 ----
     const canRoam =
-      stateApplied && !errorActive && motionOwner === "none" && !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
+      stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
       !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {

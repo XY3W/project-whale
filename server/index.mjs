@@ -114,9 +114,11 @@ const isLeaseAlive = () =>
   !!session.lease && session.lease.readyState === 1 && Date.now() - session.leaseAt < HEARTBEAT_MS;
 
 function grantLease(ws) {
+  session.chatOpen = false; // 聊天状态绑定执行端，换人即失效
   session.lease = ws;
   session.leaseEpoch += 1;
   session.leaseAt = Date.now();
+  console.log(`[lease] grant epoch=${session.leaseEpoch} to ${ws._connId ?? "?"}`);
   return session.leaseEpoch;
 }
 
@@ -187,6 +189,12 @@ function applyOutput(ws, task, out) {
     endTask();
     return;
   }
+  if (task.rounds >= MAX_ROUNDS) {
+    session.phase = "blocked";
+    send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
+    endTask("round budget");
+    return;
+  }
   task.plan = out.plan;
   task.rounds += 1;
   task.planId = `${task.id}-p${task.rounds}-g${task.generation}`;
@@ -215,8 +223,11 @@ function fail(ws, task, err) {
   endTask("model error");
 }
 
-wss.on("connection", (ws) => {
+let connSeq = 0;
+wss.on("connection", (ws, req) => {
   ws._seq = 0;
+  ws._connId = `c${++connSeq}`;
+  console.log(`[lease] connect ${ws._connId} from ${req?.socket?.remoteAddress ?? "?"}`);
 
   // 租约：只有当前执行端存活时才允许新连接只读
   if (!isLeaseAlive()) grantLease(ws);
@@ -242,6 +253,11 @@ wss.on("connection", (ws) => {
         break;
 
       case "state_snapshot": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能更新状态" }); break; }
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
+          break;
+        }
         // 重连后对账：执行端报告实际状态，服务器不盲重播任务
         // 只有“不是本连接创建的任务”才需要对账结束；否则会把刚发的消息杀掉
         if (isLease(ws) && session.task && msg.reconciled && session.task.originWs !== ws) {
@@ -342,6 +358,11 @@ wss.on("connection", (ws) => {
 
       case "plan_result": {
         const task = session.task;
+        if (!isLease(ws)) return;
+        if (typeof msg.generation !== "number" || !msg.planId || typeof msg.leaseEpoch !== "number") {
+          send(ws, "error", { code: "PROTOCOL_FIELD_MISSING", message: "结果缺少 generation/planId/leaseEpoch" });
+          return;
+        }
         if (!task || task.id !== msg.taskId) return;                       // 旧任务结果
         if (msg.generation !== undefined && msg.generation !== task.generation) return; // 旧代际
         if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) return; // 旧租约
@@ -363,13 +384,6 @@ wss.on("connection", (ws) => {
           endTask("budget exceeded");
           return;
         }
-        if (task.rounds >= MAX_ROUNDS) {
-          session.phase = "blocked";
-          send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
-          endTask("round budget");
-          return;
-        }
-
         session.phase = "checking";
         broadcastState();
         setTimeout(async () => {
@@ -412,10 +426,17 @@ wss.on("connection", (ws) => {
       }
 
       case "chat_opened":
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能打开聊天" }); break; }
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
+          break;
+        }
         session.chatOpen = true;
+        session.chatEpoch = session.leaseEpoch;
         broadcastState();
         break;
       case "chat_closed":
+        if (!isLease(ws)) break;
         session.chatOpen = false;
         broadcastState();
         break;
@@ -423,6 +444,7 @@ wss.on("connection", (ws) => {
   });
 
   ws.on("close", () => {
+    console.log(`[lease] close ${ws._connId ?? "?"} lease=${session.lease === ws}`);
     if (session.lease === ws) {
       session.lease = null;
       session.leaseAt = 0;

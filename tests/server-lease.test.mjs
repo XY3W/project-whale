@@ -62,9 +62,15 @@ test("租约、代际与重复结果去重", async (t) => {
   const closed = await waitFor(a.inbox, (m) => m.type === "error");
   assert.equal(closed.code, "CHAT_CLOSED");
 
-  // 只读端发消息被拒绝
+  // 只读端不能改位置、不能开聊天、不能发消息
+  b.ws.send(JSON.stringify({ protocolVersion: 1, type: "state_snapshot", snapshot: { x: 1.234, z: 0, yawDeg: 0 } }));
+  const snapDenied = await waitFor(b.inbox, (m) => m.type === "error" && m.code === "NOT_EXECUTOR");
+  assert.ok(snapDenied, "只读端快照必须被拒绝");
+
+  b.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));
+  await sleep(150);
   b.ws.send(JSON.stringify({ protocolVersion: 1, type: "user_message", text: "挥挥手" }));
-  const denied = await waitFor(b.inbox, (m) => m.type === "error");
+  const denied = await waitFor(b.inbox, (m) => m.type === "error" && m.code === "NOT_EXECUTOR");
   assert.equal(denied.code, "NOT_EXECUTOR");
 
   // 打开聊天后执行端拿计划

@@ -89,6 +89,7 @@ export class ChatPanel {
     this.draft = this.input.value; // 保留草稿到下次打开
     this.close("timeout");
     this.onTimeout?.();
+    this.onClose?.(); // 与手动关闭共用退出路径，通知服务端
   }
 
   openPanel() {
