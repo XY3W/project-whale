@@ -57,7 +57,6 @@ async function boot() {
 
   const basin = new THREE.Group();
   basin.add(basinGltf.scene);
-  basin.matrixAutoUpdate = false;
   stage.scene.add(basin);
 
   const rest = new THREE.Matrix4().compose(
@@ -72,12 +71,12 @@ async function boot() {
   const handBone = bones.get(norm(catalog.bindings.hand.bone));
   const headBone = bones.get(norm(catalog.bindings.head.bone));
 
-  const setRest = () => { basin.matrix.copy(rest); basin.matrixWorldNeedsUpdate = true; };
+  const setRest = () => rest.decompose(basin.position, basin.quaternion, basin.scale);
   const attachTo = (bone: THREE.Bone | undefined, m: THREE.Matrix4) => {
     if (!bone) return;
     bone.updateWorldMatrix(true, false);
-    basin.matrix.copy(bone.matrixWorld).multiply(m);
-    basin.matrixWorldNeedsUpdate = true;
+    const world = new THREE.Matrix4().multiplyMatrices(bone.matrixWorld, m);
+    world.decompose(basin.position, basin.quaternion, basin.scale);
   };
 
   const mixer = new THREE.AnimationMixer(root);
@@ -86,7 +85,10 @@ async function boot() {
   let events: Event[] = [];
   let prevTime = 0;
 
+  const fired: string[] = [];
   const fire = (type: string) => {
+    fired.push(type);
+    console.log(`[basin] event ${type} at actionTime=${current?.time?.toFixed(3)} handBone=${handBone?.name}`);
     if (type === "grasp") attachTo(handBone, attach.hand);
     if (type === "hand_release_to_transfer") { /* 曲线驱动阶段，暂按挂手处理 */ }
     if (type === "head_attach") { attachTo(headBone, attach.head); setTuck(1); }
@@ -133,7 +135,17 @@ async function boot() {
   });
 
   statusEl.textContent = `✅ ${charGltf.animations.length} 段动画 · ${bones.size} 骨 · ${meshes.length} 网格 · 形态键 ${tuck ? "有" : "无"}`;
-  (window as unknown as Record<string, unknown>).sandbox = { stage, root, basin, play, setTuck };
+  (window as unknown as Record<string, unknown>).sandbox = {
+    stage, root, basin, play, setTuck,
+    debug: () => ({
+      time: current?.time ?? null,
+      fired: [...fired],
+      handBone: handBone?.name ?? null,
+      headBone: headBone?.name ?? null,
+      handBoneWorld: handBone ? [handBone.matrixWorld.elements[12], handBone.matrixWorld.elements[13], handBone.matrixWorld.elements[14]] : null,
+      basin: [basin.position.x, basin.position.y, basin.position.z],
+    }),
+  };
 }
 
 boot().catch((err) => { statusEl.textContent = `加载失败：${err}`; console.error(err); });
