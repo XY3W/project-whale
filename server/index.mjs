@@ -54,34 +54,80 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 
 let nextTask = 100;
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
-function loadCharacter() {
+function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
     if (typeof raw.x === "number" && typeof raw.z === "number" && typeof raw.yawDeg === "number") return raw;
   } catch {}
   return { x: 0, z: 0, yawDeg: 0, updatedAt: 0 };
 }
-let character = loadCharacter();
+
+/** 只持久化“落地 / 手持 / 戴头”三种稳定状态，飞行和转移中不落盘 */
+const PERSISTED_BASIN_STATES = new Set(["resting", "held", "worn"]);
+
+/** 钢盆快照：状态 + 位置 + 姿态，刷新页面后用来恢复现场 */
+function sanitizeBasin(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const pos = Array.isArray(raw.position) && raw.position.length === 3 && raw.position.every(Number.isFinite)
+    ? raw.position.map(Number)
+    : null;
+  if (!pos) return null;
+  const quat = Array.isArray(raw.quaternion) && raw.quaternion.length === 4 && raw.quaternion.every(Number.isFinite)
+    ? raw.quaternion.map(Number)
+    : null;
+  const state = typeof raw.state === "string" ? raw.state : "resting";
+  if (!PERSISTED_BASIN_STATES.has(state)) return null;
+  return {
+    object_id: "basin",
+    state,
+    position: pos,
+    quaternion: quat,
+    upright: raw.upright === true,
+    holder: raw.holder === "hand" || raw.holder === "head" ? raw.holder : null,
+    revision: Number.isFinite(raw.revision) ? raw.revision : 0,
+    updatedAt: Date.now(),
+  };
+}
+
+const loaded = loadState();
+let character = { x: loaded.x, z: loaded.z, yawDeg: loaded.yawDeg, updatedAt: loaded.updatedAt ?? 0 };
+let basin = sanitizeBasin(loaded.basin);
 let lastSave = 0;
 /** 用客户端上报的快照刷新角色状态（坐标越界时夹到可走范围） */
 function applyClientSnapshot(snap) {
-  if (!snap || !Number.isFinite(snap.x) || !Number.isFinite(snap.z) || !Number.isFinite(snap.yawDeg)) return false;
-  character = {
-    x: Math.max(-3.7, Math.min(3.7, snap.x)),
-    z: Math.max(-3.7, Math.min(3.7, snap.z)),
-    yawDeg: snap.yawDeg,
-    updatedAt: Date.now(),
-  };
-  saveCharacter();
-  return true;
+  if (!snap) return false;
+  let changed = false;
+  let basinChanged = false;
+  if (Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
+    character = {
+      x: Math.max(-3.7, Math.min(3.7, snap.x)),
+      z: Math.max(-3.7, Math.min(3.7, snap.z)),
+      yawDeg: snap.yawDeg,
+      updatedAt: Date.now(),
+    };
+    changed = true;
+  }
+  if (Array.isArray(snap.objects)) {
+    for (const object of snap.objects) {
+      if (!object || (object.object_id ?? object.id) !== "basin") continue;
+      const next = sanitizeBasin(object);
+      if (next) {
+        basin = next;
+        changed = true;
+        basinChanged = true;
+      }
+    }
+  }
+  if (changed) saveState(basinChanged);
+  return changed;
 }
 
-function saveCharacter() {
-  if (Date.now() - lastSave < 1500) return;
+function saveState(force = false) {
+  if (!force && Date.now() - lastSave < 1500) return;
   lastSave = Date.now();
   try {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ ...character, updatedAt: Date.now() }));
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ ...character, basin, updatedAt: Date.now() }));
   } catch (err) {
     console.error("state save failed", err.message);
   }
@@ -151,6 +197,7 @@ function statePayload(ws) {
     taskId: session.task?.id ?? null,
     generation: session.generation,
     leaseEpoch: session.leaseEpoch,
+    basin,
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,

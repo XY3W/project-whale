@@ -117,6 +117,12 @@ try {
   } else {
     console.log(JSON.stringify({ url: await cdp.evaluate("location.href") }, null, 2));
   }
+  if (process.env.PROBE_SHOT) {
+    const { data } = await cdp.send("Page.captureScreenshot", { format: "png" });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(process.env.PROBE_SHOT, Buffer.from(data, "base64"));
+    console.log(`screenshot -> ${process.env.PROBE_SHOT}`);
+  }
   if (cdp.errors.length) {
     console.log("=== PAGE ERRORS ===");
     for (const e of cdp.errors) console.log(e);

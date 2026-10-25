@@ -12,6 +12,7 @@ export interface BasinSnapshot {
   holder: "hand" | "head" | null;
   state: BasinState;
   position: [number, number, number];
+  quaternion: [number, number, number, number];
   upright: boolean;
   stationary: boolean;
   available: boolean;
@@ -359,6 +360,55 @@ export class BasinProp {
     return this.uprightResult;
   }
 
+  /**
+   * 从服务器持久化的快照恢复：刷新页面后盆应该还在原来的状态和位置。
+   * 手持/戴头只恢复状态（位置下一帧由骨骼重算）；飞行中用零初速度重新落下。
+   */
+  restore(record: {
+    state?: string;
+    position?: number[];
+    quaternion?: number[] | null;
+    holder?: "hand" | "head" | null;
+  }): boolean {
+    // 服务端只保存 resting / held / worn；其它状态一律按落地静置恢复
+    const raw = record.state ?? "resting";
+    const state: BasinState = raw === "held" || raw === "worn" ? (raw as BasinState) : "resting";
+    const position = Array.isArray(record.position) && record.position.length === 3 ? record.position : null;
+    if (!position || !position.every((v) => Number.isFinite(v))) return false;
+    this.physics.stop();
+    this.actionId = null;
+    this.previewing = false;
+    this.object.visible = true;
+    const reference = this.catalog.pickupReference;
+
+    if (state === "held") {
+      this.state = "held";
+      this.mode = "hand";
+      this.setMorph(0);
+      this.followBone(this.handBone, this.handAttach);
+      this.bump();
+      return true;
+    }
+    if (state === "worn") {
+      this.state = "worn";
+      this.mode = "head";
+      this.setMorph(1);
+      this.followBone(this.headBone, this.headAttach);
+      this.bump();
+      return true;
+    }
+
+    const quaternion = Array.isArray(record.quaternion) && record.quaternion.length === 4 && record.quaternion.every((v) => Number.isFinite(v))
+      ? new THREE.Quaternion(record.quaternion[0], record.quaternion[1], record.quaternion[2], record.quaternion[3])
+      : new THREE.Quaternion(reference.quaternion[0], reference.quaternion[1], reference.quaternion[2], reference.quaternion[3]);
+    this.applyPose({ position: new THREE.Vector3(position[0], position[1], position[2]), quaternion });
+    this.setMorph(0);
+    this.state = "resting";
+    this.mode = "world";
+    this.bump();
+    return true;
+  }
+
   /** 回到“当前站位对应的标准静置姿态”（调试台与沙盒用） */
   resetToReference(): Pose {
     this.physics.stop();
@@ -502,6 +552,12 @@ export class BasinProp {
         Math.round(this.object.position.x * 1000) / 1000,
         Math.round(this.object.position.y * 1000) / 1000,
         Math.round(this.object.position.z * 1000) / 1000,
+      ],
+      quaternion: [
+        Math.round(this.object.quaternion.x * 10000) / 10000,
+        Math.round(this.object.quaternion.y * 10000) / 10000,
+        Math.round(this.object.quaternion.z * 10000) / 10000,
+        Math.round(this.object.quaternion.w * 10000) / 10000,
       ],
       upright: this.upright,
       stationary: this.stationary,

@@ -26,6 +26,7 @@ type Handlers = {
   onReadOnly?: (readOnly: boolean) => void;
   onReconcile?: () => void;
   onSnapshot?: (s: { x: number; z: number; yawDeg: number }) => void;
+  onBasin?: (basin: Record<string, unknown>) => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -105,6 +106,7 @@ export class BrainClient {
           if (ch && Number.isFinite(ch.x) && Number.isFinite(ch.z) && Number.isFinite(ch.yawDeg)) {
             this.handlers.onSnapshot?.(ch);
           }
+          if (msg.basin) this.handlers.onBasin?.(msg.basin as Record<string, unknown>);
           break;
         }
         case "error":

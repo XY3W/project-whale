@@ -123,6 +123,9 @@ async function boot() {
   let taskActive = false;
   let readOnly = false;
   let stateApplied = false;
+  let basinApplied = false;
+  let lastBasinRevision = -1;
+  let lastBasinReport = 0;
   let lastReport = 0;
 
   // 头顶红色断连图标：固定屏幕尺寸，跟随角色投影
@@ -541,6 +544,13 @@ async function boot() {
       root.position.z = THREE.MathUtils.clamp(s.z, -AREA_HALF, AREA_HALF);
       root.rotation.y = (s.yawDeg * Math.PI) / 180;
     },
+    onBasin: (record) => {
+      if (basinApplied) return;
+      basinApplied = true;
+      root.updateMatrixWorld(true);
+      const ok = basin.restore(record);
+      console.info("[basin] restored", ok ? record.state : "failed", record.position);
+    },
     onConnection: (ok) => {
       if (!ok) {
         chat.setError("与大脑的连接断开，正在重连…");
@@ -667,6 +677,18 @@ async function boot() {
         const x = (p.x * 0.5 + 0.5) * innerWidth;
         const y = (-p.y * 0.5 + 0.5) * innerHeight;
         bubble.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
+      }
+    }
+
+    // 钢盆状态一变就立刻上报，避免刚拾取完就刷新导致恢复成旧状态
+    const basinRevision = basin.snapshot().revision;
+    if (basinRevision !== lastBasinRevision) {
+      lastBasinRevision = basinRevision;
+      const now = performance.now();
+      if (stateApplied && !readOnly && now - lastBasinReport > 500 && !player.performing) {
+        lastBasinReport = now;
+        lastReport = now;
+        client.sendStateSnapshot(snapshot());
       }
     }
 

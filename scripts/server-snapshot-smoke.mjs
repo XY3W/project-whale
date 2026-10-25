@@ -51,18 +51,43 @@ try {
     type: "user_message",
     text: "测试定位刷新",
     leaseEpoch: first.leaseEpoch,
-    snapshot: { x: 1.5, z: -0.4, yawDeg: 45, base: "idle_stand", walking: false, chatOpen: true },
+    snapshot: {
+      x: 1.5, z: -0.4, yawDeg: 45, base: "idle_stand", walking: false, chatOpen: true,
+      objects: [{
+        id: "basin", object_id: "basin", state: "worn", revision: 7, holder: "head",
+        position: [0.02, 0.91, -0.07], quaternion: [0, 0.3827, 0, 0.9239], upright: false, available: false,
+      }],
+    },
   }));
   await sleep(500);
   ws.send(JSON.stringify({ type: "hello" }));
   await sleep(300);
 
+  // 飞行中的盆不应该落盘：发一个 flying 快照，服务端应保持上一条已保存的状态
+  ws.send(JSON.stringify({
+    type: "user_message",
+    text: "扔出去",
+    leaseEpoch: first.leaseEpoch,
+    snapshot: {
+      x: 1.5, z: -0.4, yawDeg: 45,
+      objects: [{ id: "basin", object_id: "basin", state: "flying", revision: 9, position: [1, 0.8, 2], upright: true }],
+    },
+  }));
+  await sleep(500);
+  ws.send(JSON.stringify({ type: "hello" }));
+  await sleep(300);
+  const afterFlying = states.at(-1).basin;
+
   const last = states.at(-1);
   const before = first.character ?? {};
   const after = last.character ?? {};
-  const ok = Math.abs(after.x - 1.5) < 1e-6 && Math.abs(after.z + 0.4) < 1e-6 && Math.abs(after.yawDeg - 45) < 1e-6;
-  console.log(JSON.stringify({ before, after, ok }, null, 2));
-  if (!ok) throw new Error("服务端没有采用客户端快照");
+  const basin = afterFlying ?? null;
+  const okCharacter = Math.abs(after.x - 1.5) < 1e-6 && Math.abs(after.z + 0.4) < 1e-6 && Math.abs(after.yawDeg - 45) < 1e-6;
+  const okBasin = !!basin && basin.state === "worn" && basin.holder === "head" && Math.abs(basin.position[1] - 0.91) < 1e-6;
+  console.log(JSON.stringify({ before, after, basin, okCharacter, okBasin }, null, 2));
+  if (!okCharacter) throw new Error("服务端没有采用客户端快照");
+  if (!okBasin) throw new Error("服务端没有持久化钢盆状态");
+  if (basin.state === "flying") throw new Error("飞行中的状态不应该落盘");
   ws.close();
 } catch (err) {
   console.error("SMOKE FAILED:", err.message);
