@@ -63,6 +63,19 @@ function loadCharacter() {
 }
 let character = loadCharacter();
 let lastSave = 0;
+/** 用客户端上报的快照刷新角色状态（坐标越界时夹到可走范围） */
+function applyClientSnapshot(snap) {
+  if (!snap || !Number.isFinite(snap.x) || !Number.isFinite(snap.z) || !Number.isFinite(snap.yawDeg)) return false;
+  character = {
+    x: Math.max(-3.7, Math.min(3.7, snap.x)),
+    z: Math.max(-3.7, Math.min(3.7, snap.z)),
+    yawDeg: snap.yawDeg,
+    updatedAt: Date.now(),
+  };
+  saveCharacter();
+  return true;
+}
+
 function saveCharacter() {
   if (Date.now() - lastSave < 1500) return;
   lastSave = Date.now();
@@ -277,16 +290,7 @@ wss.on("connection", (ws, req) => {
         if (isLease(ws) && session.task && msg.reconciled && (session.task.unknown || session.task.originWs !== ws)) {
           endTask("reconciled after restart/reconnect");
         }
-        const snap = msg.snapshot;
-        if (snap && Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
-          character = {
-            x: Math.max(-3.7, Math.min(3.7, snap.x)),
-            z: Math.max(-3.7, Math.min(3.7, snap.z)),
-            yawDeg: snap.yawDeg,
-            updatedAt: Date.now(),
-          };
-          saveCharacter();
-        }
+        applyClientSnapshot(msg.snapshot);
         break;
       }
 
@@ -300,6 +304,8 @@ wss.on("connection", (ws, req) => {
           return;
         }
         if (!msg.text || typeof msg.text !== "string") return;
+        // 用户消息里带着客户端此刻的真实位姿：先刷新，再基于它规划
+        applyClientSnapshot(msg.snapshot);
         if (!session.chatOpen) {
           send(ws, "error", { code: "CHAT_CLOSED", message: "聊天框没有打开，不能发送消息" });
           return;
@@ -402,6 +408,8 @@ wss.on("connection", (ws, req) => {
         if (task.superseded) return;
         if (msg.planId && task.planId && msg.planId !== task.planId) return; // 不属于当前计划
 
+        // 结果里带着执行完之后的真实位姿：审核阶段必须看到它，而不是旧坐标
+        applyClientSnapshot(msg.snapshot);
         const entry = msg.planId ? session.ledger.get(msg.planId) : null;
         if (entry && entry.state === "done") {
           // 重复投递：回放已缓存的回复，不再次执行
@@ -444,6 +452,7 @@ wss.on("connection", (ws, req) => {
                 turn: task.rounds,
                 executionReport: msg.result,
                 characterState: character,
+                clientSnapshot: msg.snapshot ?? null,
                 capabilities: describeCapabilities(),
                 disabledCapabilities: describeDisabled(),
                 capabilityVersion: CAPABILITY_VERSION,

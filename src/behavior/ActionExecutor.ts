@@ -171,7 +171,8 @@ export class ActionExecutor {
           return done("failed", null, "PRECONDITION_FAILED");
         }
         const before = this.state().yawDeg;
-        const raced = await this.withTimeout(this.loco.turn(deg), 2000 + Math.abs(deg) * 20);
+        // 转向按帧推进，低帧率下墙钟会被拉长；卡死由 locomotion 的进度看门狗负责
+        const raced = await this.withTimeout(this.loco.turn(deg), 60000);
         const after = this.state().yawDeg;
         const actual = round(signedDeltaDeg(before, after));
         if (!raced.ok) {
@@ -205,8 +206,9 @@ export class ActionExecutor {
         if (Math.abs(target.x) > limit || Math.abs(target.z) > limit) {
           return done("failed", { target }, "OUT_OF_BOUNDS");
         }
-        // 预算：起步 0.8 + n 圈 * 1.6 / 速率 + 收步 0.8 + 余量
-        const budget = 2500 + 800 + n * 1600 + 800;
+        // 预算：起步 0.8 + n 圈 * 1.6 + 收步 0.8 的动画时间；墙钟留足余量，
+        // 真正的“卡住”由 walk 的进度看门狗在 8 秒无进展时判定
+        const budget = 60000 + n * 5000;
         const raced = await this.withTimeout(this.loco.walk(meters), budget);
         const after = this.loco.position();
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
@@ -227,7 +229,7 @@ export class ActionExecutor {
         if (!PLAYABLE.has(step.action_id)) {
           return done("unsupported", { supported: [...PLAYABLE] }, "CAPABILITY_DISABLED");
         }
-        const raced = await this.withTimeout(this.loco.play(step.action_id), 6000);
+        const raced = await this.withTimeout(this.loco.play(step.action_id), 30000);
         if (!raced.ok) return done("timeout", { action_id: step.action_id }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { action_id: step.action_id }, "CANCELLED");
         return done("succeeded", { action_id: step.action_id }, "OK");

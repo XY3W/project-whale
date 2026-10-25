@@ -16,6 +16,7 @@ import { BasinProp } from "./prop/BasinProp";
 import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
 import type { BasinBridge } from "./behavior/protocol.ts";
+import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = "/models/basin-v2/character_basin_actions.glb";
 const BASIN_MODEL = "/models/basin-v2/steel_basin_v2.glb";
@@ -260,16 +261,28 @@ async function boot() {
   }
 
   // ---- 精确执行器接线 ----
-  const waiters: { check: () => boolean; done: () => void }[] = [];
-  const waitFor = (check: () => boolean, timeoutMs = 15000) =>
-    new Promise<void>((resolve) => {
-      const w = { check, done: () => { clearTimeout(timer); resolve(); } };
-      const timer = setTimeout(() => {
-        const i = waiters.indexOf(w);
-        if (i >= 0) waiters.splice(i, 1);
-        resolve();
-      }, timeoutMs);
-      waiters.push(w);
+  /**
+   * 按“有没有继续动”等待，而不是按墙钟。
+   * 动画按帧推进，低帧率或后台标签页会把 17 秒路程拉长到几分钟；固定超时会把
+   * 正常行走切成半截，再被判定成位移不符。
+   */
+  const waitForProgress = (
+    check: () => boolean,
+    progress: () => number,
+    opts: { idleMs?: number; maxMs?: number } = {},
+  ) =>
+    new Promise<void>((resolve, reject) => {
+      const monitor = new ProgressMonitor({ start: performance.now(), initial: progress(), ...opts });
+      const timer = setInterval(() => {
+        const state = monitor.sample(performance.now(), progress(), check());
+        if (state === "done") {
+          clearInterval(timer);
+          resolve();
+        } else if (state === "stalled") {
+          clearInterval(timer);
+          reject(new Error("STALLED"));
+        }
+      }, 50);
     });
 
   const loco: Locomotion = {
@@ -277,16 +290,27 @@ async function boot() {
     position: () => ({ x: root.position.x, z: root.position.z }),
     walk: async (meters) => {
       if (cyclesFor(meters) === null) return;
+      const from = root.position.clone();
       player.walkDistance(meters);
-      await waitFor(() => !player.state.walking && player.state.base === "idle_stand");
+      // 进展 = 已走距离；收步阶段也要算，否则最后 0.09 m 会被当成卡住
+      await waitForProgress(
+        () => !player.state.walking && player.state.base === "idle_stand",
+        () => root.position.distanceTo(from),
+        { idleMs: 8000 },
+      );
     },
     turn: async (deg) => {
-      startTurn(root.rotation.y + (deg * Math.PI) / 180, null);
-      await waitFor(() => phase !== "turning", 5000);
+      const from = root.rotation.y;
+      startTurn(from + (deg * Math.PI) / 180, null);
+      await waitForProgress(
+        () => phase !== "turning",
+        () => Math.abs(root.rotation.y - from),
+        { idleMs: 4000, maxMs: 60000 },
+      );
     },
     play: async (id) => {
       player.gesture(id);
-      await waitFor(() => player.state.upper === null, 8000);
+      await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
     },
     tail: async (style, dur) => {
       player.setTail(style === "tail_swish");
@@ -436,7 +460,8 @@ async function boot() {
   let motionOwner: Owner = "none";
   let motionEpoch = 0;
 
-  const waitBodySettled = async (timeoutMs = 4000) => {
+  // 收步也是按帧推进的：低帧率下 0.8 秒的收步可能占好几秒墙钟，给足时间
+  const waitBodySettled = async (timeoutMs = 30000) => {
     const t0 = performance.now();
     while (player.state.walking || player.state.base !== "idle_stand" || phase !== "idle" || player.state.upper !== null || player.performing !== null) {
       if (performance.now() - t0 > timeoutMs) return false;
@@ -477,7 +502,10 @@ async function boot() {
       // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
       planChain = planChain.then(async () => {
         const result = await runOwned("plan", msg.plan as unknown as Plan);
-        if (result) client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId });
+        if (result) {
+          client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId }, snapshot());
+          lastReport = performance.now();
+        }
       });
     },
     onReply: (msg) => {
@@ -623,13 +651,6 @@ async function boot() {
       }
     } else {
       roamTimer = Math.max(roamTimer, 2 + Math.random() * 3);
-    }
-
-    for (let i = waiters.length - 1; i >= 0; i--) {
-      if (waiters[i].check()) {
-        waiters[i].done();
-        waiters.splice(i, 1);
-      }
     }
 
     root.position.x = THREE.MathUtils.clamp(root.position.x, -AREA_HALF, AREA_HALF);

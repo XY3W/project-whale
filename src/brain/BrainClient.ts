@@ -142,10 +142,14 @@ export class BrainClient {
     taskId: string,
     result: unknown,
     meta: { generation?: number; planId?: string } = {},
+    snapshot?: Record<string, unknown>,
   ) {
+    // 快照随结果一起上报：审核阶段必须看到“执行完之后的真实位置”，
+    // 不能再用服务端缓存的旧坐标
     return this.send("plan_result", {
       taskId,
       result,
+      snapshot,
       generation: meta.generation,
       planId: meta.planId,
       leaseEpoch: this.leaseEpoch,
