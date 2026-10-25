@@ -10,6 +10,7 @@ import type { Plan } from "./behavior/protocol.ts";
 import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
+import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
 
 const MODEL = "/models/animation-v9/character_v9.glb";
@@ -438,12 +439,22 @@ async function boot() {
       roamTimer -= dt;
       if (roamTimer <= 0) {
         roamTimer = 3 + Math.random() * 5;
-        roamBusy = true;
-        const angle = (Math.random() - 0.5) * 60;
-        const distance = Math.random() < 0.5 ? 0.27 : 0.45;
-        void runOwned("roaming", {
-          steps: [{ action: "turn", angle_deg: Math.round(angle) }, { action: "walk", distance_m: distance }],
-        }).finally(() => { roamBusy = false; });
+        // 加权选向：越靠近边缘，朝该方向的权重越低，0.5 米内为 0
+        const plan = pickRoamPlan({
+          x: root.position.x,
+          z: root.position.z,
+          yaw: root.rotation.y,
+          half: 4 - 0.3, // 留出角色半身
+        });
+        if (plan) {
+          roamBusy = true;
+          void runOwned("roaming", {
+            steps: [
+              { action: "turn", angle_deg: Math.round(plan.angleDeg) },
+              { action: "walk", distance_m: plan.distance },
+            ],
+          }).finally(() => { roamBusy = false; });
+        }
       }
     } else {
       roamTimer = Math.max(roamTimer, 2 + Math.random() * 3);
