@@ -284,6 +284,12 @@ function makeBasinLoco() {
     },
     canStart: () => true,
     cancel: () => calls.push("cancel"),
+    upright: async () => {
+      calls.push("upright");
+      const moved = 0.12;
+      view.upright = true;
+      return { ok: true, moved, rotatedDeg: 88 };
+    },
     perform: async (id) => {
       calls.push(id);
       if (id === "pickup_basin") { view.state = "held"; view.holder = "hand"; view.available = false; }
@@ -354,4 +360,37 @@ test("钢盆：parallel 里不允许放物品动作", async () => {
   const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   const result = await ex.run({ steps: [{ action: "parallel", items: [{ action: "turn", angle_deg: 10 }, { action: "pickup", object_id: "basin" }] }] });
   assert.equal(result.status, "failed");
+});
+
+test("钢盆：侧躺时先扶正再拾取，证据里带挪动量", async () => {
+  const { loco, calls, view } = makeBasinLoco();
+  view.upright = false;
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "pickup", object_id: "basin" }] });
+  assert.equal(result.status, "completed");
+  assert.deepEqual(calls, ["upright", "pickup_basin"]);
+  assert.equal(result.steps[0].actual.upright.moved, 0.12);
+  assert.equal(result.steps[0].actual.basin.state, "held");
+});
+
+test("钢盆：扶正失败（挪动过远）就不播拾取动画", async () => {
+  const { loco, calls, view } = makeBasinLoco();
+  view.upright = false;
+  loco.basin.upright = async () => {
+    calls.push("upright");
+    return { ok: false, moved: 0.8, rotatedDeg: 120 };
+  };
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "pickup", object_id: "basin" }] });
+  assert.equal(result.status, "failed");
+  assert.equal(result.steps[0].reasonCode, "NOT_ALIGNED");
+  assert.deepEqual(calls, ["upright"]);
+});
+
+test("钢盆：walk_to_basin 不再要求盆已经正放", async () => {
+  const { loco, view } = makeBasinLoco();
+  view.upright = false;
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "walk_to_basin" }] });
+  assert.equal(result.status, "completed");
 });

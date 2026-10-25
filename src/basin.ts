@@ -94,6 +94,12 @@ async function boot() {
     fired.length = 0;
     statusEl.textContent = "已复位";
   };
+  const resetCenter = () => {
+    basin.resetToCenter();
+    setTuck(0);
+    fired.length = 0;
+    statusEl.textContent = "盆已放回场地中心";
+  };
 
   const buttons: Array<[string, () => void]> = [
     ["pickup", () => void play("pickup_basin")],
@@ -101,6 +107,7 @@ async function boot() {
     ["unwear", () => void play("unwear_basin")],
     ["throw", () => void play("throw_basin", { directionDeg: 0, speed: 3.2, spin: 180 })],
     ["reset", reset],
+    ["center", resetCenter],
   ];
   for (const [label, fn] of buttons) {
     const b = document.createElement("button");

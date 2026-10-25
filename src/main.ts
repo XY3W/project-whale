@@ -340,6 +340,22 @@ async function boot() {
   const basinBridge: BasinBridge = {
     snapshot: () => basin.snapshot(),
     alignment: alignInfo,
+    upright: async () => {
+      const started = basin.startUpright(0.45);
+      if (!started.ok) return started;
+      // 扶正按帧推进：低帧率机器上 0.45 秒可能要跑十几秒墙钟
+      const t0 = performance.now();
+      while (basin.uprighting && performance.now() - t0 < 20000) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return { ...basin.lastUpright, ok: !basin.uprighting && basin.upright };
+    },
+    reset: () => {
+      player.clearGesture();
+      player.setWalking(false);
+      player.cancelPerformance();
+      basin.resetToCenter();
+    },
     canStart: (id) => basin.canStart(id),
     cancel: () => { player.cancelPerformance(); },
     align: async () => {
@@ -391,6 +407,12 @@ async function boot() {
     },
   };
   loco.basin = basinBridge;
+
+  const resetButton = document.getElementById("reset-basin");
+  resetButton?.addEventListener("click", () => {
+    basinBridge.reset();
+    speak("盆放回场地中心了", 1800);
+  });
 
   // 每次运行独立执行器：过期 run 的取消不会复活，也不会影响新 run
   let currentExecutor: ActionExecutor | null = null;
@@ -661,6 +683,7 @@ async function boot() {
     stage, root, player, meshes, chat, requestMove, enterChat, client, basin, basinBridge, alignInfo,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
+    resetBasin: () => basinBridge.reset(),
     /** 调试用：不经模型直接跑一套计划（与模型下发走同一条调度路径） */
     run: (plan: Plan) => runOwned("plan", plan),
   };

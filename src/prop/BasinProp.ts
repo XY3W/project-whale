@@ -48,7 +48,14 @@ export interface BasinPropOptions {
 const norm = (name: string) => name.replace(/[^A-Za-z0-9_]/g, "");
 const UPRIGHT_MIN_Y = Math.cos((32 * Math.PI) / 180);
 
-type Mode = "world" | "hand" | "head" | "curve" | "physics";
+type Mode = "world" | "hand" | "head" | "curve" | "physics" | "uprighting";
+
+export interface UprightResult {
+  ok: boolean;
+  /** 被挪动的水平距离（米）与扶正角度（度） */
+  moved: number;
+  rotatedDeg: number;
+}
 
 export class BasinProp {
   readonly object = new THREE.Group();
@@ -75,6 +82,11 @@ export class BasinProp {
   private lastCalm = 0;
   private lastSpeed = 0;
   private lastSpin = 0;
+  private uprightFrom: Pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+  private uprightTo: Pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+  private uprightTime = 0;
+  private uprightDuration = 0.45;
+  private uprightResult: UprightResult = { ok: false, moved: 0, rotatedDeg: 0 };
 
   private constructor(opts: BasinPropOptions, physics: BasinPhysics) {
     this.catalog = opts.catalog;
@@ -253,6 +265,59 @@ export class BasinProp {
     this.lastCalm = 0;
   }
 
+  get uprighting(): boolean {
+    return this.mode === "uprighting";
+  }
+
+  get lastUpright(): UprightResult {
+    return this.uprightResult;
+  }
+
+  /**
+   * 把静止的盆扶成正放：在 0.45 秒内平滑插值到“当前站位对应的标准姿态”。
+   * 只对静止的盆开放，且由执行器在确认站位误差后调用。
+   */
+  startUpright(seconds = 0.45, maxMove = 0.35): UprightResult {
+    if (this.state !== "resting") {
+      this.uprightResult = { ok: false, moved: 0, rotatedDeg: 0 };
+      return this.uprightResult;
+    }
+    const reference = this.catalog.pickupReference;
+    const target = BasinProp.toWorld(this.charRoot, reference.position, reference.quaternion);
+    this.uprightFrom = { position: this.object.position.clone(), quaternion: this.object.quaternion.clone() };
+    this.uprightTo = target;
+    const moved = Math.hypot(target.position.x - this.object.position.x, target.position.z - this.object.position.z);
+    const dot = Math.min(1, Math.abs(this.object.quaternion.dot(target.quaternion)));
+    const rotatedDeg = (2 * Math.acos(dot) * 180) / Math.PI;
+    this.uprightResult = { ok: moved <= maxMove, moved: Math.round(moved * 1000) / 1000, rotatedDeg: Math.round(rotatedDeg * 10) / 10 };
+    if (!this.uprightResult.ok) return this.uprightResult;
+    if (this.upright) {
+      this.mode = "world";
+      return this.uprightResult;
+    }
+    this.uprightTime = 0;
+    this.uprightDuration = Math.max(0.05, seconds);
+    this.mode = "uprighting";
+    return this.uprightResult;
+  }
+
+  /** 回到场地正中心、正放静止 */
+  resetToCenter(): Pose {
+    this.physics.stop();
+    this.actionId = null;
+    const reference = this.catalog.pickupReference;
+    const pose: Pose = {
+      position: new THREE.Vector3(0, reference.position[1], 0),
+      quaternion: new THREE.Quaternion(reference.quaternion[0], reference.quaternion[1], reference.quaternion[2], reference.quaternion[3]),
+    };
+    this.state = "resting";
+    this.mode = "world";
+    this.applyPose(pose);
+    this.setMorph(0);
+    this.bump();
+    return pose;
+  }
+
   /** 每帧调用：必须在骨骼世界矩阵更新之后 */
   update(dt: number, actionTime: number) {
     if (this.mode === "hand") {
@@ -280,6 +345,19 @@ export class BasinProp {
       this.lastPose.position.copy(this.object.position);
       this.lastPose.quaternion.copy(this.object.quaternion);
       this.setMorph(sample.wearMorph);
+      return;
+    }
+    if (this.mode === "uprighting") {
+      this.uprightTime += dt;
+      const k = Math.min(1, this.uprightTime / this.uprightDuration);
+      const e = k * k * (3 - 2 * k);
+      this.object.position.lerpVectors(this.uprightFrom.position, this.uprightTo.position, e);
+      this.object.quaternion.slerpQuaternions(this.uprightFrom.quaternion, this.uprightTo.quaternion, e);
+      if (k >= 1) {
+        this.mode = "world";
+        this.state = "resting";
+        this.bump();
+      }
       return;
     }
     if (this.mode === "physics") {
@@ -359,7 +437,7 @@ export class BasinProp {
       ],
       upright: this.upright,
       stationary: this.stationary,
-      available: this.state === "resting" && this.upright,
+      available: this.state === "resting",
       ...(this.state === "flying" ? { speed: this.lastSpeed, spin: this.lastSpin } : {}),
     };
   }

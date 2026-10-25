@@ -96,9 +96,20 @@ export interface ThrowRequest {
   elevationDeg?: number;
 }
 
+export interface UprightReport {
+  ok: boolean;
+  /** 扶正时被挪动的水平距离（米）与旋转角度（度） */
+  moved: number;
+  rotatedDeg: number;
+}
+
 export interface BasinBridge {
   snapshot(): BasinView;
   alignment(): BasinAlignment;
+  /** 把静止但侧躺/倒扣的盆扶成正放；返回实际挪动量 */
+  upright(): Promise<UprightReport>;
+  /** 回到场地正中心的静止姿态 */
+  reset(): void;
   /** 走到拾取站位并对准朝向；返回是否到位 */
   align(): Promise<{ ok: boolean; plan: ApproachSummary | null; error?: string }>;
   /** 播放互动片段，返回是否到达终态 */

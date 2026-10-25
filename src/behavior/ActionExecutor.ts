@@ -261,7 +261,7 @@ export class ActionExecutor {
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
         const view = bridge.snapshot();
         if (view.state !== "resting") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
-        if (!view.upright) return done("failed", { basin: view }, "OBJECT_UNAVAILABLE");
+        // 侧躺/倒扣也能走近，扶正发生在 pickup 内
         // 动画按帧推进而非墙钟：低帧率机器上一段 3 秒的片段可能跑更久，
         // 这里只做“卡死”兜底，真正的完成判定由片段自身的事件与结束回调给出。
         const raced = await this.withTimeout(bridge.align(), 90000);
@@ -283,12 +283,22 @@ export class ActionExecutor {
         if (!view.available) return done("failed", { basin: view }, "OBJECT_UNAVAILABLE");
         const alignment = bridge.alignment();
         if (!alignment.ok) return done("failed", { alignment }, "NOT_ALIGNED");
+        // 侧躺或倒扣：先平滑扶正到当前站位的标准姿态，再播拾取
+        let upright: { ok: boolean; moved: number; rotatedDeg: number } | null = null;
+        if (!view.upright) {
+          upright = await bridge.upright();
+          if (!upright.ok) {
+            return done("failed", { upright, basin: bridge.snapshot() }, "NOT_ALIGNED");
+          }
+        }
         const raced = await this.withTimeout(bridge.perform("pickup_basin"), 60000);
         const after = bridge.snapshot();
         if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
-        if (!raced.value || after.state !== "held") return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
-        return done("succeeded", { basin: after }, "OK");
+        if (!raced.value || after.state !== "held") {
+          return done("failed", { basin: after, upright }, "BASIN_STATE_MISMATCH");
+        }
+        return done("succeeded", { basin: after, ...(upright ? { upright } : {}) }, "OK");
       }
 
       case "wear": {

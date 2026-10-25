@@ -135,7 +135,7 @@ test("状态机：拾取 → 戴上 → 取下 → 投掷 → 落地", async () 
   }
   assert.equal(prop.state, "resting", `应在 15 秒内落地静止，实际 ${steps} 步`);
   assert.ok(prop.position.y < 0.6, "落地高度合理");
-  assert.equal(prop.snapshot().available, prop.upright);
+  assert.equal(prop.snapshot().available, true, "落地静止即可拾取（姿态由 upright 单独表示）");
 });
 
 test("取消：拾取未到抓取点就退回静置，不产生第二只盆", async () => {
@@ -179,4 +179,60 @@ test("快照字段：revision 随状态变化递增", async () => {
   const r1 = prop.snapshot().revision;
   assert.ok(r1 > r0);
   assert.equal(prop.snapshot().object_id, "basin");
+});
+
+test("扶正：侧躺的盆插值到当前站位的标准姿态", async () => {
+  const rig = makeRig();
+  const { prop } = await makeProp(rig);
+  // 人为摆成侧躺：位置接近抓取点，但姿态翻了 90°
+  const target = BasinProp.toWorld(rig.root, catalog.pickupReference.position, catalog.pickupReference.quaternion);
+  prop.object.quaternion.setFromEuler(new THREE.Euler(0, 0.3, Math.PI / 2));
+  prop.object.position.set(target.position.x + 0.05, 0.37, target.position.z - 0.03);
+  assert.equal(prop.upright, false);
+  {
+    const started = prop.startUpright(0.3);
+    assert.equal(started.ok, true);
+    assert.ok(started.rotatedDeg > 60, `旋转 ${started.rotatedDeg}`);
+    assert.equal(prop.mode, "uprighting");
+    for (let i = 0; i < 30; i++) prop.update(1 / 60, 0);
+    assert.equal(prop.mode, "world");
+    assert.equal(prop.state, "resting");
+    assert.equal(prop.upright, true);
+    const target = BasinProp.toWorld(rig.root, catalog.pickupReference.position, catalog.pickupReference.quaternion);
+    assert.ok(prop.position.distanceTo(target.position) < 1e-6, "扶正后落在标准姿态");
+  }
+});
+
+test("扶正：已经正放时是空操作；位移过大时拒绝", async () => {
+  const rig = makeRig();
+  const { prop } = await makeProp(rig);
+  const before = prop.position.clone();
+  const noop = prop.startUpright(0.3);
+  assert.equal(noop.moved, 0);
+  assert.equal(prop.mode, "world");
+  assert.ok(prop.position.distanceTo(before) < 1e-9);
+
+  prop.object.position.set(-2.5, 0.37, 1.8);
+  prop.object.quaternion.setFromEuler(new THREE.Euler(0.9, 0, 0.2));
+  const tooFar = prop.startUpright(0.3);
+  assert.equal(tooFar.ok, false, "超出 0.35 m 不应扶正");
+  assert.equal(prop.mode, "world");
+});
+
+test("重置：回到场地中心、正放、静止", async () => {
+  const rig = makeRig();
+  const { prop } = await makeProp(rig);
+  prop.begin("pickup_basin");
+  prop.handleEvent("grasp");
+  prop.finish(true);
+  assert.equal(prop.state, "held");
+  const pose = prop.resetToCenter();
+  assert.equal(prop.state, "resting");
+  assert.equal(prop.mode, "world");
+  assert.equal(prop.upright, true);
+  assert.equal(pose.position.x, 0);
+  assert.equal(pose.position.z, 0);
+  assert.ok(Math.abs(pose.position.y - catalog.pickupReference.position[1]) < 1e-9);
+  assert.ok(prop.position.length() < 1e-9 || Math.abs(prop.position.x) + Math.abs(prop.position.z) < 1e-9);
+  assert.equal(prop.canStart("pickup_basin"), true);
 });
