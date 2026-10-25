@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAPABILITY_VERSION, describeCapabilities, validatePlan, validateStep } from "../server/capabilities.mjs";
+import { CAPABILITY_VERSION, describeCapabilities, outputContract, validatePlan, validateStep } from "../server/capabilities.mjs";
 import { createEventDeduper } from "../server/events.mjs";
 
 test("注册表：enabled 清单不含 disabled 能力", () => {
@@ -47,4 +47,12 @@ test("事件去重：同 eventId 只发一次，revision 变化可再发", () =>
   assert.equal(d.shouldEmit({ ...ev }, 2000), false);
   assert.equal(d.shouldEmit({ ...ev, eventId: "e2" }, 3000), false);
   assert.equal(d.shouldEmit({ ...ev, eventId: "e3", revision: 2 }, 4000), true);
+});
+
+test("输出契约由注册表生成，不含禁用能力", () => {
+  const c = outputContract();
+  assert.ok(c.includes("0.09"));
+  assert.ok(c.includes('"action":"walk"'));
+  assert.ok(!c.includes("pickup"));
+  assert.ok(c.includes("finish_task"));
 });

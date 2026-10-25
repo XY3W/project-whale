@@ -116,3 +116,25 @@ export function validateStep(step, id = "step") {
   }
   throw new ModelError("INVALID_SCHEMA", `${id} 无法识别`, 0);
 }
+
+/** 由注册表生成输出契约文本，避免手写动作清单与注册表漂移 */
+export function outputContract() {
+  const steps = CAPABILITIES.filter((c) => c.enabled && c.id !== "parallel")
+    .map((c) => {
+      const props = Object.entries(c.params).map(([name, spec]) => {
+        if (spec.enum) return `${name}:${JSON.stringify(spec.enum)}`;
+        if (spec.type === "number") return `${name}:number [${spec.min},${spec.max}]`;
+        return `${name}:?`;
+      });
+      return `  {"action":"${c.id}", ${props.join(", ")}}`;
+    })
+    .join("\n");
+  return [
+    'execute_plan: {"type":"execute_plan","speech":"string","steps":[Step 1..6],"memory_proposals":[{"key","value","source_quote"}] 可选}',
+    'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
+    "Step 只能取以下之一：",
+    steps,
+    '  {"action":"parallel","items":[Step 1..3]}（不嵌套，通道不冲突）',
+    "只输出一个 JSON 对象。",
+  ].join("\n");
+}

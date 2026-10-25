@@ -7,7 +7,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { CAPABILITY_VERSION, CAPABILITIES, ModelError, validatePlan } from "./capabilities.mjs";
+import { CAPABILITY_VERSION, CAPABILITIES, ModelError, outputContract, validatePlan } from "./capabilities.mjs";
 
 const PROMPT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "prompts");
 const readPrompt = (name) => fs.readFileSync(path.join(PROMPT_DIR, name), "utf8");
@@ -24,19 +24,8 @@ export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
 export const SYSTEM_PROMPT = readPrompt("system.txt");
 
-const OUTPUT_CONTRACT = `输出 JSON，二选一：
-{"type":"execute_plan","speech":"string","steps":[...]}
-{"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}
-steps 允许的动作：
-{"action":"turn","angle_deg":number}
-{"action":"walk","distance_m":0.09+0.18n}
-{"action":"play","action_id":"greet|notice|nod|look_left|look_right"}
-{"action":"tail","style":"tail_idle|tail_swish","duration_s":number}
-{"action":"wait","duration_s":number}
-{"action":"parallel","items":[...]}
-最多 6 个步骤；只输出 JSON。
-可选字段：{"memory_proposals":[{"key":"preferred_name|response_language|response_style|ordinary_interest","value":"string","source_quote":"用户原话片段"}]}
-每轮最多 2 条；只记录用户明确表达的称呼、语言、风格偏好或普通兴趣，不要记录敏感信息。`;
+const OUTPUT_CONTRACT = outputContract();
+
 
 function contextBlock(ctx) {
   return `REQUEST_CONTEXT_JSON:\n${JSON.stringify(ctx)}`;
