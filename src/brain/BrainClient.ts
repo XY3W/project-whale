@@ -80,6 +80,8 @@ export class BrainClient {
           const ro = !!msg.readOnly;
           this.handlers.onReadOnly?.(ro);
           if (msg.needsReconcile) this.handlers.onReconcile?.();
+          // session_state 也携带任务阶段：任务结束后必须清除“思考中”
+          if (typeof msg.phase === "string") this.handlers.onTaskState?.(msg.phase);
           const ch = msg.character as { x: number; z: number; yawDeg: number } | undefined;
           if (ch && Number.isFinite(ch.x) && Number.isFinite(ch.z) && Number.isFinite(ch.yawDeg)) {
             this.handlers.onSnapshot?.(ch);
