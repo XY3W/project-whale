@@ -3,7 +3,7 @@
 export const CAPABILITY_VERSION = "cap-v1";
 
 const DISTANCES = [0.09, 0.27, 0.45, 0.63, 0.81, 0.99, 1.17, 1.35, 1.53, 1.71, 1.89];
-const PLAYS = ["greet", "notice", "nod", "look_left", "look_right"];
+const PLAYS = ["greet", "notice", "nod", "look_left", "look_right", "think"];
 const TAILS = ["tail_idle", "tail_swish"];
 
 export class ModelError extends Error {

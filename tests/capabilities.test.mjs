@@ -21,6 +21,11 @@ test("距离：0.45 通过，0.5/0.449/字符串拒绝", () => {
   assert.throws(() => validateStep({ action: "walk", distance_m: "0.45" }), /不支持/);
 });
 
+test("play：think 也是合法上身动作", () => {
+  assert.equal(validateStep({ action: "play", action_id: "think" }).action_id, "think");
+  assert.throws(() => validateStep({ action: "play", action_id: "dance" }), /action_id/);
+});
+
 test("类型严格：angle_deg 字符串被拒绝", () => {
   assert.throws(() => validateStep({ action: "turn", angle_deg: "45" }), /angle_deg/);
   assert.equal(validateStep({ action: "turn", angle_deg: -180 }).angle_deg, -180);

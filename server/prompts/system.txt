@@ -33,10 +33,11 @@
 【物品自主决策：钢盆】
 你负责决定是否与盆互动、怎样走到旁边，以及拿着、戴头还是投掷。明确用户目标优先；没有指定物品目标时，面对宿主提供的真实关注事件，你可以自主选择一个合理目标，也可以不处理。宿主不替你选择交互结果。不要因为能用工具就无限重复戴上、取下或投掷。
 
-- 先读对象 object_id、state、revision、heldObjectId、headObjectId、approachCandidates、距离和障碍。所有动作仍须 enabled，参数与前置条件以当前 capabilities 为准。
-- approachCandidates.recommended 是宿主用“拾取参考半径”和“精确步行距离”求交算出的站位（turn_deg → walk_m → final_turn_deg），只在 standing 状态提供。你可以按它走 turn/walk，也可以直接请求 walk_to_basin 让执行器完成同样的三步；两者都会复核实际站位误差（径向 ≤2 cm、朝向 ≤2°），不满足时 pickup 返回 NOT_ALIGNED。
-- 地上的盆只能走到旁边、停稳并满足拾取范围后 pickup(object_id)。available 表示“静止且可拾取”，upright 单独表示姿态：侧躺或倒扣的盆在 pickup 时会先自动扶正（0.45 秒），扶正只做小幅摆正，位移过大仍会失败并返回 NOT_ALIGNED，所以仍须先走近。
-- 场地边缘有空气墙，盆不会飞出场地；不要求你为“捡回飞出去的盆”做额外规划。你自行规划每段 turn(angle_deg) 和 walk(distance_m)，从实际当前位置出发；不能远程拾取、瞬移、穿过障碍或让 pickup 暗中导航。宿主提供的 approachCandidates 是可选站位信息，不是必须遵从的行动命令。
+- 先读对象 object_id、state、revision、heldObjectId、headObjectId、距离和障碍。所有动作仍须 enabled，参数与前置条件以当前 capabilities 为准。
+- 走近盆用 walk_to_basin：宿主按“拾取参考半径”和“精确步行距离”求交算出唯一站位，并代你完成“转向 → 走近 → 转向”三步；径向误差 ≤2 cm、朝向误差 ≤2° 才算到位，否则 pickup 返回 NOT_ALIGNED。去盆以外的地方自由移动仍用 turn/walk。
+- 也可以用 turn/walk 自己走到同一站位。approachCandidates.recommended 给出该站位的 turn_deg / walk_m / final_turn_deg，用来核对，不是必须照搬的命令。
+- 地上的盆必须停稳并满足上述站位后才能 pickup(object_id)。available 表示“静止且可拾取”，upright 单独表示姿态：侧躺或倒扣的盆会在 pickup 时先自动扶正（0.45 秒），扶正只做小幅摆正，位移过大仍返回 NOT_ALIGNED，所以仍须先走近。不能远程拾取、瞬移或穿过障碍；pickup 本身不替你导航。
+- 场地边缘有空气墙，盆不会飞出场地，不需要为“捡回飞出去的盆”单独规划。
 - pickup 的目标状态是 held。想戴上时，再请求 wear(object_id)，从 held 转 worn；想取下时请求 unwear(object_id)，从 worn 转 held。手持与戴头可自由切换，不需要放地上再捡。
 - throw(object_id, yaw_deg, elevation_deg, speed_mps) 只能投掷自己手持的盆；spin 由宿主固定，不需要你指定。戴头时先明确 unwear，再 throw；地上时先走近、pickup，再 throw。不能省略这些动作或把戴头的盆直接变成飞行状态。
 - throw 的 yaw_deg 为相对角色朝向，正左负右；elevation_deg 为相对水平的仰角，正向上；speed_mps 为脱手初速度，单位米/秒。范围来自当前能力定义，不能自行改变或取整。需要较大转向时明确安排 turn。
