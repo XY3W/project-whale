@@ -2,18 +2,12 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Stage } from "./core/Stage";
 import { enableMultiWeight } from "./character/multiWeight";
+import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
+import { BasinProp, type ThrowSpec } from "./prop/BasinProp";
+import { loadBasinAssets, type BasinAssets } from "./prop/catalog";
 
 const norm = (n: string) => n.replace(/[^A-Za-z0-9_]/g, "");
 const BASE = "/models/basin-v2";
-
-interface Event { time: number; type: string }
-interface ActionMeta { id: string; duration: number; events?: Event[] }
-interface Catalog {
-  bindings: { hand: { bone: string; matrixColumnMajor: number[] }; head: { bone: string; matrixColumnMajor: number[] } };
-  pickupReference: { position: number[]; quaternion: number[] };
-  wearMorph: string;
-  actions: ActionMeta[];
-}
 
 const statusEl = document.getElementById("status")!;
 const buttonsEl = document.getElementById("buttons")!;
@@ -21,11 +15,12 @@ const buttonsEl = document.getElementById("buttons")!;
 async function boot() {
   const stage = new Stage(document.getElementById("app")!);
   const loader = new GLTFLoader();
-  const [catalog, charGltf, basinGltf] = await Promise.all([
-    fetch(`${BASE}/catalog.json`).then((r) => r.json()) as Promise<Catalog>,
+  const [assets, charGltf, basinGltf] = await Promise.all([
+    loadBasinAssets(BASE),
     loader.loadAsync(`${BASE}/character_basin_actions.glb`),
     loader.loadAsync(`${BASE}/steel_basin_v2.glb`),
   ]);
+  const { catalog } = assets as BasinAssets;
 
   const root = new THREE.Group();
   root.add(charGltf.scene);
@@ -39,11 +34,10 @@ async function boot() {
   });
   await enableMultiWeight(charGltf as never, meshes);
 
-  // 形态键：头顶收拢
   let tuck: THREE.Mesh | null = null;
   charGltf.scene.traverse((o) => {
     const m = o as THREE.Mesh;
-    const dict = (m as THREE.Mesh).morphTargetDictionary;
+    const dict = m.morphTargetDictionary;
     if (dict && dict[catalog.wearMorph] !== undefined) tuck = m;
   });
   const setTuck = (v: number) => {
@@ -55,95 +49,91 @@ async function boot() {
   const bones = new Map<string, THREE.Bone>();
   charGltf.scene.traverse((o) => { if ((o as THREE.Bone).isBone) bones.set(norm(o.name), o as THREE.Bone); });
 
-  const basin = new THREE.Group();
-  basin.add(basinGltf.scene);
-  stage.scene.add(basin);
+  const player = new LayeredMotionPlayer(root, charGltf.animations);
+  const holdClip = charGltf.animations.find((c) => c.name === "hold_basin") ?? null;
+  if (holdClip) player.setHoldClip(holdClip);
 
-  const rest = new THREE.Matrix4().compose(
-    new THREE.Vector3(...(catalog.pickupReference.position as [number, number, number])),
-    new THREE.Quaternion(...(catalog.pickupReference.quaternion as [number, number, number, number])),
-    new THREE.Vector3(1, 1, 1),
-  );
-  const attach = {
-    hand: new THREE.Matrix4().fromArray(catalog.bindings.hand.matrixColumnMajor),
-    head: new THREE.Matrix4().fromArray(catalog.bindings.head.matrixColumnMajor),
-  };
-  const handBone = bones.get(norm(catalog.bindings.hand.bone));
-  const headBone = bones.get(norm(catalog.bindings.head.bone));
-
-  const setRest = () => rest.decompose(basin.position, basin.quaternion, basin.scale);
-  const attachTo = (bone: THREE.Bone | undefined, m: THREE.Matrix4) => {
-    if (!bone) return;
-    bone.updateWorldMatrix(true, false);
-    const world = new THREE.Matrix4().multiplyMatrices(bone.matrixWorld, m);
-    world.decompose(basin.position, basin.quaternion, basin.scale);
-  };
-
-  const mixer = new THREE.AnimationMixer(root);
-  const clips = new Map(charGltf.animations.map((c) => [c.name, c]));
-  let current: THREE.AnimationAction | null = null;
-  let events: Event[] = [];
-  let prevTime = 0;
+  const basin = await BasinProp.create({
+    catalog,
+    propMotion: assets.propMotion,
+    charRoot: root,
+    scene: basinGltf.scene,
+    bones,
+    setMorph: setTuck,
+    parent: stage.scene,
+  });
 
   const fired: string[] = [];
-  const fire = (type: string) => {
-    fired.push(type);
-    console.log(`[basin] event ${type} at actionTime=${current?.time?.toFixed(3)} handBone=${handBone?.name}`);
-    if (type === "grasp") attachTo(handBone, attach.hand);
-    if (type === "hand_release_to_transfer") { /* 曲线驱动阶段，暂按挂手处理 */ }
-    if (type === "head_attach") { attachTo(headBone, attach.head); setTuck(1); }
-    if (type === "head_release_to_transfer") { /* 转移中 */ }
-    if (type === "hand_catch") attachTo(handBone, attach.hand);
-    if (type === "release") setRest();
+  const log: string[] = [];
+  const note = (line: string) => { log.push(line); console.log(`[sandbox] ${line}`); };
+
+  const play = async (id: string, spec?: ThrowSpec) => {
+    if (!basin.begin(id, spec)) {
+      note(`跳过 ${id}：当前状态 ${basin.state}`);
+      statusEl.textContent = `不能开始 ${id}（当前 ${basin.state}）`;
+      return false;
+    }
+    const events = (catalog.actions.find((a) => a.id === id)?.events ?? []).map((e) => ({ time: e.time, type: e.type }));
+    const started = performance.now();
+    const ok = await player.perform(id, events, (type) => {
+      fired.push(`${id}:${type}`);
+      note(`${id} 事件 ${type} @ ${(player.performanceTime).toFixed(3)}s`);
+      basin.handleEvent(type);
+    });
+    basin.finish(ok);
+    note(`${id} 结束 ok=${ok} state=${basin.state} ${Math.round(performance.now() - started)}ms`);
+    statusEl.textContent = `✅ ${id}（${basin.state}）`;
+    return ok;
   };
 
-  const play = (id: string) => {
-    const clip = clips.get(id);
-    if (!clip) return;
-    mixer.stopAllAction();
-    const action = mixer.clipAction(clip);
-    action.reset();
-    action.setLoop(THREE.LoopOnce, 1);
-    action.clampWhenFinished = true;
-    action.play();
-    current = action;
-    prevTime = 0;
-    events = (catalog.actions.find((a) => a.id === id)?.events ?? []) as Event[];
-    statusEl.textContent = `播放 ${id}（${clip.duration.toFixed(2)}s，${events.length} 个事件）`;
+  const reset = () => {
+    const pose = BasinProp.toWorld(root, catalog.pickupReference.position, catalog.pickupReference.quaternion);
+    basin.placeAt(pose);
+    basin.state = "resting";
+    setTuck(0);
+    fired.length = 0;
+    statusEl.textContent = "已复位";
   };
 
-  setRest();
-  for (const a of catalog.actions) {
+  const buttons: Array<[string, () => void]> = [
+    ["pickup", () => void play("pickup_basin")],
+    ["wear", () => void play("wear_basin")],
+    ["unwear", () => void play("unwear_basin")],
+    ["throw", () => void play("throw_basin", { directionDeg: 0, speed: 3.2, spin: 180 })],
+    ["reset", reset],
+  ];
+  for (const [label, fn] of buttons) {
     const b = document.createElement("button");
-    b.textContent = a.id;
-    b.onclick = () => play(a.id);
+    b.textContent = label;
+    b.onclick = fn;
     buttonsEl.appendChild(b);
   }
 
   const clock = new THREE.Clock();
+  let frames = 0;
   stage.renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
-    mixer.update(dt);
-    if (current) {
-      const t = current.time;
-      for (const e of events) {
-        if (prevTime < e.time && e.time <= t) fire(e.type);
-      }
-      prevTime = t;
-    }
+    player.update(dt);
+    root.updateMatrixWorld(true);
+    basin.update(dt, player.performanceTime);
+    player.setHoldEnabled(basin.mode === "hand" && (!player.performing || player.performanceEnding));
     stage.update();
+    frames++;
   });
 
   statusEl.textContent = `✅ ${charGltf.animations.length} 段动画 · ${bones.size} 骨 · ${meshes.length} 网格 · 形态键 ${tuck ? "有" : "无"}`;
   (window as unknown as Record<string, unknown>).sandbox = {
-    stage, root, basin, play, setTuck,
+    stage, root, player, basin, play, reset, setTuck,
     debug: () => ({
-      time: current?.time ?? null,
+      frames,
+      time: player.performanceTime,
+      performing: player.performing,
       fired: [...fired],
-      handBone: handBone?.name ?? null,
-      headBone: headBone?.name ?? null,
-      handBoneWorld: handBone ? [handBone.matrixWorld.elements[12], handBone.matrixWorld.elements[13], handBone.matrixWorld.elements[14]] : null,
-      basin: [basin.position.x, basin.position.y, basin.position.z],
+      log: [...log],
+      state: basin.state,
+      mode: basin.mode,
+      snapshot: basin.snapshot(),
+      hold: { enabled: player.holdEnabled, tracks: player.holdTrackCount },
     }),
   };
 }

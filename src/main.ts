@@ -12,10 +12,16 @@ import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
+import { BasinProp } from "./prop/BasinProp";
+import { loadBasinAssets } from "./prop/catalog";
+import { planApproach, signedDeltaDeg } from "./prop/align";
+import type { BasinBridge } from "./behavior/protocol.ts";
 
-const MODEL = "/models/animation-v9/character_v9.glb";
+const MODEL = "/models/basin-v2/character_basin_actions.glb";
+const BASIN_MODEL = "/models/basin-v2/steel_basin_v2.glb";
 const AREA_HALF = 3.7;
 const DEBUG = new URLSearchParams(location.search).has("debug");
+const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
 type Phase = "idle" | "stopping" | "turning" | "walking";
 
@@ -52,6 +58,43 @@ async function boot() {
   root.position.y -= box.min.y;
   stage.scene.add(root);
   stage.setRoomCamera();
+
+  // ---- 钢盆互动资产（v2：4 段互动 + 持盆循环）----
+  note.textContent = "正在准备钢盆…";
+  const [basinAssets, basinGltf] = await Promise.all([
+    loadBasinAssets(),
+    new GLTFLoader().loadAsync(BASIN_MODEL),
+  ]);
+  const basinCatalog = basinAssets.catalog;
+  const tuckTargets: THREE.Mesh[] = [];
+  gltf.scene.traverse((o) => {
+    const m = o as THREE.Mesh;
+    const dict = m.morphTargetDictionary;
+    if (dict && dict[basinCatalog.wearMorph] !== undefined) tuckTargets.push(m);
+  });
+  const setTuck = (value: number) => {
+    for (const mesh of tuckTargets) {
+      const index = mesh.morphTargetDictionary![basinCatalog.wearMorph]!;
+      if (mesh.morphTargetInfluences) mesh.morphTargetInfluences[index] = value;
+    }
+  };
+  const boneMap = new Map<string, THREE.Bone>();
+  gltf.scene.traverse((o) => {
+    if ((o as THREE.Bone).isBone) boneMap.set(o.name.replace(/[^A-Za-z0-9_]/g, ""), o as THREE.Bone);
+  });
+  const basin = await BasinProp.create({
+    catalog: basinCatalog,
+    propMotion: basinAssets.propMotion,
+    charRoot: root,
+    scene: basinGltf.scene,
+    bones: boneMap,
+    setMorph: setTuck,
+    parent: stage.scene,
+  });
+  root.updateMatrixWorld(true);
+  basin.placeAt(BasinProp.toWorld(root, basinCatalog.pickupReference.position, basinCatalog.pickupReference.quaternion));
+  const holdClip = gltf.animations.find((c) => c.name === "hold_basin") ?? null;
+  if (holdClip) player.setHoldClip(holdClip);
 
   // ---- 状态 ----
   let phase: Phase = "idle";
@@ -105,6 +148,9 @@ async function boot() {
     base: player.state.base,
     walking: player.state.walking,
     chatOpen: chat.open,
+    heldObjectId: basin.state === "held" ? "basin" : null,
+    headObjectId: basin.state === "worn" ? "basin" : null,
+    objects: [{ ...basin.snapshot(), approachCandidates: basin.state === "resting" ? approachHint() : null }],
   });
 
   chat.onSend = (text) => {
@@ -250,6 +296,102 @@ async function boot() {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     isMoving: () => player.state.walking || phase !== "idle",
   };
+  const degYaw = () => (root.rotation.y * 180) / Math.PI;
+  const alignInfo = () => {
+    const ref = basinCatalog.pickupReference.position;
+    const reach = Math.hypot(ref[0], ref[2]);
+    const dx = basin.position.x - root.position.x;
+    const dz = basin.position.z - root.position.z;
+    const direct = Math.hypot(dx, dz);
+    const offsetBearing = (Math.atan2(ref[0], ref[2]) * 180) / Math.PI;
+    const wantYaw = (Math.atan2(dx, dz) * 180) / Math.PI - offsetBearing;
+    const yawErrorDeg = signedDeltaDeg(degYaw(), wantYaw);
+    const distanceError = direct - reach;
+    return {
+      distanceError: Math.round(distanceError * 10000) / 10000,
+      yawErrorDeg: Math.round(yawErrorDeg * 1000) / 1000,
+      ok: Math.abs(distanceError) <= 0.02 && Math.abs(yawErrorDeg) <= 2,
+    };
+  };
+
+  // 给模型的站位建议：站位点由“参考半径 + 精确步行距离”两个圆求交得到
+  const approachHint = () => {
+    const plan = planApproach({
+      character: { x: root.position.x, z: root.position.z },
+      basin: { x: basin.position.x, z: basin.position.z },
+      yawDeg: degYaw(),
+      reference: { x: basinCatalog.pickupReference.position[0], z: basinCatalog.pickupReference.position[2] },
+      half: AREA_HALF,
+      margin: 0.3,
+    });
+    if ("error" in plan) return { error: plan.error, reach: round3(plan.reach) };
+    return {
+      reach: round3(plan.reach),
+      recommended: {
+        turn_deg: round3(plan.turn1Deg),
+        walk_m: plan.distanceM,
+        final_turn_deg: round3(plan.turn2Deg),
+        stand: { x: round3(plan.stand.x), z: round3(plan.stand.z) },
+        final_yaw_deg: round3(plan.finalYawDeg),
+      },
+    };
+  };
+
+  const basinBridge: BasinBridge = {
+    snapshot: () => basin.snapshot(),
+    alignment: alignInfo,
+    canStart: (id) => basin.canStart(id),
+    cancel: () => { player.cancelPerformance(); },
+    align: async () => {
+      const reference = { x: basinCatalog.pickupReference.position[0], z: basinCatalog.pickupReference.position[2] };
+      // 距离远时先按最大支持距离走近，再求精确站位；最多 10 段，避免无限循环
+      for (let leg = 0; leg < 10; leg++) {
+        const plan = planApproach({
+          character: { x: root.position.x, z: root.position.z },
+          basin: { x: basin.position.x, z: basin.position.z },
+          yawDeg: degYaw(),
+          reference,
+          half: AREA_HALF,
+          margin: 0.3,
+        });
+        if (!("error" in plan)) {
+          if (Math.abs(plan.turn1Deg) > 0.01) await loco.turn(plan.turn1Deg);
+          if (plan.distanceM > 0) await loco.walk(plan.distanceM);
+          if (Math.abs(plan.turn2Deg) > 0.01) await loco.turn(plan.turn2Deg);
+          const check = alignInfo();
+          return {
+            ok: check.ok,
+            plan: {
+              distanceM: plan.distanceM,
+              turn1Deg: plan.turn1Deg,
+              turn2Deg: plan.turn2Deg,
+              stand: plan.stand,
+              finalYawDeg: plan.finalYawDeg,
+              reach: plan.reach,
+            },
+            error: check.ok ? undefined : "NOT_ALIGNED",
+          };
+        }
+        if (plan.error === "NO_SUPPORTED_DISTANCE" && plan.direct > plan.reach + 1.89 + 0.2) {
+          const bearing = (Math.atan2(basin.position.x - root.position.x, basin.position.z - root.position.z) * 180) / Math.PI;
+          await loco.turn(signedDeltaDeg(degYaw(), bearing));
+          await loco.walk(1.89);
+          continue;
+        }
+        return { ok: false, plan: null, error: plan.error };
+      }
+      return { ok: false, plan: null, error: "TOO_FAR" };
+    },
+    perform: async (actionId, spec) => {
+      if (!basin.begin(actionId, spec)) return false;
+      const events = (basinCatalog.actions.find((a) => a.id === actionId)?.events ?? []).map((e) => ({ time: e.time, type: e.type }));
+      const ok = await player.perform(actionId, events, (type) => basin.handleEvent(type));
+      basin.finish(ok);
+      return ok;
+    },
+  };
+  loco.basin = basinBridge;
+
   // 每次运行独立执行器：过期 run 的取消不会复活，也不会影响新 run
   let currentExecutor: ActionExecutor | null = null;
   const makeExecutor = () => {
@@ -257,6 +399,7 @@ async function boot() {
     ex.onCancel(() => {
       player.clearGesture();
       player.setWalking(false);
+      basinBridge.cancel();
     });
     currentExecutor = ex;
     return ex;
@@ -273,7 +416,7 @@ async function boot() {
 
   const waitBodySettled = async (timeoutMs = 4000) => {
     const t0 = performance.now();
-    while (player.state.walking || player.state.base !== "idle_stand" || phase !== "idle" || player.state.upper !== null) {
+    while (player.state.walking || player.state.base !== "idle_stand" || phase !== "idle" || player.state.upper !== null || player.performing !== null) {
       if (performance.now() - t0 > timeoutMs) return false;
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -498,6 +641,11 @@ async function boot() {
       errIcon.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
     }
 
+    root.updateMatrixWorld(true);
+    basin.update(dt, player.performanceTime);
+    // 拾取/取下片段收尾时立刻接管持盆姿势，避免 0.15s 淡出把手臂拉回 idle
+    player.setHoldEnabled(basin.mode === "hand" && (!player.performing || player.performanceEnding));
+
     stage.update();
   });
 
@@ -510,9 +658,11 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, client,
+    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, basinBridge, alignInfo,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
+    /** 调试用：不经模型直接跑一套计划（与模型下发走同一条调度路径） */
+    run: (plan: Plan) => runOwned("plan", plan),
   };
 }
 

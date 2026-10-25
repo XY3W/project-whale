@@ -21,10 +21,21 @@ export const CAPABILITIES = [
   { id: "tail", enabled: true, channels: ["tail"], params: { style: { enum: TAILS }, duration_s: { type: "number", min: 0, max: 10 } } },
   { id: "wait", enabled: true, channels: [], params: { duration_s: { type: "number", min: 0, max: 5 } } },
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
-  { id: "pickup", enabled: false, disabledReason: "钢盆资产与拾取动画未接入" },
-  { id: "wear", enabled: false, disabledReason: "戴帽动作与呆毛修正未接入" },
-  { id: "unwear", enabled: false, disabledReason: "取下动作未接入" },
-  { id: "throw", enabled: false, disabledReason: "物理沙盒未验收" },
+  { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
+  { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
+  { id: "wear", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
+  { id: "unwear", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
+  {
+    id: "throw",
+    enabled: true,
+    channels: ["item"],
+    params: {
+      object_id: { enum: ["basin"] },
+      yaw_deg: { type: "number", min: -180, max: 180, note: "相对角色朝向，正=左" },
+      elevation_deg: { type: "number", min: 0, max: 45 },
+      speed_mps: { type: "number", min: 1, max: 6 },
+    },
+  },
   { id: "run", enabled: false, disabledReason: "没有跑步片段" },
   { id: "sit", enabled: false, disabledReason: "没有坐下片段" },
 ];
@@ -107,6 +118,34 @@ export function validateStep(step, id = "step") {
       }
       return { action: "wait", duration_s: step.duration_s };
     }
+    case "walk_to_basin":
+      return { action: "walk_to_basin" };
+    case "pickup":
+    case "wear":
+    case "unwear": {
+      if (step.object_id !== "basin") {
+        throw new ModelError("OBJECT_NOT_FOUND", `${id} 只有 basin 这一件物品`, 0);
+      }
+      return { action: cap.id, object_id: "basin" };
+    }
+    case "throw": {
+      if (step.object_id !== "basin") {
+        throw new ModelError("OBJECT_NOT_FOUND", `${id} 只有 basin 这一件物品`, 0);
+      }
+      const num = (value, min, max, name) => {
+        if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+          throw new ModelError("INVALID_SCHEMA", `${id} ${name} 必须是 [${min},${max}] 的数字`, 0);
+        }
+        return value;
+      };
+      return {
+        action: "throw",
+        object_id: "basin",
+        yaw_deg: num(step.yaw_deg, -180, 180, "yaw_deg"),
+        elevation_deg: num(step.elevation_deg, 0, 45, "elevation_deg"),
+        speed_mps: num(step.speed_mps, 1, 6, "speed_mps"),
+      };
+    }
     case "parallel": {
       const items = Array.isArray(step.items) ? step.items : [];
       if (!items.length || items.length > 3) throw new ModelError("INVALID_SCHEMA", `${id} items 数量必须是 1..3`, 0);
@@ -126,7 +165,7 @@ export function outputContract() {
         if (spec.type === "number") return `${name}:number [${spec.min},${spec.max}]`;
         return `${name}:?`;
       });
-      return `  {"action":"${c.id}", ${props.join(", ")}}`;
+      return props.length ? `  {"action":"${c.id}", ${props.join(", ")}}` : `  {"action":"${c.id}"}`;
     })
     .join("\n");
   return [

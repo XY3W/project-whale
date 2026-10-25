@@ -10,6 +10,7 @@
     "assets": "blender -b --python scripts/build_glb.py -- public/models/character.glb"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
     "three": "^0.180.0",
     "ws": "^8.22.0"
   },

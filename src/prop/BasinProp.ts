@@ -1,0 +1,366 @@
+import * as THREE from "three";
+import type { BasinAction, BasinCatalog, PropMotion } from "./catalog.ts";
+import { sampleCurve } from "./catalog.ts";
+import { BasinPhysics, hullPoints, type Pose } from "./basinPhysics.ts";
+
+export type BasinState = "resting" | "reserved" | "held" | "transferring" | "worn" | "flying";
+
+export interface BasinSnapshot {
+  id: "basin";
+  object_id: "basin";
+  revision: number;
+  holder: "hand" | "head" | null;
+  state: BasinState;
+  position: [number, number, number];
+  upright: boolean;
+  stationary: boolean;
+  available: boolean;
+  /** 飞行中的线速度 m/s 与角速度 rad/s，便于验收落地判定 */
+  speed?: number;
+  spin?: number;
+}
+
+export interface ThrowSpec {
+  /** 相对角色朝向的水平方向（度） */
+  directionDeg: number;
+  /** 出手速度 m/s */
+  speed: number;
+  /** 自转角速度 deg/s */
+  spin: number;
+  /** 出手仰角（度），默认 12 */
+  elevationDeg?: number;
+}
+
+export interface BasinPropOptions {
+  catalog: BasinCatalog;
+  propMotion: PropMotion;
+  /** 角色根节点（盆的世界变换与曲线都以它为参考） */
+  charRoot: THREE.Object3D;
+  /** 盆的 glTF 场景，会被放进内部容器 */
+  scene: THREE.Object3D;
+  bones: Map<string, THREE.Bone>;
+  /** 头顶收拢形态键写入 */
+  setMorph?: (value: number) => void;
+  /** 容器要挂到的场景节点 */
+  parent: THREE.Object3D;
+}
+
+const norm = (name: string) => name.replace(/[^A-Za-z0-9_]/g, "");
+const UPRIGHT_MIN_Y = Math.cos((32 * Math.PI) / 180);
+
+type Mode = "world" | "hand" | "head" | "curve" | "physics";
+
+export class BasinProp {
+  readonly object = new THREE.Group();
+  readonly catalog: BasinCatalog;
+  readonly actions: Map<string, BasinAction>;
+  state: BasinState = "resting";
+  mode: Mode = "world";
+  private revision = 0;
+
+  private readonly charRoot: THREE.Object3D;
+  private readonly motion: PropMotion;
+  private readonly handBone?: THREE.Bone;
+  private readonly headBone?: THREE.Bone;
+  private readonly handAttach: THREE.Matrix4;
+  private readonly headAttach: THREE.Matrix4;
+  private readonly setMorph: (value: number) => void;
+  private readonly physics: BasinPhysics;
+
+  private actionId: string | null = null;
+  private actionsBefore: BasinState = "resting";
+  private restorePose: Pose;
+  private throwSpec: ThrowSpec | null = null;
+  private lastPose: Pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+  private lastCalm = 0;
+  private lastSpeed = 0;
+  private lastSpin = 0;
+
+  private constructor(opts: BasinPropOptions, physics: BasinPhysics) {
+    this.catalog = opts.catalog;
+    this.motion = opts.propMotion;
+    this.charRoot = opts.charRoot;
+    this.physics = physics;
+    this.setMorph = opts.setMorph ?? (() => {});
+    this.object.add(opts.scene);
+    opts.parent.add(this.object);
+
+    this.actions = new Map(opts.catalog.actions.map((a) => [a.id, a]));
+    this.handAttach = new THREE.Matrix4().fromArray(opts.catalog.bindings.hand.matrixColumnMajor);
+    this.headAttach = new THREE.Matrix4().fromArray(opts.catalog.bindings.head.matrixColumnMajor);
+    this.handBone = opts.bones.get(norm(opts.catalog.bindings.hand.bone));
+    this.headBone = opts.bones.get(norm(opts.catalog.bindings.head.bone));
+    if (!this.handBone) console.warn("[basin] 找不到手部挂点骨骼", opts.catalog.bindings.hand.bone);
+    if (!this.headBone) console.warn("[basin] 找不到头部挂点骨骼", opts.catalog.bindings.head.bone);
+
+    const ref = opts.catalog.pickupReference;
+    this.restorePose = {
+      position: new THREE.Vector3(ref.position[0], ref.position[1], ref.position[2]),
+      quaternion: new THREE.Quaternion(ref.quaternion[0], ref.quaternion[1], ref.quaternion[2], ref.quaternion[3]),
+    };
+    this.applyPose(this.restorePose);
+  }
+
+  static async create(opts: BasinPropOptions): Promise<BasinProp> {
+    const hull = hullPoints(opts.scene);
+    const physics = await BasinPhysics.create(hull);
+    return new BasinProp(opts, physics);
+  }
+
+  /** 把“角色根局部坐标”下的静置姿态换成世界坐标（角色移动/转身后仍用这份局部定义） */
+  static toWorld(charRoot: THREE.Object3D, position: number[], quaternion: number[]): Pose {
+    charRoot.updateWorldMatrix(true, false);
+    const local = new THREE.Matrix4().compose(
+      new THREE.Vector3(position[0], position[1], position[2]),
+      new THREE.Quaternion(quaternion[0], quaternion[1], quaternion[2], quaternion[3]),
+      new THREE.Vector3(1, 1, 1),
+    );
+    const world = new THREE.Matrix4().multiplyMatrices(charRoot.matrixWorld, local);
+    const pose: Pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
+    world.decompose(pose.position, pose.quaternion, new THREE.Vector3());
+    return pose;
+  }
+
+  get position(): THREE.Vector3 {
+    return this.object.position;
+  }
+
+  get action(): string | null {
+    return this.actionId;
+  }
+
+  private bump() {
+    this.revision++;
+  }
+
+  private applyPose(pose: Pose) {
+    this.object.position.copy(pose.position);
+    this.object.quaternion.copy(pose.quaternion);
+    this.lastPose.position.copy(pose.position);
+    this.lastPose.quaternion.copy(pose.quaternion);
+  }
+
+  private followBone(bone: THREE.Bone | undefined, matrix: THREE.Matrix4) {
+    if (!bone) return;
+    bone.updateWorldMatrix(true, false);
+    const world = new THREE.Matrix4().multiplyMatrices(bone.matrixWorld, matrix);
+    const scale = new THREE.Vector3();
+    world.decompose(this.object.position, this.object.quaternion, scale);
+    this.lastPose.position.copy(this.object.position);
+    this.lastPose.quaternion.copy(this.object.quaternion);
+  }
+
+  /** 直接把盆放到世界坐标（静置、或物理落地后固化） */
+  placeAt(pose: Pose) {
+    this.mode = "world";
+    this.applyPose(pose);
+    this.bump();
+  }
+
+  /**
+   * 开始一段互动。返回 false 表示当前状态不允许（调用方不应播放动画）。
+   * pickup 在开始时就占位（resting → reserved），避免并行计划重复拾取。
+   */
+  begin(actionId: string, spec?: ThrowSpec): boolean {
+    if (this.actionId) return false;
+    const allowed = this.canStart(actionId);
+    if (!allowed) return false;
+    this.actionId = actionId;
+    this.actionsBefore = this.state;
+    this.restorePose = {
+      position: this.object.position.clone(),
+      quaternion: this.object.quaternion.clone(),
+    };
+    this.throwSpec = spec ?? null;
+    if (actionId === "pickup_basin") this.state = "reserved";
+    return true;
+  }
+
+  canStart(actionId: string): boolean {
+    if (this.actionId) return false;
+    switch (actionId) {
+      case "pickup_basin":
+        return this.state === "resting" && this.upright;
+      case "wear_basin":
+        return this.state === "held";
+      case "unwear_basin":
+        return this.state === "worn";
+      case "throw_basin":
+        // 戴头时不能直接投掷：必须先 unwear，避免盆从头顶飞出
+        return this.state === "held";
+      default:
+        return false;
+    }
+  }
+
+  /** 由动画事件驱动：调用前骨骼世界矩阵必须已经是事件时刻的姿态 */
+  handleEvent(type: string) {
+    const actionId = this.actionId;
+    this.bump();
+    switch (type) {
+      case "grasp":
+        this.state = "held";
+        this.mode = "hand";
+        this.setMorph(0);
+        break;
+      case "hand_release_to_transfer":
+        this.state = "transferring";
+        this.mode = "curve";
+        break;
+      case "head_attach":
+        this.state = "worn";
+        this.mode = "head";
+        this.setMorph(1);
+        break;
+      case "head_release_to_transfer":
+        this.state = "transferring";
+        this.mode = "curve";
+        break;
+      case "hand_catch":
+        this.state = "held";
+        this.mode = "hand";
+        this.setMorph(0);
+        break;
+      case "release":
+        this.launch();
+        break;
+      default:
+        console.warn(`[basin] 未知事件 ${type}（${actionId}）`);
+    }
+  }
+
+  private launch() {
+    const spec = this.throwSpec ?? { directionDeg: 0, speed: 2.6, spin: 120 };
+    const elevation = (spec.elevationDeg ?? 12) * (Math.PI / 180);
+    const yaw = this.charRoot.rotation.y + (spec.directionDeg * Math.PI) / 180;
+    const flat = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const velocity = flat
+      .clone()
+      .multiplyScalar(spec.speed * Math.cos(elevation))
+      .setY(spec.speed * Math.sin(elevation));
+    const axis = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize();
+    const angularVelocity = axis.multiplyScalar((spec.spin * Math.PI) / 180);
+    // 事件时刻的手部姿态是权威起点
+    this.followBone(this.handBone, this.handAttach);
+    this.physics.launch({
+      position: this.object.position.clone(),
+      quaternion: this.object.quaternion.clone(),
+      velocity,
+      angularVelocity,
+    });
+    this.state = "flying";
+    this.mode = "physics";
+    this.lastCalm = 0;
+  }
+
+  /** 每帧调用：必须在骨骼世界矩阵更新之后 */
+  update(dt: number, actionTime: number) {
+    if (this.mode === "hand") {
+      this.followBone(this.handBone, this.handAttach);
+      return;
+    }
+    if (this.mode === "head") {
+      this.followBone(this.headBone, this.headAttach);
+      return;
+    }
+    if (this.mode === "curve") {
+      const samples = this.actionId ? this.motion.clips[this.actionId] : undefined;
+      if (!samples) return;
+      const sample = sampleCurve(samples, actionTime);
+      if (!sample) return;
+      this.charRoot.updateWorldMatrix(true, false);
+      const local = new THREE.Matrix4().compose(
+        new THREE.Vector3(sample.position[0], sample.position[1], sample.position[2]),
+        new THREE.Quaternion(sample.quaternion[0], sample.quaternion[1], sample.quaternion[2], sample.quaternion[3]),
+        new THREE.Vector3(1, 1, 1),
+      );
+      const world = new THREE.Matrix4().multiplyMatrices(this.charRoot.matrixWorld, local);
+      const scale = new THREE.Vector3();
+      world.decompose(this.object.position, this.object.quaternion, scale);
+      this.lastPose.position.copy(this.object.position);
+      this.lastPose.quaternion.copy(this.object.quaternion);
+      this.setMorph(sample.wearMorph);
+      return;
+    }
+    if (this.mode === "physics") {
+      const result = this.physics.step(dt);
+      if (!result) return;
+      this.object.position.copy(result.pose.position);
+      this.object.quaternion.copy(result.pose.quaternion);
+      this.lastPose.position.copy(this.object.position);
+      this.lastPose.quaternion.copy(this.object.quaternion);
+      this.lastCalm = result.calm;
+      this.lastSpeed = result.speed;
+      this.lastSpin = result.spin;
+      if (result.resting) {
+        this.physics.stop();
+        this.mode = "world";
+        this.state = "resting";
+        this.bump();
+      }
+    }
+  }
+
+  /** 动画结束（或取消）时收尾：未到达终态就退回起始状态，不凭空造出第二只盆 */
+  finish(completed: boolean) {
+    const actionId = this.actionId;
+    this.actionId = null;
+    this.throwSpec = null;
+    if (actionId === "throw_basin" && this.mode === "physics") return; // 飞行交回物理系统
+
+    const settled =
+      (actionId === "pickup_basin" && this.state === "held") ||
+      (actionId === "wear_basin" && this.state === "worn") ||
+      (actionId === "unwear_basin" && this.state === "held") ||
+      (actionId === "throw_basin" && this.state === "flying");
+
+    if (completed && settled) {
+      if (actionId === "wear_basin") this.setMorph(1);
+      else this.setMorph(0);
+      return;
+    }
+
+    // 取消/失败：退回动作开始前的状态
+    this.bump();
+    this.state = this.actionsBefore;
+    if (this.actionsBefore === "worn") {
+      this.mode = "head";
+      this.setMorph(1);
+    } else if (this.actionsBefore === "held") {
+      this.mode = "hand";
+      this.setMorph(0);
+    } else {
+      this.mode = "world";
+      this.applyPose(this.restorePose);
+      this.setMorph(0);
+    }
+  }
+
+  get upright(): boolean {
+    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.object.quaternion);
+    return up.y >= UPRIGHT_MIN_Y;
+  }
+
+  get stationary(): boolean {
+    return this.state !== "flying" || this.lastCalm > 0.4;
+  }
+
+  snapshot(): BasinSnapshot {
+    return {
+      id: "basin",
+      object_id: "basin",
+      revision: this.revision,
+      holder: this.mode === "hand" ? "hand" : this.mode === "head" ? "head" : null,
+      state: this.state,
+      position: [
+        Math.round(this.object.position.x * 1000) / 1000,
+        Math.round(this.object.position.y * 1000) / 1000,
+        Math.round(this.object.position.z * 1000) / 1000,
+      ],
+      upright: this.upright,
+      stationary: this.stationary,
+      available: this.state === "resting" && this.upright,
+      ...(this.state === "flying" ? { speed: this.lastSpeed, spin: this.lastSpin } : {}),
+    };
+  }
+}

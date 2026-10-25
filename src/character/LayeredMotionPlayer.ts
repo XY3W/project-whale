@@ -1,6 +1,27 @@
 import * as THREE from 'three';
+import { PoseOverlay } from './PoseOverlay';
 
 type Base = 'idle_stand' | 'walk_start' | 'walk' | 'walk_stop';
+
+export interface PerformanceEvent {
+  time: number;
+  type: string;
+}
+
+type Performance = {
+  name: string;
+  action: THREE.AnimationAction;
+  events: PerformanceEvent[];
+  next: number;
+  onEvent: (type: string) => void;
+  ending: boolean;
+  cancelled: boolean;
+  fade: number;
+  resolve: (completed: boolean) => void;
+};
+
+const PERF_FADE = 0.15;
+
 /** Baked poses only. Locomotion transitions are authored; no runtime bone solving. */
 export class LayeredMotionPlayer {
   readonly mixer: THREE.AnimationMixer;
@@ -16,11 +37,14 @@ export class LayeredMotionPlayer {
   private tailMix = 0;
   private rate = 1;
   private cyclesLeft = -1;
+  private perf: Performance | null = null;
+  private hold: PoseOverlay | null = null;
+  private holdTime = 0;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
   movementDelta = 0;
   get speed() { return this.rate; }
   set speed(value: number) { this.rate = THREE.MathUtils.clamp(value, .75, 1.25); }
-  constructor(root: THREE.Object3D, clips: THREE.AnimationClip[]) {
+  constructor(private readonly root: THREE.Object3D, clips: THREE.AnimationClip[]) {
     this.mixer = new THREE.AnimationMixer(root);
     for (const clip of clips) {
       const a = this.mixer.clipAction(clip); a.setEffectiveWeight(0); a.play();
@@ -38,6 +62,7 @@ export class LayeredMotionPlayer {
   }
   /** 精确走：只接受 0.09 + 0.18n 米，返回是否接受 */
   walkDistance(meters: number): boolean {
+    if (this.perf) return false;
     const n = Math.round((meters - 0.09) / 0.18);
     if (!Number.isFinite(meters) || n < 0 || n > 10) return false;
     if (Math.abs(0.09 + 0.18 * n - meters) > 1e-6) return false;
@@ -49,11 +74,13 @@ export class LayeredMotionPlayer {
   }
 
   setWalking(value: boolean) {
+    if (this.perf) return;
     this.walking = value;
     if (value && this.base === 'idle_stand') this.setBase('walk_start');
     // Stop at the next left-foot landing, then use the authored gathering step.
   }
   gesture(name: string) {
+    if (this.perf) return;
     if (!['greet','notice','nod','look_left','look_right','think'].includes(name)) throw new Error('Unknown upper action');
     if (this.upper && this.upper !== name) { this.queuedUpper=name; this.upperEnding=true; return; }
     if (this.upper === name) return;
@@ -61,12 +88,70 @@ export class LayeredMotionPlayer {
   }
   clearGesture() { this.queuedUpper=null; this.upperEnding=true; }
   setTail(big: boolean) { this.tail=big?'tail_swish':'tail_idle'; }
-  get state() { return {walking:this.walking,base:this.base,walkWeight:this.base==='idle_stand'?0:1,upper:this.upper,upperWeight:this.upperWeight,tail:this.tail}; }
-  private weights() {
+
+  /**
+   * 播放一次性全身互动片段（拾取/戴上/取下/投掷）。
+   * 片段独占身体骨骼；事件在精确时刻触发，掉帧跨过事件也会补发一次。
+   */
+  perform(name: string, events: PerformanceEvent[], onEvent: (type: string) => void): Promise<boolean> {
+    const action = this.actions.get(name);
+    if (!action) return Promise.resolve(false);
+    if (this.perf) return Promise.resolve(false);
+    this.clearGesture();
+    this.walking = false;
     for (const base of ['idle_stand','walk_start','walk','walk_stop'] as Base[]) {
-      const w=base===this.base?1:0;
+      for (const suffix of ['lower','upperBase']) this.get(`${base}.${suffix}`).setEffectiveWeight(0);
+    }
+    action.reset();
+    action.setLoop(THREE.LoopOnce, 1);
+    action.clampWhenFinished = true;
+    action.setEffectiveWeight(1);
+    action.setEffectiveTimeScale(1);
+    action.play();
+    const sorted = [...events].sort((a, b) => a.time - b.time);
+    return new Promise<boolean>((resolve) => {
+      this.perf = { name, action, events: sorted, next: 0, onEvent, ending: false, cancelled: false, fade: 1, resolve };
+      this.weights();
+      this.mixer.update(0);
+    });
+  }
+
+  /** 取消当前互动片段：淡出后按未完成收尾 */
+  cancelPerformance(): boolean {
+    if (!this.perf || this.perf.ending) return false;
+    this.perf.cancelled = true;
+    this.perf.ending = true;
+    return true;
+  }
+
+  get performing(): string | null { return this.perf?.name ?? null; }
+  get performanceTime(): number { return this.perf?.action.time ?? 0; }
+  get performanceEnding(): boolean { return this.perf?.ending ?? false; }
+
+  /** 持盆循环姿态：按绝对姿势覆盖右臂骨骼（在 mixer 求值之后写入） */
+  setHoldClip(clip: THREE.AnimationClip | null) {
+    this.hold = clip ? new PoseOverlay(this.root, clip) : null;
+    this.holdTime = 0;
+  }
+  get holdTrackCount(): number { return this.hold?.trackCount ?? 0; }
+  setHoldEnabled(enabled: boolean) {
+    if (!enabled) this.holdTime = 0;
+    if (this.hold) this.holdEnabled = enabled;
+  }
+  holdEnabled = false;
+
+  get state() { return {walking:this.walking,base:this.base,walkWeight:this.base==='idle_stand'?0:1,upper:this.upper,upperWeight:this.upperWeight,tail:this.tail,performing:this.perf?.name ?? null}; }
+  private weights() {
+    const perf = this.perf;
+    for (const base of ['idle_stand','walk_start','walk','walk_stop'] as Base[]) {
+      let w = base === this.base ? 1 : 0;
+      if (perf) w *= perf.ending ? 1 - perf.fade : 0;
       this.get(`${base}.lower`).setEffectiveWeight(w).setEffectiveTimeScale(base==='idle_stand'?1:this.rate);
       this.get(`${base}.upperBase`).setEffectiveWeight(w*(1-this.upperWeight)).setEffectiveTimeScale(base==='idle_stand'?1:this.rate);
+    }
+    if (perf) {
+      perf.action.setEffectiveWeight(perf.ending ? perf.fade : 1);
+      if (this.upper) { this.get(this.upper).setEffectiveWeight(0); }
     }
     this.get('tail_idle').setEffectiveWeight(1-this.tailMix);this.get('tail_swish').setEffectiveWeight(this.tailMix);
   }
@@ -83,8 +168,57 @@ export class LayeredMotionPlayer {
     const distance=(time:number)=>{const u=THREE.MathUtils.clamp(time/.8,0,1);return this.base==='walk_start'?.045*u*u:this.base==='walk_stop'?.045*(2*u-u*u):this.base==='walk'?.1125*time:0;};
     this.movementDelta+=distance(this.baseTime)-distance(old);this.weights();this.mixer.update(dt);
   }
+
+  /** 互动片段推进：事件前先求值到事件时刻，再继续吃掉本帧剩余时间 */
+  private advancePerformance(dt: number) {
+    const perf = this.perf!;
+    let remaining = Math.max(0, dt);
+    if (!perf.ending) {
+      const duration = perf.action.getClip().duration;
+      let guard = 0;
+      while (remaining > 1e-9 && guard++ < 32) {
+        const event = perf.events[perf.next];
+        const until = event ? Math.max(0, event.time - perf.action.time) : remaining;
+        const step = Math.min(remaining, until);
+        if (step > 1e-9) { this.mixer.update(step); remaining -= step; }
+        if (event && perf.action.time >= event.time - 1e-6) {
+          perf.next++;
+          perf.onEvent(event.type);
+          continue;
+        }
+        if (step <= 1e-9) break;
+        if (perf.action.time >= duration - 1e-6) break;
+      }
+      if (perf.action.time >= perf.action.getClip().duration - 1e-6) {
+        perf.action.paused = true;
+        perf.ending = true;
+      }
+    } else {
+      this.mixer.update(remaining);
+    }
+    if (perf.ending) {
+      perf.fade = Math.max(0, perf.fade - dt / PERF_FADE);
+      if (perf.fade <= 1e-9) {
+        const { resolve, cancelled } = perf;
+        perf.action.setEffectiveWeight(0);
+        perf.action.paused = false;
+        this.perf = null;
+        this.weights();
+        this.mixer.update(0);
+        resolve(!cancelled);
+      }
+    }
+    this.weights();
+    if (this.hold) {
+      this.holdTime += dt;
+      if (this.holdEnabled) this.hold.apply(this.holdTime);
+    }
+  }
+
   update(dt: number) {
-    this.movementDelta=0;let remaining=Math.max(0,dt);
+    this.movementDelta=0;
+    if (this.perf) { this.advancePerformance(dt); return; }
+    let remaining=Math.max(0,dt);
     while(remaining>1e-9){
       const duration=this.base==='walk'?1.6:this.base==='idle_stand'?Infinity:.8;
       const until=(duration-this.baseTime)/this.rate;
@@ -99,6 +233,10 @@ export class LayeredMotionPlayer {
         else this.setBase('walk_stop');
         this.weights();this.mixer.update(0);
       }
+    }
+    if (this.hold && this.holdEnabled) {
+      this.holdTime += dt;
+      this.hold.apply(this.holdTime);
     }
   }
 }

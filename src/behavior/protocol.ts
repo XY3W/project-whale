@@ -14,7 +14,11 @@ export type ReasonCode =
   | "CANCELLED"
   | "TIMEOUT"
   | "DISPLACEMENT_MISMATCH"
-  | "ANGLE_MISMATCH";
+  | "ANGLE_MISMATCH"
+  | "OBJECT_NOT_FOUND"
+  | "OBJECT_UNAVAILABLE"
+  | "NOT_ALIGNED"
+  | "BASIN_STATE_MISMATCH";
 
 export interface StepResult {
   stepId: string;
@@ -40,6 +44,11 @@ export type Step =
   | { action: "play"; action_id: string }
   | { action: "tail"; style: "tail_idle" | "tail_swish"; duration_s: number }
   | { action: "wait"; duration_s: number }
+  | { action: "walk_to_basin" }
+  | { action: "pickup"; object_id: string }
+  | { action: "wear"; object_id: string }
+  | { action: "unwear"; object_id: string }
+  | { action: "throw"; object_id: string; yaw_deg: number; elevation_deg: number; speed_mps: number }
   | { action: "parallel"; items: Step[] };
 
 export interface Plan {
@@ -57,4 +66,53 @@ export interface Locomotion {
   sleep(ms: number): Promise<void>;
   /** 可选：身体是否仍在运动，用于 stopped 证据 */
   isMoving?(): boolean;
+  /** 可选：钢盆互动能力。未接线时相关步骤返回 CAPABILITY_DISABLED。 */
+  basin?: BasinBridge;
+}
+
+export interface BasinView {
+  id: string;
+  object_id?: string;
+  revision?: number;
+  state: string;
+  position: [number, number, number];
+  upright: boolean;
+  stationary: boolean;
+  available: boolean;
+}
+
+export interface BasinAlignment {
+  /** 站位到“正确半径”的径向误差，米 */
+  distanceError: number;
+  /** 朝向误差，度 */
+  yawErrorDeg: number;
+  ok: boolean;
+}
+
+export interface ThrowRequest {
+  directionDeg: number;
+  speed: number;
+  spin: number;
+  elevationDeg?: number;
+}
+
+export interface BasinBridge {
+  snapshot(): BasinView;
+  alignment(): BasinAlignment;
+  /** 走到拾取站位并对准朝向；返回是否到位 */
+  align(): Promise<{ ok: boolean; plan: ApproachSummary | null; error?: string }>;
+  /** 播放互动片段，返回是否到达终态 */
+  perform(actionId: string, spec?: ThrowRequest): Promise<boolean>;
+  /** 当前状态能否开始该动作 */
+  canStart(actionId: string): boolean;
+  cancel(): void;
+}
+
+export interface ApproachSummary {
+  distanceM: number;
+  turn1Deg: number;
+  turn2Deg: number;
+  stand: { x: number; z: number };
+  finalYawDeg: number;
+  reach: number;
 }

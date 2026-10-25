@@ -267,3 +267,91 @@ test("±180 方向符号正确（-180 不被归一成 +180）", async () => {
   assert.equal(signedDeltaDeg(0, -180), -180);
   assert.equal(signedDeltaDeg(0, 180), 180);
 });
+
+// ---- 钢盆互动：执行器前置条件与终态验证 ----
+function makeBasinLoco() {
+  const { loco, pos } = makeLoco(0);
+  const view = { id: "basin", object_id: "basin", revision: 1, holder: null, state: "resting", position: [0, 0.13, 0], upright: true, stationary: true, available: true };
+  const calls = [];
+  let alignment = { distanceError: 0.005, yawErrorDeg: 0.4, ok: true };
+  loco.basin = {
+    snapshot: () => ({ ...view }),
+    alignment: () => alignment,
+    align: async () => {
+      calls.push("align");
+      pos.x = 0.2;
+      return { ok: true, plan: { distanceM: 0.27, turn1Deg: 0, turn2Deg: 0, stand: { x: 0.2, z: 0 }, finalYawDeg: 0, reach: 0.585 } };
+    },
+    canStart: () => true,
+    cancel: () => calls.push("cancel"),
+    perform: async (id) => {
+      calls.push(id);
+      if (id === "pickup_basin") { view.state = "held"; view.holder = "hand"; view.available = false; }
+      if (id === "wear_basin") { view.state = "worn"; view.holder = "head"; }
+      if (id === "unwear_basin") { view.state = "held"; view.holder = "hand"; }
+      if (id === "throw_basin") { view.state = "flying"; view.holder = null; }
+      view.revision++;
+      return true;
+    },
+  };
+  return { loco, view, calls, setAlignment: (a) => { alignment = a; } };
+}
+
+test("钢盆：未对准时 pickup 失败且不播放动画", async () => {
+  const { loco, calls, setAlignment } = makeBasinLoco();
+  setAlignment({ distanceError: 0.15, yawErrorDeg: 0.2, ok: false });
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "pickup", object_id: "basin" }] });
+  assert.equal(result.status, "failed");
+  assert.equal(result.steps[0].reasonCode, "NOT_ALIGNED");
+  assert.ok(!calls.includes("pickup_basin"), "没对准就不能播拾取动画");
+});
+
+test("钢盆：walk_to_basin → pickup → wear → unwear → throw 全链路", async () => {
+  const { loco, view, calls } = makeBasinLoco();
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({
+    steps: [
+      { action: "walk_to_basin" },
+      { action: "pickup", object_id: "basin" },
+      { action: "wear", object_id: "basin" },
+      { action: "unwear", object_id: "basin" },
+      { action: "throw", object_id: "basin", yaw_deg: 0, elevation_deg: 10, speed_mps: 3 },
+    ],
+  });
+  assert.equal(result.status, "completed");
+  assert.deepEqual(calls, ["align", "pickup_basin", "wear_basin", "unwear_basin", "throw_basin"]);
+  assert.equal(result.steps[4].actual.basin.state, "flying");
+  assert.equal(view.state, "flying");
+});
+
+test("钢盆：状态不匹配时拒绝执行后续动作", async () => {
+  const { loco } = makeBasinLoco();
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "wear", object_id: "basin" }] });
+  assert.equal(result.status, "failed");
+  assert.equal(result.steps[0].reasonCode, "BASIN_STATE_MISMATCH");
+});
+
+test("钢盆：落地后 state 变 resting，throw 仍算成功", async () => {
+  const { loco, view } = makeBasinLoco();
+  view.state = "held";
+  const original = loco.basin.perform;
+  loco.basin.perform = async (id) => {
+    const ok = await original(id);
+    if (id === "throw_basin") { view.state = "resting"; view.upright = true; view.available = true; }
+    return ok;
+  };
+  loco.basin.snapshot = () => ({ ...view });
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "throw", object_id: "basin", yaw_deg: 0, elevation_deg: 0, speed_mps: 2 }] });
+  assert.equal(result.status, "completed");
+  assert.equal(result.steps[0].actual.basin.state, "resting");
+});
+
+test("钢盆：parallel 里不允许放物品动作", async () => {
+  const { loco } = makeBasinLoco();
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const result = await ex.run({ steps: [{ action: "parallel", items: [{ action: "turn", angle_deg: 10 }, { action: "pickup", object_id: "basin" }] }] });
+  assert.equal(result.status, "failed");
+});

@@ -3,6 +3,7 @@ import { cyclesFor, nearestSupported, round, supportedDistances } from "./distan
 
 const PLAYABLE = new Set(["greet", "notice", "nod", "look_left", "look_right", "think"]);
 const TAIL_STYLES = new Set(["tail_idle", "tail_swish"]);
+const BASIN_ACTIONS = new Set(["walk_to_basin", "pickup", "wear", "unwear", "throw"]);
 const MAX_STEPS = 6;
 const MAX_PARALLEL = 3;
 const MAX_WAIT_S = 5;
@@ -255,6 +256,96 @@ export class ActionExecutor {
         return done("succeeded", { duration_s: dur }, "OK");
       }
 
+      case "walk_to_basin": {
+        const bridge = this.loco.basin;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const view = bridge.snapshot();
+        if (view.state !== "resting") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        if (!view.upright) return done("failed", { basin: view }, "OBJECT_UNAVAILABLE");
+        // 动画按帧推进而非墙钟：低帧率机器上一段 3 秒的片段可能跑更久，
+        // 这里只做“卡死”兜底，真正的完成判定由片段自身的事件与结束回调给出。
+        const raced = await this.withTimeout(bridge.align(), 90000);
+        if (!raced.ok) return done("timeout", { alignment: bridge.alignment() }, "TIMEOUT");
+        const outcome = raced.value;
+        if (this.cancelled) return done("cancelled", { alignment: bridge.alignment() }, "CANCELLED");
+        if (!outcome.ok) {
+          return done("failed", { plan: outcome.plan, alignment: bridge.alignment(), error: outcome.error }, outcome.error === "NOT_ALIGNED" ? "NOT_ALIGNED" : "PRECONDITION_FAILED");
+        }
+        return done("succeeded", { plan: outcome.plan, alignment: bridge.alignment() }, "OK");
+      }
+
+      case "pickup": {
+        const bridge = this.loco.basin;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        if (step.object_id !== "basin") return done("unsupported", { object_id: step.object_id }, "OBJECT_NOT_FOUND");
+        const view = bridge.snapshot();
+        if (view.state !== "resting") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        if (!view.available) return done("failed", { basin: view }, "OBJECT_UNAVAILABLE");
+        const alignment = bridge.alignment();
+        if (!alignment.ok) return done("failed", { alignment }, "NOT_ALIGNED");
+        const raced = await this.withTimeout(bridge.perform("pickup_basin"), 60000);
+        const after = bridge.snapshot();
+        if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
+        if (!raced.value || after.state !== "held") return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
+        return done("succeeded", { basin: after }, "OK");
+      }
+
+      case "wear": {
+        const bridge = this.loco.basin;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        if (step.object_id !== "basin") return done("unsupported", { object_id: step.object_id }, "OBJECT_NOT_FOUND");
+        const view = bridge.snapshot();
+        if (view.state !== "held") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        const raced = await this.withTimeout(bridge.perform("wear_basin"), 60000);
+        const after = bridge.snapshot();
+        if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
+        if (!raced.value || after.state !== "worn") return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
+        return done("succeeded", { basin: after }, "OK");
+      }
+
+      case "unwear": {
+        const bridge = this.loco.basin;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        if (step.object_id !== "basin") return done("unsupported", { object_id: step.object_id }, "OBJECT_NOT_FOUND");
+        const view = bridge.snapshot();
+        if (view.state !== "worn") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        const raced = await this.withTimeout(bridge.perform("unwear_basin"), 60000);
+        const after = bridge.snapshot();
+        if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
+        if (!raced.value || after.state !== "held") return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
+        return done("succeeded", { basin: after }, "OK");
+      }
+
+      case "throw": {
+        const bridge = this.loco.basin;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        if (step.object_id !== "basin") return done("unsupported", { object_id: step.object_id }, "OBJECT_NOT_FOUND");
+        const direction = step.yaw_deg;
+        const speed = step.speed_mps;
+        const elevation = step.elevation_deg;
+        if (typeof elevation !== "number" || !Number.isFinite(elevation) || elevation < 0 || elevation > 45) {
+          return done("failed", null, "PRECONDITION_FAILED");
+        }
+        if (typeof direction !== "number" || !Number.isFinite(direction) || Math.abs(direction) > 180) {
+          return done("failed", null, "PRECONDITION_FAILED");
+        }
+        if (typeof speed !== "number" || !Number.isFinite(speed) || speed < 1 || speed > 6) {
+          return done("failed", null, "PRECONDITION_FAILED");
+        }
+        const view = bridge.snapshot();
+        if (view.state !== "held") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        const raced = await this.withTimeout(bridge.perform("throw_basin", { directionDeg: direction, speed, spin: 180, elevationDeg: elevation }), 60000);
+        const after = bridge.snapshot();
+        if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
+        if (!raced.value || (after.state !== "flying" && after.state !== "resting")) {
+          return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
+        }
+        return done("succeeded", { basin: after }, "OK");
+      }
+
       case "parallel": {
         const items = step.items ?? [];
         if (items.length > MAX_PARALLEL || items.some((i) => i.action === "parallel")) {
@@ -264,7 +355,8 @@ export class ActionExecutor {
         const hasMove = channels.filter((c) => c === "turn" || c === "walk").length > 1;
         const hasPlay = channels.filter((c) => c === "play").length > 1;
         const hasTail = channels.filter((c) => c === "tail").length > 1;
-        if (hasMove || hasPlay || hasTail) {
+        const hasBasin = channels.some((c) => BASIN_ACTIONS.has(c));
+        if (hasMove || hasPlay || hasTail || hasBasin) {
           return done("failed", null, "PRECONDITION_FAILED");
         }
         const results = await Promise.all(items.map((item, idx) => this.runStep(`${stepId}.${idx + 1}`, item)));
