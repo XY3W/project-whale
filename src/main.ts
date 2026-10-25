@@ -605,6 +605,8 @@ async function boot() {
         const e = u * u * (3 - 2 * u);
         root.rotation.y = turn.from + (turn.to - turn.from) * e;
         if (u >= 1) {
+          // 朝向归一化到 (-π, π]：累计多次转向后避免出现 400° 之类的数值
+          root.rotation.y = Math.atan2(Math.sin(root.rotation.y), Math.cos(root.rotation.y));
           phase = "idle";
           const next = postTurn;
           postTurn = null;
