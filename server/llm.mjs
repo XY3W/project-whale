@@ -19,15 +19,25 @@ export { describeCapabilities, describeDisabled } from "./capabilities.mjs";
 const API = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/chat/completions";
 const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
 /**
- * 思考模式开关。默认关闭：决策只需要结构化 JSON，开思考主要增加延迟与 token。
- * 打开方式：.env 里加 DEEPSEEK_THINKING=1（或 DEEPSEEK_MODEL=deepseek-reasoner）。
+ * 思考模式。DEEPSEEK_THINKING 取 enabled / adaptive / disabled（1|true|on|yes 等同 enabled）。
+ * 思考强度用 DEEPSEEK_REASONING_EFFORT 调，服务端接受的档位：
+ * none / minimal / low / medium / high / xhigh / ultra / max。
  * 思考 token 计入 max_tokens，所以打开时同步提高上限与超时。
  */
-const THINKING = /^(1|true|on|yes)$/i.test(process.env.DEEPSEEK_THINKING ?? "");
+const THINKING_RAW = (process.env.DEEPSEEK_THINKING ?? "").trim().toLowerCase();
+const THINKING_TYPE = ["enabled", "adaptive", "disabled"].includes(THINKING_RAW)
+  ? THINKING_RAW
+  : /^(1|true|on|yes)$/.test(THINKING_RAW) ? "enabled" : "disabled";
+const THINKING = THINKING_TYPE !== "disabled";
+const EFFORT_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "ultra", "max"];
+const EFFORT_RAW = (process.env.DEEPSEEK_REASONING_EFFORT ?? "").trim().toLowerCase();
+const REASONING_EFFORT = EFFORT_LEVELS.includes(EFFORT_RAW) ? EFFORT_RAW : null;
+if (EFFORT_RAW && !REASONING_EFFORT) console.warn(`[llm] 忽略未知的 DEEPSEEK_REASONING_EFFORT=${EFFORT_RAW}`);
 const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS ?? (THINKING ? 2400 : 800));
 const TIMEOUT_MS = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? (THINKING ? 90_000 : 30_000));
 
 export const thinkingEnabled = () => THINKING;
+export const thinkingConfig = () => ({ type: THINKING_TYPE, effort: REASONING_EFFORT });
 
 export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
@@ -71,7 +81,12 @@ export async function callModel(messages) {
         response_format: { type: "json_object" },
         max_tokens: MAX_TOKENS,
         // 思考模式下 temperature 不生效，部分模型还会报参数冲突，就不传了
-        ...(THINKING ? { thinking: { type: "enabled" } } : { temperature: 0.6 }),
+        ...(THINKING
+          ? {
+              thinking: { type: THINKING_TYPE },
+              ...(REASONING_EFFORT ? { reasoning_effort: REASONING_EFFORT } : {}),
+            }
+          : { temperature: 0.6 }),
       }),
       signal: ctl.signal,
     });
@@ -93,7 +108,9 @@ export async function callModel(messages) {
   if (THINKING) {
     const reasoning = choice?.message?.reasoning_content;
     const reasoningTokens = data?.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
-    console.log(`[llm] thinking on · reasoning_tokens=${reasoningTokens} · ${String(reasoning ?? "").slice(0, 80).replace(/\s+/g, " ")}`);
+    console.log(
+      `[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${reasoningTokens} · ${String(reasoning ?? "").slice(0, 80).replace(/\s+/g, " ")}`,
+    );
   }
   if (typeof content !== "string") throw new ModelError("EMPTY", "模型返回空内容", 0);
   let parsed;
