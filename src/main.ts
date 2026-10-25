@@ -163,7 +163,7 @@ async function boot() {
     destination = null;
     // 任务执行中点击角色：先取消旧计划，再由统一入口接管
     if (motionOwner === "plan") {
-      executor.cancel();
+      currentExecutor?.cancel();
       motionEpoch++;
     }
     if (phase === "walking" || player.state.walking) {
@@ -248,11 +248,17 @@ async function boot() {
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
     isMoving: () => player.state.walking || phase !== "idle",
   };
-  const executor = new ActionExecutor(loco, { half: 4, margin: 0.3 });
-  executor.onCancel(() => {
-    player.clearGesture();
-    player.setWalking(false);
-  });
+  // 每次运行独立执行器：过期 run 的取消不会复活，也不会影响新 run
+  let currentExecutor: ActionExecutor | null = null;
+  const makeExecutor = () => {
+    const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+    ex.onCancel(() => {
+      player.clearGesture();
+      player.setWalking(false);
+    });
+    currentExecutor = ex;
+    return ex;
+  };
   let roamBusy = false;
   let planChain: Promise<void> = Promise.resolve();
   let errorActive = false;
@@ -263,9 +269,9 @@ async function boot() {
   let motionOwner: Owner = "none";
   let motionEpoch = 0;
 
-  const waitBodySettled = async (timeoutMs = 3000) => {
+  const waitBodySettled = async (timeoutMs = 4000) => {
     const t0 = performance.now();
-    while (player.state.walking || player.state.base !== "idle_stand") {
+    while (player.state.walking || player.state.base !== "idle_stand" || phase !== "idle" || player.state.upper !== null) {
       if (performance.now() - t0 > timeoutMs) return false;
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -274,16 +280,21 @@ async function boot() {
 
   const runOwned = async (owner: Owner, plan: Plan) => {
     if (motionOwner !== "none") {
-      executor.cancel();
+      currentExecutor?.cancel();
       player.clearGesture();
       player.setWalking(false);
-      await waitBodySettled();
+      const settled = await waitBodySettled();
+      if (!settled) {
+        console.warn("[motion] body did not settle, refusing new run");
+        return null; // 停不下来就不接管，避免叠加动作
+      }
     }
     motionOwner = owner;
     const epoch = ++motionEpoch;
+    const ex = makeExecutor();
     try {
-      const result = await executor.run(plan);
-      return epoch === motionEpoch ? result : null; // 过期结果不回报
+      const result = await ex.run(plan);
+      return epoch === motionEpoch && currentExecutor === ex ? result : null; // 过期结果不回报
     } finally {
       if (epoch === motionEpoch) motionOwner = "none";
     }
@@ -320,7 +331,7 @@ async function boot() {
       if (code !== "BUSY") setError(true);
     },
     onCancel: () => {
-      executor.cancel();
+      currentExecutor?.cancel();
       chat.setThinking(false);
     },
     onReadOnly: (ro) => {
@@ -341,7 +352,7 @@ async function boot() {
         chat.setThinking(false);
         taskActive = false;
         errorActive = true;
-        executor.cancel();
+        currentExecutor?.cancel();
         player.setWalking(false);
         setError(true);
       } else {
@@ -487,7 +498,8 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, executor, client,
+    stage, root, player, meshes, chat, requestMove, enterChat, client,
+    get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
   };
 }
