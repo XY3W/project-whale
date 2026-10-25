@@ -13,9 +13,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
-import { contextBudget } from "./context.mjs";
+import { contextBudget, estimateRequest } from "./context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
-import { CAPABILITY_VERSION, ModelError, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
+import { CAPABILITY_VERSION, ModelError, SYSTEM_PROMPT, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
 const ROOT = path.resolve(process.cwd(), "dist");
@@ -355,8 +355,7 @@ wss.on("connection", (ws, req) => {
             return;
           }
           try {
-            const out = await callModel(
-              planningMessages({
+            const planningContext = {
                 taskId,
                 userMessage: msg.text,
                 characterState: character,
@@ -364,11 +363,24 @@ wss.on("connection", (ws, req) => {
                 capabilities: describeCapabilities(),
                 disabledCapabilities: describeDisabled(),
                 capabilityVersion: CAPABILITY_VERSION,
-                ...contextBudget({ history: session.history }),
-                memory: confirmedMemories(storeSeed.memories),
-                clientSnapshot: msg.snapshot ?? null,
-              }),
-            );
+              ...contextBudget({ history: session.history }),
+              memory: confirmedMemories(storeSeed.memories),
+              clientSnapshot: msg.snapshot ?? null,
+            };
+            const budget = estimateRequest({
+              system: SYSTEM_PROMPT,
+              capabilities: describeCapabilities(),
+              context: planningContext,
+            });
+            if (!budget.ok) {
+              send(ws, "error", {
+                code: "CONTEXT_TOO_LARGE",
+                message: `请求估算 ${budget.total} tokens，超过 ${budget.maxInputTokens} 上限`,
+              });
+              endTask("context too large");
+              return;
+            }
+            const out = await callModel(planningMessages(planningContext));
             applyOutput(ws, task, out);
           } catch (err) {
             fail(ws, task, err);

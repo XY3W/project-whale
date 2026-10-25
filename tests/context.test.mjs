@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildHistory, estimateTokens } from "../server/context.mjs";
+import { buildHistory, estimateRequest, estimateTokens } from "../server/context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "../server/memory.mjs";
 
 test("上下文：预算内保留最近消息，丢弃最旧", () => {
@@ -41,4 +41,13 @@ test("记忆：无来源拒绝，confirmed 过滤", () => {
   // 旧字段名进来自动映射成契约字段
   const legacy = validateProposals([{ key: "nickname", value: "小乔" }], "m2");
   assert.equal(legacy.accepted[0].key, "preferred_name");
+});
+
+test("整轮预算：system+能力+上下文合计，超限拒绝", () => {
+  const ok = estimateRequest({ system: "x".repeat(100), capabilities: [{ id: "walk" }], context: { a: 1 }, maxInputTokens: 1000 });
+  assert.equal(ok.ok, true);
+  assert.ok(ok.parts.system > 0);
+  const big = estimateRequest({ system: "x".repeat(20000), capabilities: [], context: {}, maxInputTokens: 1000 });
+  assert.equal(big.ok, false);
+  assert.ok(big.total > big.maxInputTokens);
 });

@@ -25,3 +25,14 @@ export function contextBudget({ history, budgetTokens = 1200 } = {}) {
     estimator: "chars*0.6",
   };
 }
+
+/** 整轮请求预算：system + 能力 + 上下文（含历史）一起估算，超限拒绝执行 */
+export function estimateRequest({ system = "", capabilities = [], context = {}, maxInputTokens = 8000 } = {}) {
+  const parts = {
+    system: estimateTokens(system),
+    capabilities: estimateTokens(JSON.stringify(capabilities)),
+    context: estimateTokens(JSON.stringify(context)),
+  };
+  const total = parts.system + parts.capabilities + parts.context;
+  return { total, parts, maxInputTokens, ok: total <= maxInputTokens, estimator: "chars*0.6" };
+}
