@@ -12,7 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer } from "ws";
-import { CAPABILITIES, ModelError, callModel, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
+import { CAPABILITY_VERSION, ModelError, callModel, describeCapabilities, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
 const ROOT = path.resolve(process.cwd(), "dist");
@@ -286,7 +286,8 @@ wss.on("connection", (ws) => {
                 userMessage: msg.text,
                 characterState: character,
                 world: { walkableHalf: 3.7, coordinateSystem: "glTF +Y up, +Z forward" },
-                capabilities: CAPABILITIES,
+                capabilities: describeCapabilities(),
+                capabilityVersion: CAPABILITY_VERSION,
                 history: session.history.slice(-8),
                 clientSnapshot: msg.snapshot ?? null,
               }),
@@ -356,7 +357,8 @@ wss.on("connection", (ws) => {
                 turn: task.rounds,
                 executionReport: msg.result,
                 characterState: character,
-                capabilities: CAPABILITIES,
+                capabilities: describeCapabilities(),
+                capabilityVersion: CAPABILITY_VERSION,
                 history: session.history.slice(-8),
               }),
             );
