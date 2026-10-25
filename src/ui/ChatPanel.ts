@@ -148,25 +148,25 @@ export class ChatPanel {
 }
 
 const CSS = `
-.chat-panel{position:fixed;right:16px;top:16px;bottom:16px;width:320px;display:none;flex-direction:column;
+.chat-panel{position:fixed;right:16px;top:16px;bottom:16px;width:min(440px,92vw);display:none;flex-direction:column;
   background:rgba(12,18,30,.92);border:1px solid rgba(120,160,230,.25);border-radius:12px;
-  color:#dbe7ff;font:13px/1.5 system-ui,sans-serif;backdrop-filter:blur(8px);z-index:20;overflow:hidden}
+  color:#dbe7ff;font:15px/1.6 system-ui,sans-serif;backdrop-filter:blur(8px);z-index:20;overflow:hidden}
 .chat-panel.open{display:flex}
 .chat-head{display:flex;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(120,160,230,.18);
-  font-size:12px;letter-spacing:.08em;color:#8fa8cc}
+  font-size:13px;letter-spacing:.08em;color:#8fa8cc}
 .chat-state{color:#5f7a9e;margin-left:auto}
 .chat-close{background:none;border:0;color:#8fa8cc;font:18px/1 system-ui,sans-serif;cursor:pointer;padding:0 2px}
 .chat-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
-.chat-msg{max-width:88%;padding:8px 10px;border-radius:10px;white-space:pre-wrap;word-break:break-word}
+.chat-msg{max-width:90%;padding:10px 12px;border-radius:10px;font-size:15px;white-space:pre-wrap;word-break:break-word}
 .chat-user{align-self:flex-end;background:rgba(70,110,190,.35);border:1px solid rgba(120,160,230,.3)}
 .chat-whale{align-self:flex-start;background:rgba(30,45,70,.9);border:1px solid rgba(120,160,230,.16)}
-.chat-status{display:none;padding:8px 12px;color:#ff8d8d;font-size:12px}
+.chat-status{display:none;padding:8px 12px;color:#ff8d8d;font-size:13px}
 .chat-status.show{display:block}
 .chat-form{display:flex;gap:8px;padding:10px;border-top:1px solid rgba(120,160,230,.18)}
 .chat-form textarea{flex:1;resize:none;background:rgba(20,30,48,.9);border:1px solid rgba(120,160,230,.25);
-  border-radius:8px;color:#e6efff;padding:8px;font:inherit;outline:none}
+  border-radius:8px;color:#e6efff;padding:10px;font:15px/1.6 system-ui,sans-serif;outline:none}
 .chat-form button{background:rgba(70,110,190,.5);border:1px solid rgba(120,160,230,.4);color:#e6efff;
-  border-radius:8px;padding:0 14px;cursor:pointer;font:inherit}
+  border-radius:8px;padding:0 16px;cursor:pointer;font:15px system-ui,sans-serif}
 .chat-form button:disabled{opacity:.5;cursor:default}
 .speech-bubble{position:fixed;left:0;top:0;max-width:320px;padding:8px 12px;border-radius:10px;
   background:rgba(14,22,36,.94);border:1px solid rgba(120,160,230,.35);color:#e6efff;
