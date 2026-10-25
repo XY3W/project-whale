@@ -117,6 +117,8 @@ async function boot() {
       chat.setThinking(false);
       return;
     }
+    errorActive = false;
+    setError(false);
     chat.setError(null);
     chat.setThinking(true);
     client.sendUserMessage(text, snapshot());
@@ -157,6 +159,11 @@ async function boot() {
       return;
     }
     destination = null;
+    // 任务执行中点击角色：先取消旧计划，再由统一入口接管
+    if (motionOwner === "plan") {
+      executor.cancel();
+      motionEpoch++;
+    }
     if (phase === "walking" || player.state.walking) {
       player.setWalking(false);
       phase = "stopping";
@@ -245,6 +252,39 @@ async function boot() {
   });
   let roamBusy = false;
   let planChain: Promise<void> = Promise.resolve();
+  let errorActive = false;
+
+  // ---- 单一动作调度入口（P0-A）----
+  // 漫游、模型计划都经由这里；同一时刻只有一个动作所有者。
+  type Owner = "none" | "roaming" | "plan";
+  let motionOwner: Owner = "none";
+  let motionEpoch = 0;
+
+  const waitBodySettled = async (timeoutMs = 3000) => {
+    const t0 = performance.now();
+    while (player.state.walking || player.state.base !== "idle_stand") {
+      if (performance.now() - t0 > timeoutMs) return false;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    return true;
+  };
+
+  const runOwned = async (owner: Owner, plan: Plan) => {
+    if (motionOwner !== "none") {
+      executor.cancel();
+      player.clearGesture();
+      player.setWalking(false);
+      await waitBodySettled();
+    }
+    motionOwner = owner;
+    const epoch = ++motionEpoch;
+    try {
+      const result = await executor.run(plan);
+      return epoch === motionEpoch ? result : null; // 过期结果不回报
+    } finally {
+      if (epoch === motionEpoch) motionOwner = "none";
+    }
+  };
 
   client.on({
     onPlan: (msg) => {
@@ -255,11 +295,13 @@ async function boot() {
       }
       // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
       planChain = planChain.then(async () => {
-        const result = await executor.run(msg.plan as unknown as Plan);
-        client.sendPlanResult(msg.taskId, result);
+        const result = await runOwned("plan", msg.plan as unknown as Plan);
+        if (result) client.sendPlanResult(msg.taskId, result);
       });
     },
     onReply: (msg) => {
+      errorActive = false;
+      setError(false);
       chat.addMessage("whale", msg.speech);
       speak(msg.speech);
     },
@@ -269,6 +311,7 @@ async function boot() {
       if (phase === "idle") chat.setThinking(false);
     },
     onError: (code, message) => {
+      errorActive = true;
       chat.setError(`${code}：${message}`);
       chat.setThinking(false);
       if (code !== "BUSY") setError(true);
@@ -372,7 +415,7 @@ async function boot() {
 
     // ---- 机械漫游门禁 ----
     const canRoam =
-      stateApplied && !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
+      stateApplied && !errorActive && motionOwner === "none" && !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
       !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {
@@ -382,9 +425,9 @@ async function boot() {
         roamBusy = true;
         const angle = (Math.random() - 0.5) * 60;
         const distance = Math.random() < 0.5 ? 0.27 : 0.45;
-        void executor
-          .run({ steps: [{ action: "turn", angle_deg: Math.round(angle) }, { action: "walk", distance_m: distance }] })
-          .finally(() => { roamBusy = false; });
+        void runOwned("roaming", {
+          steps: [{ action: "turn", angle_deg: Math.round(angle) }, { action: "walk", distance_m: distance }],
+        }).finally(() => { roamBusy = false; });
       }
     } else {
       roamTimer = Math.max(roamTimer, 2 + Math.random() * 3);
@@ -441,6 +484,7 @@ async function boot() {
 
   (window as unknown as Record<string, unknown>).whale = {
     stage, root, player, meshes, chat, requestMove, enterChat, executor, client,
+    getMotionOwner: () => motionOwner,
   };
 }
 
