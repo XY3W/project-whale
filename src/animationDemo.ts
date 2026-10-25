@@ -264,7 +264,7 @@ async function boot() {
     setTuck(0);
     log("盆已放回场地中心");
   });
-  hint(basinSection, "拾取以标准站位为参考：先“回原点”再复位，动作才和手对得上。");
+  hint(basinSection, "拾取以标准站位为参考：先“回原点”再复位，动作才和手对得上。单片段检查钢盆片段时，盆会按片段时刻自动摆到手上/头上。");
 
   // ---- 逐片段检查 ----
   const clipSection = section("逐片段检查");
@@ -435,6 +435,10 @@ async function boot() {
       root.position.z = clamp(root.position.z, -3.7, 3.7);
     }
     root.updateMatrixWorld(true);
+    // 单片段检查钢盆片段时，按片段时刻预览挂接（不动状态机）
+    const soloNow = player.solo;
+    if (soloNow && soloNow.name.endsWith("_basin")) basin.previewAt(soloNow.name, soloNow.time);
+    else basin.previewAt(null, 0);
     basin.update(dt, player.performanceTime);
     player.setHoldEnabled(basin.mode === "hand" && (!player.performing || player.performanceEnding));
 

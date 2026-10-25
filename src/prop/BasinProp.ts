@@ -87,6 +87,7 @@ export class BasinProp {
   private uprightTime = 0;
   private uprightDuration = 0.45;
   private uprightResult: UprightResult = { ok: false, moved: 0, rotatedDeg: 0 };
+  private previewing = false;
 
   private constructor(opts: BasinPropOptions, physics: BasinPhysics) {
     this.catalog = opts.catalog;
@@ -202,6 +203,63 @@ export class BasinProp {
         return this.state === "held";
       default:
         return false;
+    }
+  }
+
+  private followCurve(actionId: string, time: number) {
+    const samples = this.motion.clips[actionId];
+    if (!samples) return;
+    const sample = sampleCurve(samples, time);
+    if (!sample) return;
+    this.charRoot.updateWorldMatrix(true, false);
+    const local = new THREE.Matrix4().compose(
+      new THREE.Vector3(sample.position[0], sample.position[1], sample.position[2]),
+      new THREE.Quaternion(sample.quaternion[0], sample.quaternion[1], sample.quaternion[2], sample.quaternion[3]),
+      new THREE.Vector3(1, 1, 1),
+    );
+    const world = new THREE.Matrix4().multiplyMatrices(this.charRoot.matrixWorld, local);
+    const scale = new THREE.Vector3();
+    world.decompose(this.object.position, this.object.quaternion, scale);
+    this.lastPose.position.copy(this.object.position);
+    this.lastPose.quaternion.copy(this.object.quaternion);
+    this.setMorph(sample.wearMorph);
+  }
+
+  /**
+   * 调试用：按“互动片段 + 时间”预览盆的挂接状态，只改视觉，不动状态机与物理。
+   * 事件里的 from/to 已经描述了 resting→held→transferring→worn 的时序，直接复用。
+   */
+  previewAt(actionId: string | null, time: number) {
+    if (actionId === "hold_basin") {
+      // 持盆循环没有事件，直接挂在手上
+      this.previewing = true;
+      this.object.visible = true;
+      this.followBone(this.handBone, this.handAttach);
+      this.setMorph(0);
+      return;
+    }
+    const events = actionId ? this.actions.get(actionId)?.events ?? [] : [];
+    if (!actionId || !events.length) {
+      this.previewing = false;
+      this.object.visible = true;
+      return;
+    }
+    this.previewing = true;
+    let phase = events[0].from ?? "resting";
+    for (const event of events) if (time >= event.time) phase = event.to ?? phase;
+    this.object.visible = phase !== "flying";
+    if (phase === "held") {
+      this.followBone(this.handBone, this.handAttach);
+      this.setMorph(0);
+    } else if (phase === "worn") {
+      this.followBone(this.headBone, this.headAttach);
+      this.setMorph(1);
+    } else if (phase === "transferring") {
+      this.followCurve(actionId, time);
+    } else if (phase === "resting") {
+      const reference = this.catalog.pickupReference;
+      this.applyPose(BasinProp.toWorld(this.charRoot, reference.position, reference.quaternion));
+      this.setMorph(0);
     }
   }
 
@@ -344,6 +402,7 @@ export class BasinProp {
 
   /** 每帧调用：必须在骨骼世界矩阵更新之后 */
   update(dt: number, actionTime: number) {
+    if (this.previewing) return;
     if (this.mode === "hand") {
       this.followBone(this.handBone, this.handAttach);
       return;
@@ -353,22 +412,7 @@ export class BasinProp {
       return;
     }
     if (this.mode === "curve") {
-      const samples = this.actionId ? this.motion.clips[this.actionId] : undefined;
-      if (!samples) return;
-      const sample = sampleCurve(samples, actionTime);
-      if (!sample) return;
-      this.charRoot.updateWorldMatrix(true, false);
-      const local = new THREE.Matrix4().compose(
-        new THREE.Vector3(sample.position[0], sample.position[1], sample.position[2]),
-        new THREE.Quaternion(sample.quaternion[0], sample.quaternion[1], sample.quaternion[2], sample.quaternion[3]),
-        new THREE.Vector3(1, 1, 1),
-      );
-      const world = new THREE.Matrix4().multiplyMatrices(this.charRoot.matrixWorld, local);
-      const scale = new THREE.Vector3();
-      world.decompose(this.object.position, this.object.quaternion, scale);
-      this.lastPose.position.copy(this.object.position);
-      this.lastPose.quaternion.copy(this.object.quaternion);
-      this.setMorph(sample.wearMorph);
+      if (this.actionId) this.followCurve(this.actionId, actionTime);
       return;
     }
     if (this.mode === "uprighting") {
