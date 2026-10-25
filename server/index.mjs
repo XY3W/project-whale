@@ -17,7 +17,7 @@ import { CAPABILITIES, ModelError, callModel, hasKey, planningMessages, reviewMe
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
 const ROOT = path.resolve(process.cwd(), "dist");
 const PROTOCOL = 1;
-const HEARTBEAT_MS = 6_000;
+const HEARTBEAT_MS = 8_000;
 const MAX_ROUNDS = 4;
 const BUDGET_MS = 180_000;
 
@@ -74,6 +74,9 @@ function saveCharacter() {
 const session = {
   id: `s${Date.now()}`,
   lease: null,          // 当前执行端 ws
+  leaseEpoch: 0,        // 逐次授予递增，用于 fencing
+  generation: 0,        // 任务代际
+  ledger: new Map(),    // planId -> { state, result, reply }
   leaseAt: 0,
   task: null,           // { id, text, rounds, startedAt, superseded, plan }
   phase: "idle",
@@ -87,16 +90,37 @@ function send(ws, type, payload = {}) {
 }
 
 const isLease = (ws) => session.lease === ws;
-const isLeaseAlive = () => session.lease && Date.now() - session.leaseAt < HEARTBEAT_MS;
+const isLeaseAlive = () =>
+  !!session.lease && session.lease.readyState === 1 && Date.now() - session.leaseAt < HEARTBEAT_MS;
+
+function grantLease(ws) {
+  session.lease = ws;
+  session.leaseEpoch += 1;
+  session.leaseAt = Date.now();
+  return session.leaseEpoch;
+}
+
+function statePayload(ws) {
+  return {
+    sessionId: session.id,
+    phase: session.phase,
+    taskId: session.task?.id ?? null,
+    generation: session.generation,
+    leaseEpoch: session.leaseEpoch,
+    readOnly: ws !== session.lease,
+    hasExecutor: isLeaseAlive(),
+    character,
+    needsReconcile: !!session.task && ws === session.lease,
+  };
+}
 
 function broadcastState() {
   const payload = {
     sessionId: session.id,
     phase: session.phase,
     taskId: session.task?.id ?? null,
-    hasExecutor: isLeaseAlive(),
   };
-  for (const ws of wss.clients) send(ws, "session_state", { ...payload, character, readOnly: false });
+  for (const ws of wss.clients) send(ws, "session_state", { ...payload, ...statePayload(ws) });
 }
 
 function endTask(reason) {
@@ -127,15 +151,26 @@ function applyOutput(ws, task, out) {
     const speech = out.speech || (out.outcome === "completed" ? "好了。" : "这个我还做不到。");
     send(ws, "public_reply", { taskId: task.id, speech });
     session.history.push({ role: "assistant", content: speech });
+    if (task.planId) session.ledger.set(task.planId, { state: "done", reply: speech });
     endTask();
     return;
   }
   task.plan = out.plan;
   task.rounds += 1;
+  task.planId = `${task.id}-p${task.rounds}-g${task.generation}`;
+  session.ledger.set(task.planId, { state: "dispatched" });
   session.phase = "executing";
   broadcastState();
   if (out.speech) session.history.push({ role: "assistant", content: out.speech });
-  send(ws, "execute_plan", { taskId: task.id, turnId: task.rounds, speech: out.speech ?? "", plan: out.plan });
+  send(ws, "execute_plan", {
+    taskId: task.id,
+    generation: task.generation,
+    planId: task.planId,
+    leaseEpoch: session.leaseEpoch,
+    turnId: task.rounds,
+    speech: out.speech ?? "",
+    plan: out.plan,
+  });
 }
 
 function fail(ws, task, err) {
@@ -150,18 +185,9 @@ function fail(ws, task, err) {
 wss.on("connection", (ws) => {
   ws._seq = 0;
 
-  // 租约：没有活着的执行端就接管；否则只读
-  session.lease = ws;
-  session.leaseAt = Date.now();
-  send(ws, "session_state", {
-    sessionId: session.id,
-    phase: session.phase,
-    taskId: session.task?.id ?? null,
-    hasExecutor: true,
-    readOnly: false,
-    character,
-    needsReconcile: !!session.task && ws === session.lease,
-  });
+  // 租约：只有当前执行端存活时才允许新连接只读
+  if (!isLeaseAlive()) grantLease(ws);
+  send(ws, "session_state", statePayload(ws));
 
   ws.on("message", (raw) => {
     let msg;
@@ -173,21 +199,13 @@ wss.on("connection", (ws) => {
 
     switch (msg.type) {
       case "hello":
-        session.lease = ws;
-        session.leaseAt = Date.now();
-        send(ws, "session_state", {
-          sessionId: session.id,
-          phase: session.phase,
-          taskId: session.task?.id ?? null,
-          hasExecutor: true,
-          readOnly: false,
-          character,
-          needsReconcile: !!session.task && ws === session.lease,
-        });
+        if (!isLeaseAlive()) grantLease(ws);
+        send(ws, "session_state", statePayload(ws));
         break;
 
       case "heartbeat":
         if (isLease(ws)) session.leaseAt = Date.now();
+        else send(ws, "session_state", statePayload(ws));
         break;
 
       case "state_snapshot": {
@@ -211,16 +229,25 @@ wss.on("connection", (ws) => {
           send(ws, "error", { code: "NOT_EXECUTOR", message: "另一个页面正在执行角色" });
           return;
         }
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期，请刷新" });
+          return;
+        }
         if (!msg.text || typeof msg.text !== "string") return;
 
         // 抢占：取消旧任务未执行步骤，旧结果随后被丢弃
         if (session.task) {
           session.task.superseded = true;
-          send(ws, "cancel_plan", { taskId: session.task.id });
+          send(ws, "cancel_plan", {
+            taskId: session.task.id,
+            generation: session.task.generation,
+            planId: session.task.planId ?? null,
+          });
         }
 
         const taskId = `t${nextTask++}`;
-        session.task = { id: taskId, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null };
+        const generation = ++session.generation;
+        session.task = { id: taskId, generation, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null };
         session.history.push({ role: "user", content: msg.text });
         if (session.history.length > 12) session.history = session.history.slice(-12);
         session.phase = "thinking";
@@ -237,7 +264,12 @@ wss.on("connection", (ws) => {
             if (plan) {
               task.plan = plan;
               task.rounds = 1;
-              send(ws, "execute_plan", { taskId, turnId: 1, speech: plan.speech, plan: { steps: plan.steps } });
+              task.planId = `${taskId}-p1-g${generation}`;
+              session.ledger.set(task.planId, { state: "dispatched" });
+              send(ws, "execute_plan", {
+                taskId, generation, planId: task.planId, leaseEpoch: session.leaseEpoch,
+                turnId: 1, speech: plan.speech, plan: { steps: plan.steps },
+              });
             } else {
               send(ws, "public_reply", { taskId, speech: `我听到了：${msg.text}` });
               endTask();
@@ -266,10 +298,20 @@ wss.on("connection", (ws) => {
 
       case "plan_result": {
         const task = session.task;
-        if (!task || task.id !== msg.taskId) return;           // 过期/已取消的结果直接丢弃
+        if (!task || task.id !== msg.taskId) return;                       // 旧任务结果
+        if (msg.generation !== undefined && msg.generation !== task.generation) return; // 旧代际
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) return; // 旧租约
         if (task.superseded) return;
-        if (session.lastResult?.taskId === msg.taskId && session.lastResult?.round === task.rounds) return; // 重复投递
-        session.lastResult = { taskId: msg.taskId, round: task.rounds };
+        if (msg.planId && task.planId && msg.planId !== task.planId) return; // 不属于当前计划
+
+        const entry = msg.planId ? session.ledger.get(msg.planId) : null;
+        if (entry && entry.state === "done") {
+          // 重复投递：回放已缓存的回复，不再次执行
+          send(ws, "public_reply", { taskId: task.id, speech: entry.reply ?? "" });
+          return;
+        }
+        if (entry && entry.state === "processing") return; // 首次结果正在处理，忽略重复
+        if (msg.planId) session.ledger.set(msg.planId, { state: "processing", result: msg.result });
 
         if (Date.now() - task.startedAt > BUDGET_MS) {
           session.phase = "blocked";
@@ -334,6 +376,7 @@ wss.on("connection", (ws) => {
     if (session.lease === ws) {
       session.lease = null;
       session.leaseAt = 0;
+      session.leaseEpoch += 1; // 旧 epoch 立即失效
       // 执行端断开：任务状态未知，等待重连对账，不自动续跑
       if (session.task) session.phase = "unknown";
       broadcastState();

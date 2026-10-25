@@ -296,7 +296,7 @@ async function boot() {
       // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
       planChain = planChain.then(async () => {
         const result = await runOwned("plan", msg.plan as unknown as Plan);
-        if (result) client.sendPlanResult(msg.taskId, result);
+        if (result) client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId });
       });
     },
     onReply: (msg) => {

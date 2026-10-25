@@ -6,6 +6,9 @@
 export interface PlanMessage {
   taskId: string;
   turnId: number;
+  generation?: number;
+  planId?: string;
+  leaseEpoch?: number;
   speech: string;
   plan: { steps: unknown[] };
 }
@@ -31,6 +34,8 @@ export class BrainClient {
   private ws: WebSocket | null = null;
   private handlers: Handlers = {};
   private retry = 0;
+  leaseEpoch = 0;
+  private takeover: ReturnType<typeof setInterval> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`) {}
@@ -78,7 +83,15 @@ export class BrainClient {
           break;
         case "session_state": {
           const ro = !!msg.readOnly;
+          if (typeof msg.leaseEpoch === "number") this.leaseEpoch = msg.leaseEpoch;
           this.handlers.onReadOnly?.(ro);
+          if (ro && !this.takeover) {
+            // 只读时定期重新申请：旧执行端心跳过期后可以接管
+            this.takeover = setInterval(() => this.send("hello", {}), 3000);
+          } else if (!ro && this.takeover) {
+            clearInterval(this.takeover);
+            this.takeover = null;
+          }
           if (msg.needsReconcile) this.handlers.onReconcile?.();
           // session_state 也携带任务阶段：任务结束后必须清除“思考中”
           if (typeof msg.phase === "string") this.handlers.onTaskState?.(msg.phase);
@@ -116,11 +129,21 @@ export class BrainClient {
   }
 
   sendUserMessage(text: string, snapshot: Record<string, unknown>) {
-    return this.send("user_message", { text, snapshot });
+    return this.send("user_message", { text, snapshot, leaseEpoch: this.leaseEpoch });
   }
 
-  sendPlanResult(taskId: string, result: unknown) {
-    return this.send("plan_result", { taskId, result });
+  sendPlanResult(
+    taskId: string,
+    result: unknown,
+    meta: { generation?: number; planId?: string } = {},
+  ) {
+    return this.send("plan_result", {
+      taskId,
+      result,
+      generation: meta.generation,
+      planId: meta.planId,
+      leaseEpoch: this.leaseEpoch,
+    });
   }
 
   sendStateSnapshot(snapshot: Record<string, unknown>) {
