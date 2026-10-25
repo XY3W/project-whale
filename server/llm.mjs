@@ -7,7 +7,7 @@
 import { CAPABILITY_VERSION, CAPABILITIES, ModelError, validatePlan } from "./capabilities.mjs";
 export { CAPABILITY_VERSION, CAPABILITIES };
 export { ModelError };
-export { describeCapabilities } from "./capabilities.mjs";
+export { describeCapabilities, describeDisabled } from "./capabilities.mjs";
 
 const API = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/chat/completions";
 const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
@@ -63,7 +63,9 @@ steps 允许的动作：
 {"action":"tail","style":"tail_idle|tail_swish","duration_s":number}
 {"action":"wait","duration_s":number}
 {"action":"parallel","items":[...]}
-最多 6 个步骤；只输出 JSON。`;
+最多 6 个步骤；只输出 JSON。
+可选字段：{"memory_proposals":[{"key":"preferred_name|response_language|response_style|ordinary_interest","value":"string","source_quote":"用户原话片段"}]}
+每轮最多 2 条；只记录用户明确表达的称呼、语言、风格偏好或普通兴趣，不要记录敏感信息。`;
 
 function contextBlock(ctx) {
   return `REQUEST_CONTEXT_JSON:\n${JSON.stringify(ctx)}`;

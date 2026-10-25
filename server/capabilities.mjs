@@ -29,6 +29,11 @@ export const CAPABILITIES = [
   { id: "sit", enabled: false, disabledReason: "没有坐下片段" },
 ];
 
+/** 禁用能力清单：给模型解释为什么不能做，但不注册成可执行工具 */
+export function describeDisabled() {
+  return CAPABILITIES.filter((c) => !c.enabled).map((c) => ({ id: c.id, reason: c.disabledReason }));
+}
+
 /** 模型可见清单：只含 enabled，且参数说明来自同一注册表 */
 export function describeCapabilities() {
   return CAPABILITIES.filter((c) => c.enabled).map((c) => ({

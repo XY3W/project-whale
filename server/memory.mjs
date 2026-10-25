@@ -1,5 +1,17 @@
 /** 最小长期偏好（E 批）：模型只能提案，服务端校验来源与白名单。 */
-export const MEMORY_KEYS = new Set(["nickname", "style", "interest"]);
+export const MEMORY_KEYS = new Set([
+  "preferred_name",
+  "response_language",
+  "response_style",
+  "ordinary_interest",
+]);
+/** 旧数据/旧提案的兼容映射，写入前统一成契约字段 */
+const LEGACY_KEYS = {
+  nickname: "preferred_name",
+  style: "response_style",
+  interest: "ordinary_interest",
+  language: "response_language",
+};
 const MAX_ITEMS = 20;
 const MAX_VALUE_LEN = 60;
 
@@ -10,7 +22,8 @@ export function validateProposals(proposals, sourceMessageId) {
   for (const p of proposals) {
     if (accepted.length >= 2) break;
     if (!p || typeof p !== "object") { rejected.push({ reason: "not_object" }); continue; }
-    const key = String(p.key ?? "");
+    const rawKey = String(p.key ?? "");
+    const key = LEGACY_KEYS[rawKey] ?? rawKey;
     const value = String(p.value ?? "").trim();
     if (!MEMORY_KEYS.has(key)) { rejected.push({ reason: "key_not_allowed", key }); continue; }
     if (!value || value.length > MAX_VALUE_LEN) { rejected.push({ reason: "bad_value", key }); continue; }

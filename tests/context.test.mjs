@@ -19,10 +19,10 @@ test("上下文：单条超预算时不返回空上下文以外的内容", () =>
 test("记忆：白名单外的 key 被拒绝，合法提案成为 candidate", () => {
   const r = validateProposals(
     [
-      { key: "nickname", value: "小乔" },
+      { key: "preferred_name", value: "小乔" },
       { key: "password", value: "x" },
-      { key: "style", value: "回复简短一点" },
-      { key: "interest", value: "第四项应被截断" },
+      { key: "response_style", value: "回复简短一点" },
+      { key: "ordinary_interest", value: "第四项应被截断" },
     ],
     "msg-1",
   );
@@ -32,9 +32,13 @@ test("记忆：白名单外的 key 被拒绝，合法提案成为 candidate", ()
 });
 
 test("记忆：无来源拒绝，confirmed 过滤", () => {
-  assert.equal(validateProposals([{ key: "nickname", value: "小乔" }], null).accepted.length, 0);
+  assert.equal(validateProposals([{ key: "preferred_name", value: "小乔" }], null).accepted.length, 0);
   const list = addCandidates([], [{ key: "nickname", value: "小乔", sourceMessageId: "m1", status: "candidate", createdAt: 1 }]);
   assert.equal(confirmedMemories(list).length, 0);
   list[0].status = "confirmed";
   assert.equal(confirmedMemories(list).length, 1);
+
+  // 旧字段名进来自动映射成契约字段
+  const legacy = validateProposals([{ key: "nickname", value: "小乔" }], "m2");
+  assert.equal(legacy.accepted[0].key, "preferred_name");
 });
