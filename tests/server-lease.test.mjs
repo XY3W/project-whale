@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import WebSocket from "ws";
 
-const PORT = 8097;
+const PORT = 8100 + Math.floor(Math.random() * 800);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function startServer() {
@@ -20,8 +20,23 @@ async function startServer() {
     env: { ...process.env, BRAIN_PORT: String(PORT), DEEPSEEK_API_KEY: "" },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  await sleep(600);
-  return { proc, dir };
+  // 就绪信号：可连接即视为启动完成，替代固定 sleep
+  const t0 = Date.now();
+  while (Date.now() - t0 < 5000) {
+    try {
+      const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+      await new Promise((resolve, reject) => {
+        ws.once("open", resolve);
+        ws.once("error", reject);
+      });
+      ws.close();
+      await sleep(100);
+      return { proc, dir };
+    } catch {
+      await sleep(100);
+    }
+  }
+  throw new Error("server did not become ready");
 }
 
 function connect() {
@@ -43,8 +58,13 @@ async function waitFor(inbox, pred, timeout = 4000) {
 
 test("租约、代际与重复结果去重", async (t) => {
   const { proc, dir } = await startServer();
-  t.after(() => {
-    proc.kill();
+  t.after(async () => {
+    try { a.ws.close(); b.ws.close(); } catch {}
+    await new Promise((resolve) => {
+      proc.once("exit", resolve);
+      proc.kill();
+      setTimeout(resolve, 2000);
+    });
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
