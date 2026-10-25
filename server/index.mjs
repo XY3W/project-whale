@@ -110,7 +110,7 @@ function statePayload(ws) {
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,
-    needsReconcile: !!session.task && ws === session.lease,
+    needsReconcile: !!session.task && ws === session.lease && session.task.originWs !== ws,
   };
 }
 
@@ -210,7 +210,10 @@ wss.on("connection", (ws) => {
 
       case "state_snapshot": {
         // 重连后对账：执行端报告实际状态，服务器不盲重播任务
-        if (isLease(ws) && session.task && msg.reconciled) endTask("reconciled after reconnect");
+        // 只有“不是本连接创建的任务”才需要对账结束；否则会把刚发的消息杀掉
+        if (isLease(ws) && session.task && msg.reconciled && session.task.originWs !== ws) {
+          endTask("reconciled after reconnect");
+        }
         const snap = msg.snapshot;
         if (snap && Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
           character = {
@@ -247,7 +250,7 @@ wss.on("connection", (ws) => {
 
         const taskId = `t${nextTask++}`;
         const generation = ++session.generation;
-        session.task = { id: taskId, generation, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null };
+        session.task = { id: taskId, generation, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null, originWs: ws };
         session.history.push({ role: "user", content: msg.text });
         if (session.history.length > 12) session.history = session.history.slice(-12);
         session.phase = "thinking";
