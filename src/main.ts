@@ -165,6 +165,7 @@ async function boot() {
     if (motionOwner === "plan") {
       currentExecutor?.cancel();
       motionEpoch++;
+      motionOwner = "none"; // 旧 run 的 finally 因 epoch 变化不会清 owner，这里显式释放
     }
     if (phase === "walking" || player.state.walking) {
       player.setWalking(false);
