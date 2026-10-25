@@ -18,7 +18,16 @@ export { describeCapabilities, describeDisabled } from "./capabilities.mjs";
 
 const API = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/chat/completions";
 const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
-const TIMEOUT_MS = 30_000;
+/**
+ * 思考模式开关。默认关闭：决策只需要结构化 JSON，开思考主要增加延迟与 token。
+ * 打开方式：.env 里加 DEEPSEEK_THINKING=1（或 DEEPSEEK_MODEL=deepseek-reasoner）。
+ * 思考 token 计入 max_tokens，所以打开时同步提高上限与超时。
+ */
+const THINKING = /^(1|true|on|yes)$/i.test(process.env.DEEPSEEK_THINKING ?? "");
+const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS ?? (THINKING ? 2400 : 800));
+const TIMEOUT_MS = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? (THINKING ? 90_000 : 30_000));
+
+export const thinkingEnabled = () => THINKING;
 
 export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
@@ -56,7 +65,14 @@ export async function callModel(messages) {
     res = await fetch(API, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}` },
-      body: JSON.stringify({ model: MODEL, messages, response_format: { type: "json_object" }, temperature: 0.6, max_tokens: 800 }),
+      body: JSON.stringify({
+        model: MODEL,
+        messages,
+        response_format: { type: "json_object" },
+        max_tokens: MAX_TOKENS,
+        // 思考模式下 temperature 不生效，部分模型还会报参数冲突，就不传了
+        ...(THINKING ? { thinking: { type: "enabled" } } : { temperature: 0.6 }),
+      }),
       signal: ctl.signal,
     });
   } catch (err) {
@@ -72,7 +88,13 @@ export async function callModel(messages) {
     throw new ModelError("API_ERROR", `模型返回 ${res.status}：${text.slice(0, 120)}`, res.status);
   }
   const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
+  const choice = data?.choices?.[0];
+  const content = choice?.message?.content;
+  if (THINKING) {
+    const reasoning = choice?.message?.reasoning_content;
+    const reasoningTokens = data?.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+    console.log(`[llm] thinking on · reasoning_tokens=${reasoningTokens} · ${String(reasoning ?? "").slice(0, 80).replace(/\s+/g, " ")}`);
+  }
   if (typeof content !== "string") throw new ModelError("EMPTY", "模型返回空内容", 0);
   let parsed;
   try {
