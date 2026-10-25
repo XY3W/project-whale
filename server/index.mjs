@@ -12,6 +12,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer } from "ws";
+import { createStore, reconcileOnLoad } from "./store.mjs";
 import { CAPABILITY_VERSION, ModelError, callModel, describeCapabilities, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
@@ -84,6 +85,21 @@ const session = {
   history: [],          // 最近对话（限 12 条）
 };
 
+
+const store = createStore(path.join(process.cwd(), "data", "brain-state.json"));
+const storeSeed = reconcileOnLoad(store.state);
+for (const [planId, entry] of Object.entries(storeSeed.ledger ?? {})) session.ledger.set(planId, entry);
+session.history = Array.isArray(storeSeed.history) ? storeSeed.history.slice(-12) : [];
+if (storeSeed.session?.phase === "unknown") session.phase = "unknown";
+
+function persist() {
+  store.update((st) => {
+    st.history = session.history.slice(-12);
+    st.ledger = Object.fromEntries(session.ledger);
+    st.session = { id: session.id, phase: session.phase, taskId: session.task?.id ?? null };
+  });
+}
+
 function send(ws, type, payload = {}) {
   if (!ws || ws.readyState !== 1) return;
   ws.send(JSON.stringify({ protocolVersion: PROTOCOL, type, ...payload, seq: ++ws._seq }));
@@ -126,6 +142,7 @@ function broadcastState() {
 function endTask(reason) {
   session.task = null;
   session.phase = "idle";
+  persist();
   broadcastState();
   if (reason) console.log(`[task] ${reason}`);
 }
@@ -152,6 +169,7 @@ function applyOutput(ws, task, out) {
     send(ws, "public_reply", { taskId: task.id, speech });
     session.history.push({ role: "assistant", content: speech });
     if (task.planId) session.ledger.set(task.planId, { state: "done", reply: speech });
+    persist();
     endTask();
     return;
   }
@@ -159,6 +177,7 @@ function applyOutput(ws, task, out) {
   task.rounds += 1;
   task.planId = `${task.id}-p${task.rounds}-g${task.generation}`;
   session.ledger.set(task.planId, { state: "dispatched" });
+  persist();
   session.phase = "executing";
   broadcastState();
   if (out.speech) session.history.push({ role: "assistant", content: out.speech });
@@ -253,6 +272,7 @@ wss.on("connection", (ws) => {
         session.task = { id: taskId, generation, text: msg.text, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null, originWs: ws };
         session.history.push({ role: "user", content: msg.text });
         if (session.history.length > 12) session.history = session.history.slice(-12);
+        persist();
         session.phase = "thinking";
         broadcastState();
 
@@ -269,6 +289,7 @@ wss.on("connection", (ws) => {
               task.rounds = 1;
               task.planId = `${taskId}-p1-g${generation}`;
               session.ledger.set(task.planId, { state: "dispatched" });
+  persist();
               send(ws, "execute_plan", {
                 taskId, generation, planId: task.planId, leaseEpoch: session.leaseEpoch,
                 turnId: 1, speech: plan.speech, plan: { steps: plan.steps },
