@@ -20,6 +20,7 @@ import { addCandidates, confirmedMemories, validateProposals } from "./memory.mj
 import { createGameEventQueue } from "./events.mjs";
 import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
 import { CAPABILITY_VERSION, ModelError, SYSTEM_PROMPT, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
+import { validatePlan } from "./capabilities.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
 const ROOT = path.resolve(process.cwd(), "dist");
@@ -686,6 +687,7 @@ function issueDigAuth(task, plan) {
   for (const [id] of unused.slice(0, -1)) session.digAuth.delete(id);
   const used = [...session.digAuth].filter(([, a]) => a.used);
   for (const [id] of used.slice(0, Math.max(0, used.length - 8))) session.digAuth.delete(id);
+  console.log(`[dig] auth ${authId} (${digStep.row},${digStep.col}) rev=${digStep.expected_revision}`);
   return authId;
 }
 
@@ -773,6 +775,31 @@ wss.on("connection", (ws, req) => {
           console.log(result.cleared ? `[game] 用户收起了 ${before}` : `[game] 用户结束了 ${result.board?.gameId}`);
           // 只有“进行中→结束”才需要告诉模型；收摊已经被用户拿走了
           if (!result.cleared) noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
+        }
+        break;
+      }
+
+      // 仅本地验收用：BRAIN_DEV=1 时让探针注入一份“服务端计划”，
+      // 这样浏览器验收也走真实的授权/任务/代际链路，而不是绕过它。
+      case "debug_plan": {
+        if (process.env.BRAIN_DEV !== "1") {
+          send(ws, "error", { code: "DEBUG_DISABLED", message: "调试计划需要 BRAIN_DEV=1" });
+          break;
+        }
+        if (!isLease(ws) || !epochOk(msg)) {
+          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
+          break;
+        }
+        if (session.task) {
+          send(ws, "error", { code: "BUSY", message: "已有任务在进行" });
+          break;
+        }
+        try {
+          const plan = validatePlan({ type: "execute_plan", speech: msg.speech ?? "", steps: msg.steps ?? [], memory_proposals: [] });
+          const task = beginTask({ text: msg.text ?? "调试计划", messageId: null, origin: "user", events: [], ws });
+          applyOutput(ws, task, plan);
+        } catch (err) {
+          fail(ws, session.task, err);
         }
         break;
       }

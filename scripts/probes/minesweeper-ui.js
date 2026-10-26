@@ -1,4 +1,8 @@
-// 扫雷 UI 验收：按钮 → 棋盘 → 悬停 → 无勺拒绝 → 捡勺 → 真实 dig 提交 → 揭示
+// 扫雷 UI 验收：按钮 → 棋盘 → 悬停 → 无勺拒绝 → 捡勺 → dig 提交
+//
+// 注意：whale.run() 是调试入口，不带服务端计划，所以 dig 会被授权校验拒绝（NO_AUTH），
+// 这是预期行为。要验证真实的挖掘提交，请用 scripts/probes/dig-authorized.js
+// （需要服务端 BRAIN_DEV=1），它走 计划→授权→dig_contact 的完整链路。
 // 逐段记录，任何一段失败也把已经拿到的结果带回来。
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 const once = async (expr, timeout = 60000) => {

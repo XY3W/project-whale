@@ -811,6 +811,13 @@ async function boot() {
       }
       // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
       planChain = planChain.then(async () => {
+        // 这次挖掘提交要带上的任务/计划/授权；runOwned 结束时清空
+        activePlan = {
+          taskId: msg.taskId,
+          generation: msg.generation,
+          planId: msg.planId,
+          digAuthId: msg.digAuthId ?? null,
+        };
         const result = await runOwned("plan", msg.plan as unknown as Plan);
         if (result) {
           client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId }, snapshot());
@@ -1073,6 +1080,8 @@ async function boot() {
   (window as unknown as Record<string, unknown>).whale = {
     stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board, THREE,
     getGame: () => gameBoard,
+    /** 探针用：当前客户端快照（与服务端同步的同一份） */
+    snapshot,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
     resetBasin: () => basinBridge.reset("basin"),
