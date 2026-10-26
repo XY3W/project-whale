@@ -132,6 +132,7 @@ async function boot() {
     const label =
       view.status === "won" ? "通关" : view.status === "lost" ? "踩雷" : view.status === "ended" ? "已结束" : "进行中";
     gameChip.textContent = `扫雷 ${view.size}×${view.size} · ${view.mineCount} 雷 · ${label} · 剩 ${view.remainingSafe}`;
+    gameChip.classList.toggle("playing", view.status === "playing");
     gameChip.classList.toggle("lost", view.status === "lost");
     gameChip.classList.toggle("won", view.status === "won");
     gameChip.classList.toggle("ended", view.status === "ended");
@@ -139,13 +140,16 @@ async function boot() {
     syncStartButton();
   };
 
-  /** 进行中时按钮变成「扫雷结束」，点了直接收摊 */
+  /**
+   * 只要盘面还在（进行中 / 踩雷 / 通关 / 已结束）按钮就是「扫雷结束」：
+   * 进行中 → 结束并揭开雷区；已经结束 → 收起盘面，场地回到正常状态。
+   */
   const startButton = document.getElementById("start-minesweeper") as HTMLButtonElement | null;
   const syncStartButton = () => {
     if (!startButton) return;
-    const playing = gameBoard?.status === "playing";
-    startButton.textContent = playing ? "扫雷结束" : "扫雷开局";
-    startButton.style.background = playing ? "#8a3a3a" : "#3d62ad";
+    const onField = !!gameBoard;
+    startButton.textContent = onField ? "扫雷结束" : "扫雷开局";
+    startButton.style.background = onField ? "#8a3a3a" : "#3d62ad";
   };
 
   // ---- 状态 ----
@@ -719,9 +723,9 @@ async function boot() {
       return;
     }
     chat.setError(null);
-    if (gameBoard?.status === "playing") {
+    if (gameBoard) {
       client.endGame();
-      speak("这局先到这里。", 1800);
+      speak(gameBoard.status === "playing" ? "这局先到这里。" : "收起来了。", 1800);
       return;
     }
     client.startGame(`r${Date.now()}`);
@@ -867,6 +871,7 @@ async function boot() {
       gameBoard = (value as GameView) ?? null;
       board.update((value as never) ?? null);
       renderChip(gameBoard);
+      syncStartButton();
     },
     onBasin: (record) => {
       if (basinApplied) return;

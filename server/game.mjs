@@ -62,12 +62,32 @@ export class GameService {
     return { ...result, board: this.public() };
   }
 
-  /** 用户点「扫雷结束」：结束当前局，揭开雷区 */
+  /**
+   * 用户点「扫雷结束」：
+   * - 进行中 → 结束并揭开雷区，盘面留着看结果；
+   * - 已经胜负/结束 → 收摊，清掉对局，场地回到正常状态。
+   */
   end() {
     if (!this.game) return { ok: false, reason: "NO_GAME" };
-    const result = endGame(this.game);
-    if (result.ok) this.save();
-    return { ...result, board: this.public() };
+    if (this.game.status === "playing") {
+      const result = endGame(this.game);
+      if (result.ok) this.save();
+      return { ...result, board: this.public() };
+    }
+    this.clear();
+    return { ok: true, cleared: true, board: null };
+  }
+
+  /** 收摊：忘掉这一局，重启后也不会又冒出来 */
+  clear() {
+    this.game = null;
+    this.lastRequestId = null;
+    try {
+      fs.writeFileSync(this.file, "null");
+    } catch (err) {
+      console.error("minesweeper clear failed", err.message);
+    }
+    return { ok: true, cleared: true };
   }
 
   /** 角色所在格（由服务端按权威坐标复算，不信任客户端） */

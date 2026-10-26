@@ -688,14 +688,16 @@ wss.on("connection", (ws, req) => {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
+        const before = games.public()?.gameId ?? null;
         const result = games.end();
         send(ws, "game_state", { board: games.public(), ended: result.ok });
         broadcastState();
         if (result.ok) {
           // 用户主动收摊：给自主开局按下暂停，别过一分钟又自己开一局
           noteAutoPlayDelay(AUTO_AFTER_MANUAL_END_MS);
-          console.log(`[game] 用户结束了 ${result.board?.gameId}`);
-          noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
+          console.log(result.cleared ? `[game] 用户收起了 ${before}` : `[game] 用户结束了 ${result.board?.gameId}`);
+          // 只有“进行中→结束”才需要告诉模型；收摊已经被用户拿走了
+          if (!result.cleared) noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
         }
         break;
       }

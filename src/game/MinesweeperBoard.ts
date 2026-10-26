@@ -22,18 +22,23 @@ export interface PublicBoard {
 const SIZE_M = 8;
 /** 开局扫光时长（毫秒） */
 const PULSE_MS = 1300;
-/** 状态色：进行中蓝 / 通关绿 / 踩雷红 / 用户结束琥珀 */
-const ACCENTS: Record<string, [number, number, number]> = {
-  playing: [0.345, 0.651, 1],
-  won: [0.29, 0.871, 0.502],
-  lost: [1, 0.373, 0.427],
-  ended: [1, 0.69, 0.33],
+/**
+ * 场地光效配色：
+ * 进行中=琥珀、通关=绿、踩雷=红、没有对局=蓝（静止，不呼吸）。
+ * 用户手动结束属于「已收局」，用中性灰蓝，避免和进行中的琥珀混淆。
+ */
+const IDLE_ACCENT = 0x58a6ff;
+const ACCENTS: Record<string, number> = {
+  playing: 0xffb828, // 琥珀
+  won: 0x4ade80, // 绿
+  lost: 0xff5f6d, // 红
+  ended: 0xa0abc2, // 已收局：中性灰蓝
 };
 const ACCENT_CSS: Record<string, string> = {
-  playing: "88, 166, 255",
+  playing: "255, 184, 40",
   won: "74, 222, 128",
   lost: "255, 95, 109",
-  ended: "255, 176, 84",
+  ended: "160, 171, 194",
 };
 
 /**
@@ -109,7 +114,7 @@ export class MinesweeperBoard {
       mesh.rotation.y = rotY;
       this.field.add(mesh);
     }
-    this.field.visible = false;
+    this.field.visible = true;
     this.field.renderOrder = 2;
     parent.add(this.field);
     this.draw();
@@ -145,7 +150,6 @@ export class MinesweeperBoard {
     this.board = board;
     this.active = !!board;
     if (!this.floor) this.mesh.visible = !!board;
-    this.field.visible = board?.status === "playing";
     this.syncFloor();
     if (board) {
       if (board.gameId !== this.lastGameId) {
@@ -158,17 +162,28 @@ export class MinesweeperBoard {
     this.draw();
   }
 
-  /** 每帧调用：围栏呼吸 + 开局扫光期间重绘，平时不重画 canvas */
+  /**
+   * 每帧调用：围栏颜色/亮度 + 开局扫光。
+   * 没开局时是静止的蓝色辉光（不呼吸），只有进行中才呼吸。
+   */
   tick() {
-    if (!this.active) return;
     const now = performance.now();
-    const accent = ACCENTS[this.board?.status ?? "playing"] ?? ACCENTS.playing;
-    this.field.visible = this.board?.status === "playing";
-    this.fieldMat.color.setRGB(...accent);
-    this.fieldMat.opacity = 0.15 + 0.09 * Math.sin(now / 420) + this.pulse * 0.18;
+    this.updateField(now);
+    if (!this.active) return;
     if (!this.pulseStart) return;
     if (now - this.pulseStart > PULSE_MS) this.pulseStart = 0;
     this.draw();
+  }
+
+  private updateField(now: number) {
+    const status = this.board?.status ?? null;
+    const playing = status === "playing";
+    // 用 setHex：three 会按 sRGB 解释，和画布里那套 CSS 颜色保持一致；
+    // setRGB 走的是线性空间，琥珀会变成发白的淡黄。
+    this.fieldMat.color.setHex(playing ? ACCENTS.playing : status ? ACCENTS[status] ?? IDLE_ACCENT : IDLE_ACCENT);
+    const breathe = playing ? 0.09 * Math.sin(now / 420) : 0;
+    const base = playing ? 0.26 : status ? 0.2 : 0.17;
+    this.fieldMat.opacity = base + breathe + this.pulse * 0.18;
   }
 
   private get pulse(): number {
@@ -241,9 +256,9 @@ export class MinesweeperBoard {
       const band = px * 0.28;
       const cx = -band + t * (px + band * 2);
       const grad = ctx.createLinearGradient(cx - band / 2, 0, cx + band / 2, px);
-      grad.addColorStop(0, "rgba(120, 200, 255, 0)");
-      grad.addColorStop(0.5, `rgba(150, 215, 255, ${0.28 * pulse})`);
-      grad.addColorStop(1, "rgba(120, 200, 255, 0)");
+      grad.addColorStop(0, `rgba(${accent}, 0)`);
+      grad.addColorStop(0.5, `rgba(${accent}, ${0.3 * pulse})`);
+      grad.addColorStop(1, `rgba(${accent}, 0)`);
       ctx.save();
       ctx.globalCompositeOperation = "lighter";
       ctx.fillStyle = grad;
