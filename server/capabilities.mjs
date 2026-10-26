@@ -1,4 +1,5 @@
 /** 能力注册表：模型说明、Schema 与执行校验的唯一来源（D 批）。 */
+import { SIZE } from "./minesweeper.mjs";
 
 export const CAPABILITY_VERSION = "cap-v1";
 
@@ -39,8 +40,8 @@ export const CAPABILITIES = [
     channels: ["item"],
     params: {
       game_id: { type: "string", note: "当前公开棋盘的 gameId" },
-      row: { type: "number", min: 0, max: 9, note: "0 从 -Z 向 +Z" },
-      col: { type: "number", min: 0, max: 9, note: "0 从 -X 向 +X" },
+      row: { type: "number", min: 0, max: SIZE - 1, note: "0 从 -Z 向 +Z" },
+      col: { type: "number", min: 0, max: SIZE - 1, note: "0 从 -X 向 +X" },
       expected_revision: { type: "number", min: 0, note: "必须等于公开棋盘 revision" },
     },
   },
@@ -181,8 +182,8 @@ export function validateStep(step, id = "step") {
     }
     case "dig": {
       const { row, col, expected_revision: revision } = step;
-      if (!Number.isInteger(row) || row < 0 || row > 9 || !Number.isInteger(col) || col < 0 || col > 9) {
-        throw new ModelError("INVALID_SCHEMA", `${id} row/col 必须是 0..9 的整数`, 0);
+      if (!Number.isInteger(row) || row < 0 || row >= SIZE || !Number.isInteger(col) || col < 0 || col >= SIZE) {
+        throw new ModelError("INVALID_SCHEMA", `${id} row/col 必须是 0..${SIZE - 1} 的整数`, 0);
       }
       if (!Number.isInteger(revision) || revision < 0) {
         throw new ModelError("INVALID_SCHEMA", `${id} expected_revision 必须是非负整数`, 0);

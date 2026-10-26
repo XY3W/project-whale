@@ -39,7 +39,7 @@ try {
   let started = false;
   for (let i = 0; i < 3 && !started; i++) {
     await cdp.evaluate("document.getElementById('start-minesweeper').click()");
-    started = !!(await once("window.whale.getGame()?.cells?.length === 100 && window.whale.board.state.visible", 8000));
+    started = !!(await once("window.whale.getGame()?.cells?.length === 256 && window.whale.board.state.visible", 8000));
   }
   out.startedFromButton = step("button→board", started);
   out.connection = await cdp.evaluate("({ connected: window.whale.client.connected, leaseEpoch: window.whale.client.leaseEpoch })");
@@ -57,7 +57,7 @@ try {
   const digExpr = `(async () => {
     const g = window.whale.getGame();
     if (!g || g.status !== 'playing') return { skipped: g?.status ?? 'no-game' };
-    const c = { x: -4 + (${target.col} + 0.5) * 0.8, z: -4 + (${target.row} + 0.5) * 0.8 };
+    const c = { x: -4 + (${target.col} + 0.5) * g.cellSize, z: -4 + (${target.row} + 0.5) * g.cellSize };
     window.whale.root.position.set(c.x, window.whale.root.position.y, c.z);
     window.whale.root.rotation.y = 0;
     const res = await window.whale.run({ steps: [{ action: 'dig', game_id: g.gameId, row: ${target.row}, col: ${target.col}, expected_revision: g.revision }] });
@@ -91,32 +91,7 @@ try {
     return { rev: g.revision, status: g.status, cell: { state: cell.state, value: cell.value }, revealed: g.cells.filter(c=>c.state==='revealed').length };
   })()`);
 
-  // 6. 第二轮挖掘：revision 继续增长
-  out.secondDig = await runWhenIdle(
-    `(async () => {
-      const g = window.whale.getGame();
-      if (g.status !== 'playing') return { skipped: g.status };
-      const c = { x: -4 + (6.5) * 0.8, z: -4 + (5.5) * 0.8 };
-      window.whale.root.position.set(c.x, window.whale.root.position.y, c.z);
-      const res = await window.whale.run({ steps: [{ action: 'dig', game_id: g.gameId, row: 5, col: 6, expected_revision: g.revision }] });
-      return { status: res?.status ?? null, reason: res?.steps?.[0]?.reasonCode ?? null, rev: window.whale.getGame().revision };
-    })()`,
-    "second dig",
-  );
-
-  // 7. 重复挖已揭示格：应当被拒绝
-  out.repeatDig = await runWhenIdle(
-    `(async () => {
-      const g = window.whale.getGame();
-      const c = { x: -4 + (${target.col} + 0.5) * 0.8, z: -4 + (${target.row} + 0.5) * 0.8 };
-      window.whale.root.position.set(c.x, window.whale.root.position.y, c.z);
-      const res = await window.whale.run({ steps: [{ action: 'dig', game_id: g.gameId, row: ${target.row}, col: ${target.col}, expected_revision: g.revision }] });
-      return { status: res?.status ?? null, reason: res?.steps?.[0]?.reasonCode ?? null, actual: res?.steps?.[0]?.actual ?? null };
-    })()`,
-    "repeat dig",
-  );
-
-  // 8. 站在格子外挖：应当被拒绝并给出距离
+  // 6. 站在格子外挖：应当被拒绝并给出距离
   out.outOfCell = await runWhenIdle(
     `(async () => {
       const g = window.whale.getGame();
@@ -126,6 +101,31 @@ try {
       return { status: res?.status ?? null, reason: res?.steps?.[0]?.reasonCode ?? null, actual: res?.steps?.[0]?.actual ?? null };
     })()`,
     "out of cell dig",
+  );
+
+  // 8. 重复挖已揭示格：应当被拒绝
+  out.repeatDig = await runWhenIdle(
+    `(async () => {
+      const g = window.whale.getGame();
+      const c = { x: -4 + (${target.col} + 0.5) * g.cellSize, z: -4 + (${target.row} + 0.5) * g.cellSize };
+      window.whale.root.position.set(c.x, window.whale.root.position.y, c.z);
+      const res = await window.whale.run({ steps: [{ action: 'dig', game_id: g.gameId, row: ${target.row}, col: ${target.col}, expected_revision: g.revision }] });
+      return { status: res?.status ?? null, reason: res?.steps?.[0]?.reasonCode ?? null, actual: res?.steps?.[0]?.actual ?? null };
+    })()`,
+    "repeat dig",
+  );
+
+  // 7. 第二轮挖掘：revision 继续增长（可能踩雷）
+  out.secondDig = await runWhenIdle(
+    `(async () => {
+      const g = window.whale.getGame();
+      if (g.status !== 'playing') return { skipped: g.status };
+      const c = { x: -4 + (6.5) * g.cellSize, z: -4 + (5.5) * g.cellSize };
+      window.whale.root.position.set(c.x, window.whale.root.position.y, c.z);
+      const res = await window.whale.run({ steps: [{ action: 'dig', game_id: g.gameId, row: 5, col: 6, expected_revision: g.revision }] });
+      return { status: res?.status ?? null, reason: res?.steps?.[0]?.reasonCode ?? null, rev: window.whale.getGame().revision };
+    })()`,
+    "second dig",
   );
 
   out.consoleErrors = cdp.errors.slice(0, 5);

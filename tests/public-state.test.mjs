@@ -80,14 +80,14 @@ test("公开棋盘：未揭示格没有 value，也不泄露雷表", () => {
   dig(game, 5, 5);
   const view = publicBoard(game);
   const ctx = boardContext(view, { x: 0.4, z: -0.4, yawDeg: 90 });
-  assert.equal(ctx.cells.length, 100);
-  for (const cell of ctx.cells) {
-    if (cell.state === "hidden") assert.deepEqual(Object.keys(cell).sort(), ["col", "row", "state"]);
-    else assert.ok("value" in cell);
-  }
+  assert.equal(ctx.rows.length, 16);
+  assert.ok(ctx.rows.every((row) => row.length === 16));
+  // 未揭示格只有 "."，网格里不出现任何可推断答案的符号
+  const chars = new Set(ctx.rows.join(""));
+  assert.ok([...chars].every((ch) => ch === "." || ch === "*" || /[0-9]/.test(ch)));
   assert.ok(!("mines" in ctx));
-  assert.deepEqual(ctx.currentCell, { row: 4, col: 5 });
-  assert.ok(ctx.coordinateRule.includes("0.8"));
+  assert.deepEqual(ctx.currentCell, { row: 7, col: 8 });
+  assert.ok(ctx.coordinateRule.includes("0.5"));
   assert.equal(ctx.revision, 1);
 });
 

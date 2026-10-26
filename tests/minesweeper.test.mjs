@@ -11,7 +11,7 @@ test("建盘：首次挖掘前没有雷表，公开快照全是 hidden", () => {
   const game = newGame();
   assert.equal(game.mines, null);
   const board = publicBoard(game);
-  assert.equal(board.cells.length, 100);
+  assert.equal(board.cells.length, SIZE * SIZE);
   assert.ok(board.cells.every((c) => c.state === "hidden" && c.value === undefined));
   assert.equal(board.mineCount, MINE_COUNT);
   assert.equal(board.remainingSafe, SAFE_TOTAL);
@@ -27,7 +27,7 @@ test("首次挖掘安全：200 个随机种子都不踩雷", () => {
   }
 });
 
-test("布雷：15 颗、无重复、不含首挖格、同 seed 可复现", () => {
+test(`布雷：${MINE_COUNT} 颗、无重复、不含首挖格、同 seed 可复现`, () => {
   const a = placeMines(999, indexOf(0, 0));
   const b = placeMines(999, indexOf(0, 0));
   assert.deepEqual(a, b);
@@ -42,7 +42,7 @@ test("八邻计数：角落、边、中间各自正确", () => {
   assert.equal(countAdjacentMines(mines, indexOf(0, 1)), 2);
   assert.equal(countAdjacentMines(mines, indexOf(1, 0)), 2);
   assert.equal(countAdjacentMines(mines, indexOf(5, 5)), 1);
-  assert.equal(countAdjacentMines(mines, indexOf(9, 9)), 0);
+  assert.equal(countAdjacentMines(mines, indexOf(SIZE - 1, SIZE - 1)), 0);
 });
 
 test("零格展开：同一次挖掘一次 revision，changedCells 含边界数字", () => {
@@ -92,22 +92,23 @@ test("重复挖同一格：ALREADY_REVEALED，不增加 revision", () => {
   assert.equal(game.revision, revision);
 });
 
-test("越界：行列必须在 0..9，坐标 +4 不属于棋盘", () => {
+test(`越界：行列必须在 0..${SIZE - 1}，坐标 ±4 不属于棋盘`, () => {
   const game = newGame(5);
   assert.equal(dig(game, -1, 0).reason, "OUT_OF_BOUNDS");
-  assert.equal(dig(game, 0, 10).reason, "OUT_OF_BOUNDS");
+  assert.equal(dig(game, 0, SIZE).reason, "OUT_OF_BOUNDS");
   assert.equal(dig(game, 1.5, 2).reason, "OUT_OF_BOUNDS");
-  assert.equal(cellAt(0, 0).row, 5);
-  assert.equal(cellAt(3.99, 3.99).col, 9);
+  assert.equal(cellAt(0, 0).row, SIZE / 2);
+  assert.equal(cellAt(0, 0).col, SIZE / 2);
+  assert.equal(cellAt(3.99, 3.99).col, SIZE - 1);
   assert.equal(cellAt(4, 0), null);
   assert.equal(cellAt(-4.01, 0), null);
-  assert.equal(inBounds(9, 9), true);
-  assert.equal(inBounds(10, 9), false);
+  assert.equal(inBounds(SIZE - 1, SIZE - 1), true);
+  assert.equal(inBounds(SIZE, SIZE - 1), false);
 });
 
-test("格心公式：col 从 -X 到 +X、row 从 -Z 到 +Z，每格 0.8m", () => {
-  assert.deepEqual(cellCenter(0, 0), { x: -3.6, z: -3.6 });
-  assert.deepEqual(cellCenter(9, 9), { x: 3.6, z: 3.6 });
+test("格心公式：col 从 -X 到 +X、row 从 -Z 到 +Z，每格 0.5m", () => {
+  assert.deepEqual(cellCenter(0, 0), { x: -3.75, z: -3.75 });
+  assert.deepEqual(cellCenter(SIZE - 1, SIZE - 1), { x: 3.75, z: 3.75 });
   const center = cellCenter(5, 5);
   const back = cellAt(center.x, center.z);
   assert.deepEqual(back, { row: 5, col: 5 });
@@ -141,6 +142,14 @@ test("持久化：序列化→恢复后雷表、已开格、状态一致", () =>
   // 恢复后继续挖仍然一致
   const { row, col } = cellOf(game.mines[0]);
   assert.equal(dig(restored, row, col).status, "lost");
+});
+
+test("旧尺寸存档：不会把 10×10 的索引误读成 16×16", () => {
+  assert.equal(restoreGame({ gameId: "old", seed: 1, size: 10, revealed: [0, 5] }), null);
+  assert.equal(restoreGame({ gameId: "old2", seed: 1, mines: [SIZE * SIZE + 3] }), null);
+  const saved = serializeGame(newGame());
+  assert.equal(saved.size, SIZE);
+  assert.equal(saved.mineCount, MINE_COUNT);
 });
 
 test("公开快照：未揭示格永远不含 value", () => {

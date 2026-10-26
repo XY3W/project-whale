@@ -12,6 +12,7 @@ export interface PublicBoard {
   revision: number;
   status: "playing" | "won" | "lost";
   size: number;
+  cellSize?: number;
   mineCount: number;
   cells: PublicCell[];
   revealedSafe: number;
@@ -21,7 +22,7 @@ export interface PublicBoard {
 const SIZE_M = 8;
 
 /**
- * 扫雷盘面：8m × 8m 的 10×10 网格，用一张 canvas 纹理画在贴地平面上。
+ * 扫雷盘面：8m × 8m 地面上的 16×16 网格（每格 0.5m），用一张 canvas 纹理绘制。
  * 只渲染服务端下发的公开棋盘，未揭示格不携带任何数值。
  */
 export class MinesweeperBoard {
@@ -79,14 +80,15 @@ export class MinesweeperBoard {
   private draw() {
     const ctx = this.ctx;
     const px = this.canvas.width;
-    const cell = px / 10;
+    const size = this.board?.size ?? 16;
+    const cell = px / size;
     ctx.clearRect(0, 0, px, px);
     // 底：淡蓝灰玻璃
     ctx.fillStyle = "rgba(24, 38, 62, 0.55)";
     ctx.fillRect(0, 0, px, px);
     ctx.strokeStyle = "rgba(140, 180, 240, 0.35)";
     ctx.lineWidth = 2;
-    for (let i = 0; i <= 10; i++) {
+    for (let i = 0; i <= size; i++) {
       ctx.beginPath(); ctx.moveTo(i * cell, 0); ctx.lineTo(i * cell, px); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, i * cell); ctx.lineTo(px, i * cell); ctx.stroke();
     }

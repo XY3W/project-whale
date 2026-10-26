@@ -17,6 +17,7 @@ const out = {};
 try {
   await once("!!window.whale && window.whale.client.connected === true", 60000);
   await once(IDLE, 120000);
+  await sleepMs(4000); // 等首帧着色器编译过去，避免把冷启动当成卡死
 
   out.plan = await cdp.evaluate(`(async () => {
     window.whale.root.position.set(0, window.whale.root.position.y, 0);

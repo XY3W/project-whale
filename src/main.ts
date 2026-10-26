@@ -289,8 +289,10 @@ async function boot() {
     const hit = raycaster.intersectObject(board.mesh, false)[0];
     if (!hit) return null;
     const { x, z } = hit.point;
-    if (Math.abs(x) >= 4 || Math.abs(z) >= 4) return null;
-    return { row: Math.floor((z + 4) / 0.8), col: Math.floor((x + 4) / 0.8) };
+    const cellSize = gameBoard.cellSize ?? 0.5;
+    const half = gameBoard.boardHalf ?? (gameBoard.size * cellSize) / 2;
+    if (Math.abs(x) >= half || Math.abs(z) >= half) return null;
+    return { row: Math.floor((z + half) / cellSize), col: Math.floor((x + half) / cellSize) };
   };
   canvas.addEventListener("pointermove", (e) => {
     board.setHover(hoverCellAt(e.clientX, e.clientY));
@@ -394,6 +396,19 @@ async function boot() {
     return def ? { x: def.pickupReference.position[0], z: def.pickupReference.position[2] } : { x: basinReference.position[0], z: basinReference.position[2] };
   };
   const alignInfo = (objectId = "basin") => {
+    // 有落地变体的物品（饭勺）：站位点和朝向都由物品姿态唯一确定，
+    // 判据是“离站位点多远 + 朝向差多少”，不是径向距离。用径向判断的话，
+    // 几毫米的切向偏差会被放大成几度的朝向误差，拾取会莫名其妙 NOT_ALIGNED。
+    const stand = variantStand(objectId);
+    if (stand) {
+      const standError = Math.hypot(root.position.x - stand.x, root.position.z - stand.z);
+      const yawErrorDeg = signedDeltaDeg(degYaw(), stand.yawDeg);
+      return {
+        distanceError: Math.round(standError * 10000) / 10000,
+        yawErrorDeg: Math.round(yawErrorDeg * 1000) / 1000,
+        ok: standError <= 0.02 && Math.abs(yawErrorDeg) <= 2,
+      };
+    }
     const item = itemOf(objectId) ?? basin;
     const ref = referenceOf(objectId);
     const reach = Math.hypot(ref.x, ref.z);
@@ -585,8 +600,12 @@ async function boot() {
   };
   loco.basin = basinBridge;
 
-  /** 格心：与服务端 cellCenter 同一套公式（8m 场地、10×10、每格 0.8m） */
-  const cellCenterOf = (row: number, col: number) => ({ x: -4 + (col + 0.5) * 0.8, z: -4 + (row + 0.5) * 0.8 });
+  /** 格心：与服务端 cellCenter 同一套公式（8m 场地，边长由棋盘下发，16×16 → 0.5m） */
+  const cellCenterOf = (row: number, col: number) => {
+    const size = gameBoard?.cellSize ?? 0.5;
+    const half = gameBoard?.boardHalf ?? 4;
+    return { x: -half + (col + 0.5) * size, z: -half + (row + 0.5) * size };
+  };
 
   const digBridge: DigBridge = {
     current: () => gameBoard,

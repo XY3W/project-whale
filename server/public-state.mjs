@@ -98,29 +98,41 @@ export function propsContext(props, slots = slotsOf(props)) {
 }
 
 /**
- * 公开棋盘：未揭示格只有 row/col/state，没有 value、邻雷数或概率。
- * 已结束的对局附上雷表（失败后允许公开），但模型上下文不使用该字段。
+ * 公开棋盘：给模型的是一张 16×16 的字符网格，而不是 256 条 JSON 记录。
+ * 未揭示格一律是 "."，不携带 value、邻雷数或概率；雷表、种子永远不出现。
  */
 export function boardContext(board, character = null) {
   if (!board) return null;
-  const cells = board.cells.map((cell) =>
-    cell.state === "revealed" ? { row: cell.row, col: cell.col, state: cell.state, value: cell.value } : { row: cell.row, col: cell.col, state: "hidden" },
-  );
+  const size = board.size;
+  const cellSize = board.cellSize ?? 0.5;
+  const half = board.boardHalf ?? (size * cellSize) / 2;
+  const rows = [];
+  for (let r = 0; r < size; r++) {
+    let line = "";
+    for (let c = 0; c < size; c++) {
+      const cell = board.cells[r * size + c];
+      if (!cell || cell.state !== "revealed") line += ".";
+      else if (cell.value === "mine") line += "*";
+      else line += String(cell.value);
+    }
+    rows.push(line);
+  }
   const current = character && Number.isFinite(character.x) && Number.isFinite(character.z) ? cellAt(character.x, character.z) : null;
   return {
     gameId: board.gameId,
     revision: board.revision,
     status: board.status,
-    size: board.size,
+    size,
     mineCount: board.mineCount,
-    cellSizeM: 0.8,
-    boardHalf: 4,
+    cellSizeM: cellSize,
+    boardHalf: half,
     revealedSafe: board.revealedSafe,
     remainingSafe: board.remainingSafe,
     currentCell: current,
     currentCellCenter: current ? cellCenter(current.row, current.col) : null,
-    coordinateRule: "row 从 -Z 向 +Z、col 从 -X 向 +X；格心 x=-4+(col+0.5)*0.8，z=-4+(row+0.5)*0.8；|x| 或 |z| ≥4 不属于棋盘",
-    cells,
+    coordinateRule: `row 从 -Z 向 +Z、col 从 -X 向 +X；每格 ${cellSize}m，格心 x=${-half}+(col+0.5)*${cellSize}，z=${-half}+(row+0.5)*${cellSize}；|x| 或 |z| ≥${half} 不属于棋盘`,
+    legend: "rows[row][col]：. = 未揭示（未知）；0-9 = 已揭示格的邻雷数；* = 已引爆的雷",
+    rows,
   };
 }
 

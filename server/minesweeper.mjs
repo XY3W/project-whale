@@ -2,12 +2,19 @@
  * 扫雷规则核心（服务端私有）。
  *
  * 只有这里持有雷表；公开快照永远不含未揭示格的 value、邻雷数或其它可推断答案的字段。
- * 首次挖掘格安全、10×10 / 15 雷、八邻计数、零格一次展开、挖完所有非雷格获胜。
+ * 首次挖掘格安全、16×16 / 53 雷、八邻计数、零格一次展开、挖完所有非雷格获胜。
  */
 
-export const SIZE = 10;
-export const MINE_COUNT = 15;
+export const SIZE = 16;
+/**
+ * 密度对齐经典扫雷「高级」（30×16 / 99 雷 ≈ 20.63%）：
+ * 16×16 = 256 格，53 雷 ≈ 20.70%，取下限后最接近的一档。
+ */
+export const MINE_COUNT = 53;
 export const SAFE_TOTAL = SIZE * SIZE - MINE_COUNT;
+/** 棋盘仍占 8m × 8m 场地：16 格 → 每格 0.5m，边缘仍在 ±4m */
+export const CELL_M = 0.5;
+export const BOARD_HALF = (SIZE * CELL_M) / 2;
 
 /** 小整数种子 PRNG（mulberry32），保证同一 seed 复现同一雷区 */
 export function createRandom(seed) {
@@ -77,6 +84,15 @@ export function createGame({ gameId, seed }) {
 /** 从持久化数据恢复（雷表只存在于服务端存储） */
 export function restoreGame(raw) {
   if (!raw || typeof raw !== "object" || !raw.gameId) return null;
+  // 棋盘尺寸变过（10×10 → 16×16）的旧存档直接用不了：索引会串格，宁可开新局
+  if (raw.size !== undefined && raw.size !== SIZE) {
+    console.warn(`[minesweeper] 忽略 ${raw.size}×${raw.size} 的旧存档，按 ${SIZE}×${SIZE} 重新开局`);
+    return null;
+  }
+  if (raw.mines && Array.isArray(raw.mines) && raw.mines.some((i) => !Number.isInteger(i) || i < 0 || i >= SIZE * SIZE)) {
+    console.warn("[minesweeper] 旧存档的雷索引超出当前棋盘，重新开局");
+    return null;
+  }
   const game = createGame({ gameId: raw.gameId, seed: raw.seed ?? 0 });
   game.mines = Array.isArray(raw.mines) ? raw.mines.map(Number) : null;
   game.mineSet = game.mines ? new Set(game.mines) : null;
@@ -92,6 +108,8 @@ export function restoreGame(raw) {
 export function serializeGame(game) {
   return {
     gameId: game.gameId,
+    size: SIZE,
+    mineCount: MINE_COUNT,
     seed: game.seed,
     mines: game.mines,
     revealed: [...game.revealed],
@@ -122,6 +140,8 @@ export function publicBoard(game) {
     revision: game.revision,
     status: game.status,
     size: SIZE,
+    cellSize: CELL_M,
+    boardHalf: BOARD_HALF,
     mineCount: MINE_COUNT,
     cells,
     revealedSafe,
@@ -192,16 +212,16 @@ export function dig(game, row, col) {
 
 /** 角色根位置 → 棋盘格子（半开区间；+4 不属于棋盘） */
 export function cellAt(x, z) {
-  const half = (SIZE * 0.8) / 2; // 4m
+  const half = BOARD_HALF;
   if (!Number.isFinite(x) || !Number.isFinite(z)) return null;
   if (x < -half || x >= half || z < -half || z >= half) return null;
-  const col = Math.floor((x + half) / 0.8);
-  const row = Math.floor((z + half) / 0.8);
+  const col = Math.floor((x + half) / CELL_M);
+  const row = Math.floor((z + half) / CELL_M);
   return inBounds(row, col) ? { row, col } : null;
 }
 
 const round6 = (v) => Math.round(v * 1e6) / 1e6;
 export const cellCenter = (row, col) => ({
-  x: round6(-4 + (col + 0.5) * 0.8),
-  z: round6(-4 + (row + 0.5) * 0.8),
+  x: round6(-BOARD_HALF + (col + 0.5) * CELL_M),
+  z: round6(-BOARD_HALF + (row + 0.5) * CELL_M),
 });

@@ -144,6 +144,9 @@ export interface GameView {
   revision: number;
   status: "playing" | "won" | "lost";
   size: number;
+  /** 每格边长（米）：16×16 仍占 8m 场地，所以是 0.5 */
+  cellSize: number;
+  boardHalf?: number;
   mineCount: number;
   cells: { row: number; col: number; state: "hidden" | "revealed"; value?: number | "mine" }[];
   revealedSafe: number;

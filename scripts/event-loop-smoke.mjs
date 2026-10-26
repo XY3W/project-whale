@@ -194,13 +194,13 @@ async function main() {
     send(ws, "game_start", { requestId: "smoke-1" });
     const gameState = await waitFor((m) => m.type === "game_state", "game_state");
     const board0 = boardOf(gameState);
-    check(board0?.cells?.length === 100, "棋盘 100 格");
+    check(board0?.cells?.length === 256, "棋盘 256 格（16×16）");
     check(board0?.cells?.every((c) => c.state === "hidden" && c.value === undefined), "开局未揭示格没有 value");
 
     const firstPlan = await waitFor((m) => m.type === "execute_plan", "autonomous execute_plan");
     const autonomy = requests.find((r) => r.ctx?.attentionEvents?.some((e) => e.type === "game_started"));
     check(!!autonomy, "game_started 事件触发了模型调用");
-    check(autonomy?.ctx?.board?.cells?.length === 100, "规划上下文带完整公开棋盘");
+    check(autonomy?.ctx?.board?.rows?.length === 16 && autonomy.ctx.board.rows.every((r) => r.length === 16), "规划上下文带 16×16 字符网格");
     check(autonomy?.ctx?.props?.slots?.left_hand === null || autonomy?.ctx?.props?.slots, "规划上下文带双手槽位");
     check(!JSON.stringify(autonomy?.ctx ?? {}).includes('"mines"'), "上下文不含雷表字段");
     check(firstPlan.taskId === autonomy?.ctx?.taskId, "自主计划与这次调用的任务一致");
@@ -231,7 +231,8 @@ async function main() {
     check(planningTurn?.ctx?.props?.slots?.right_hand === "rice_scoop", "上下文看到右手持勺");
 
     // 客户端执行：走到格心后提交 dig_commit，再回 plan_result
-    const center = { x: -4 + (digStep.col + 0.5) * 0.8, z: -4 + (digStep.row + 0.5) * 0.8 };
+    const cellSize = board0.cellSize ?? 0.5;
+    const center = { x: -4 + (digStep.col + 0.5) * cellSize, z: -4 + (digStep.row + 0.5) * cellSize };
     send(ws, "dig_commit", {
       actionInstanceId: "d1",
       gameId: digStep.game_id,
@@ -287,7 +288,7 @@ async function main() {
       "review 同时收到 board_updated@1（与 plan_result 合并）",
     );
     check(reviewTurn?.ctx?.board?.revision === 1, "review 看到最新棋盘 revision");
-    check(reviewTurn?.ctx?.board?.cells?.some((c) => c.state === "revealed"), "review 棋盘包含已揭示格");
+    check(reviewTurn?.ctx?.board?.rows?.some((row) => /[0-9*]/.test(row)), "review 棋盘包含已揭示格");
 
     // review 里的后续 dig 计划应当到达客户端
     const plan2 = await waitFor((m) => m.type === "execute_plan" && m.taskId === plan1.taskId && m.planId !== plan1.planId, "second dig plan", 8000);
