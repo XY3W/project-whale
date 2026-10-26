@@ -76,6 +76,29 @@ test("turn +45：actual 与 requested 一致", async () => {
   assert.equal(r.steps[0].actual.angle_deg, 45);
 });
 
+test("turn +180 落在 -180：同一个朝向，不能判失败", async () => {
+  // 线上案例：从 yaw=90 请求 turn 180，实际落到 -90（有符号差 -180）
+  const loco = {
+    yaw: () => Math.PI / 2,
+    position: () => ({ x: 0, z: 0 }),
+    walk: async () => {},
+    turn: async () => {},
+    play: async () => {},
+    tail: async () => {},
+    sleep: async () => {},
+  };
+  // 先转到 90，再让 turn 落到 -90：degs 与结果相差 360，但朝向一致
+  let yaw = Math.PI / 2;
+  loco.yaw = () => yaw;
+  loco.turn = async (deg) => {
+    yaw = ((yaw + (deg * Math.PI) / 180 + Math.PI) % (Math.PI * 2)) - Math.PI;
+  };
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "turn", angle_deg: 180 }] });
+  assert.equal(r.steps[0].status, "succeeded", JSON.stringify(r.steps[0]));
+  assert.equal(r.steps[0].reasonCode, "OK");
+});
+
 test("turn -180：方向与符号正确", async () => {
   const { loco } = makeLoco();
   const ex = new ActionExecutor(loco, { half: 4 });

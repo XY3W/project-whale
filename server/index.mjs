@@ -334,7 +334,7 @@ function broadcastState() {
   for (const ws of wss.clients) send(ws, "session_state", { ...payload, ...statePayload(ws) });
 }
 
-function endTask(reason) {
+function endTask(reason, opts = {}) {
   const finished = session.task;
   if (session.budgetTimer) { clearTimeout(session.budgetTimer); session.budgetTimer = null; }
   session.task = null;
@@ -344,12 +344,16 @@ function endTask(reason) {
   if (reason) console.log(`[task] ${reason}`);
   // 自主回合按“这一轮有没有真的推进棋盘”决定下一轮的间隔：
   // 挖到了就按正常节奏继续，原地打转就指数退避，避免空转烧 API
-  if (finished && finished.origin === "event") {
+  if (opts.retryMs != null) {
+    // 模型抽风/截断这类瞬时问题：很快再试一次，不进退避
+    autoplay.backoff = 1;
+    noteAutoPlayDelay(opts.retryMs);
+  } else if (finished && finished.origin === "event") {
     const board = games.public();
     const progressed = finished.gameRevision != null && board && board.revision > finished.gameRevision;
     autoplay.backoff = progressed ? 1 : Math.min(autoplay.backoff * 2, 8);
     const base = board && board.status === "playing" ? AUTO_CONTINUE_IDLE_MS : AUTO_START_IDLE_MS;
-    noteAutoPlayDelay(Math.min(base * autoplay.backoff, AUTO_MAX_BACKOFF_MS));
+    noteAutoPlayDelay(Math.min(base * autoplay.backoff, 120_000));
   } else if (finished) {
     autoplay.backoff = 1;
     noteAutoPlayDelay(AUTO_START_IDLE_MS);
@@ -629,9 +633,13 @@ function fail(ws, task, err) {
   const code = err instanceof ModelError ? err.code : "INTERNAL";
   const message = err instanceof Error ? err.message : String(err);
   console.error(`[model] ${code}: ${message}`);
-  send(ws, "error", { code, message });
-  send(ws, "task_state", { taskId: task?.id ?? null, phase: "error" });
-  endTask("model error");
+  // 自主回合的模型报错（尤其输出被截断）不该在页面上点亮断连红图标：
+  // 她自己没想出来，过一会儿再想就是了。
+  if (task?.origin !== "event") {
+    send(ws, "error", { code, message });
+    send(ws, "task_state", { taskId: task?.id ?? null, phase: "error" });
+  }
+  endTask("model error", { retryMs: 20_000 });
 }
 
 let connSeq = 0;

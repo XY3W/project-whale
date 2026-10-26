@@ -190,7 +190,9 @@ export class ActionExecutor {
         if (this.cancelled) {
           return done("cancelled", { angle_deg: actual, partial: true }, "CANCELLED");
         }
-        if (Math.abs(actual - deg) > 0.5) {
+        // 转向只看“最终朝向对不对”：+180° 和 -180° 是同一个朝向，
+        // 直接比较数值会把正确的结果判成 ANGLE_MISMATCH（线上就是这么卡住的）。
+        if (Math.abs(signedDeltaDeg(deg, actual)) > 0.5) {
           return done("failed", { requested_deg: deg, angle_deg: actual }, "ANGLE_MISMATCH");
         }
         return done("succeeded", { angle_deg: actual }, "OK");
