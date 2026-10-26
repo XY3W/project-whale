@@ -125,13 +125,14 @@ test("walk 0.5：拒绝并给出候选值", async () => {
   assert.deepEqual(r.steps[0].actual.nearest, { below: 0.45, above: 0.63 });
 });
 
-test("越界：场边向前走被拒绝，不移动", async () => {
+test("越界：场边向前走被拒绝，不移动（现在报 BLOCKED + 剩余距离）", async () => {
   const { loco, pos } = makeLoco();
   pos.z = 3.5;
   const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   const r = await ex.run({ steps: [{ action: "walk", distance_m: 0.27 }] });
   assert.equal(r.steps[0].status, "failed");
-  assert.equal(r.steps[0].reasonCode, "OUT_OF_BOUNDS");
+  assert.equal(r.steps[0].reasonCode, "BLOCKED");
+  assert.equal(r.steps[0].actual.error, "WALL_BLOCKED");
   assert.equal(pos.z, 3.5);
 });
 
@@ -418,4 +419,65 @@ test("钢盆：walk_to_basin 不再要求盆已经正放", async () => {
   const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   const result = await ex.run({ steps: [{ action: "walk_to_basin" }] });
   assert.equal(result.status, "completed");
+});
+
+
+// ---- 边界阻挡：必须明确告诉模型“走不动”，而不是只报位移不符 ----
+test("贴墙走路：目标越界 → BLOCKED，并给出剩余可走距离", async () => {
+  const { loco, pos } = makeLoco(0);
+  pos.z = 3.6;
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "walk", distance_m: 0.27 }] });
+  assert.equal(r.steps[0].status, "failed");
+  assert.equal(r.steps[0].reasonCode, "BLOCKED");
+  assert.equal(r.steps[0].actual.error, "WALL_BLOCKED");
+  assert.ok(r.steps[0].actual.available_m <= 0.1001, JSON.stringify(r.steps[0].actual));
+  assert.ok(String(r.steps[0].actual.hint).includes("边界"));
+  assert.equal(pos.z, 3.6, "被挡住时不应该悄悄往前走");
+});
+
+/** 带 run/adjust 的假移动层，用来测边界 */
+function makeMoveLoco(start = { x: 0, z: 0 }) {
+  let yaw = 0;
+  const pos = { ...start };
+  const step = (m) => {
+    pos.x += Math.sin(yaw) * m;
+    pos.z += Math.cos(yaw) * m;
+  };
+  const clamp = () => {
+    const half = 3.7; // 主循环的 clamp，模拟真实行为
+    pos.x = Math.max(-half, Math.min(half, pos.x));
+    pos.z = Math.max(-half, Math.min(half, pos.z));
+  };
+  const loco = {
+    yaw: () => yaw,
+    position: () => ({ ...pos }),
+    walk: async (m) => { step(m); clamp(); },
+    adjust: async (m) => { step(m); clamp(); },
+    run: async (m) => { step(m); clamp(); },
+    turn: async (deg) => { yaw += (deg * Math.PI) / 180; },
+    play: async () => {},
+    tail: async () => {},
+    sleep: async () => {},
+  };
+  return { loco, pos };
+}
+
+test("贴墙短步：同样在移动前就判定 BLOCKED", async () => {
+  const { loco, pos } = makeMoveLoco({ x: 0, z: 3.69 });
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "walk_adjust", distance_m: 0.08 }] });
+  assert.equal(r.steps[0].reasonCode, "BLOCKED");
+  assert.ok(r.steps[0].actual.available_m <= 0.0101);
+  assert.equal(pos.z, 3.69);
+});
+
+test("贴墙跑动：越界同样 BLOCKED", async () => {
+  const { loco, pos } = makeMoveLoco({ x: 3.5, z: 0 });
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  // 先转 90° 朝 +X，再跑 0.464m：x 会到 3.96，越界
+  const r = await ex.run({ steps: [{ action: "turn", angle_deg: 90 }, { action: "run", distance_m: 0.464 }] });
+  assert.equal(r.steps[1].reasonCode, "BLOCKED");
+  assert.ok(r.steps[1].actual.available_m <= 0.2001);
+  assert.equal(pos.x, 3.5, "被挡住时不应移动");
 });

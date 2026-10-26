@@ -149,6 +149,35 @@ export class ActionExecutor {
     return { x: round(p.x), z: round(p.z), yawDeg: round((yaw * 180) / Math.PI) };
   }
 
+  /**
+   * 沿着当前朝向，到场地边界还能走多远。
+   * 边界是 |x|、|z| ≤ half - margin（主循环还会 clamp 一次，多走的部分会被截掉）。
+   */
+  private forwardRoom(before: { x: number; z: number }, yaw: number): number {
+    const limit = this.half - this.margin;
+    const sx = Math.sin(yaw);
+    const cz = Math.cos(yaw);
+    let room = Infinity;
+    if (sx > 1e-9) room = Math.min(room, (limit - before.x) / sx);
+    else if (sx < -1e-9) room = Math.min(room, (-limit - before.x) / sx);
+    if (cz > 1e-9) room = Math.min(room, (limit - before.z) / cz);
+    else if (cz < -1e-9) room = Math.min(room, (-limit - before.z) / cz);
+    return Math.max(0, room);
+  }
+
+  /** 被边界挡住时的统一回报：让模型知道“直走不通”，而不是只看到位移不符 */
+  private blocked(before: { x: number; z: number }, yaw: number, requested: number): StepResult["actual"] {
+    const limit = this.half - this.margin;
+    return {
+      error: "WALL_BLOCKED",
+      requested_m: round(requested),
+      available_m: round(this.forwardRoom(before, yaw)),
+      boundary_m: round(limit),
+      position: { x: round(before.x), z: round(before.z) },
+      hint: `前方 ${round(this.forwardRoom(before, yaw))}m 就到场地边界（可走范围 ±${round(limit)}m）。先 turn 换个方向，或用更小的 walk/walk_adjust 挪；不要重复同一条走不通的指令。`,
+    };
+  }
+
   private async runStep(stepId: string, step: Step): Promise<StepResult> {
     const t0 = this.now();
     const startState = this.state();
@@ -215,7 +244,7 @@ export class ActionExecutor {
         };
         const limit = this.half - this.margin;
         if (Math.abs(target.x) > limit || Math.abs(target.z) > limit) {
-          return done("failed", { target }, "OUT_OF_BOUNDS");
+          return done("failed", { target, ...this.blocked(before, yaw, meters) }, "BLOCKED");
         }
         // 预算只是“卡死”兜底：动画按帧推进，headless/低端设备上 17 秒的 1.89m
         // 可能跑三四分钟。真正的卡住由 walk 的进度看门狗（8 秒无进展）判定。
@@ -231,6 +260,9 @@ export class ActionExecutor {
           return done("cancelled", { ...actual, partial: moved > 0 }, "CANCELLED");
         }
         if (Math.abs(moved - meters) > 0.001) {
+          // 目标在界内却走不满：几乎只可能是被主循环的边界 clamp 截断
+          const atWall = Math.abs(after.x) > limit - 0.002 || Math.abs(after.z) > limit - 0.002;
+          if (atWall) return done("failed", { ...this.blocked(after, yaw, meters), distance_m: round(moved) }, "BLOCKED");
           return done("failed", { requested_m: meters, ...actual }, "DISPLACEMENT_MISMATCH");
         }
         return done("succeeded", actual, "OK");
@@ -279,9 +311,12 @@ export class ActionExecutor {
         const target = { x: before.x + Math.sin(yaw) * meters, z: before.z + Math.cos(yaw) * meters };
         const limit = this.half - this.margin;
         if (Math.abs(target.x) > limit || Math.abs(target.z) > limit) {
-          return done("failed", { target }, "OUT_OF_BOUNDS");
+          return done("failed", { target, ...this.blocked(before, yaw, meters) }, "BLOCKED");
         }
         const cycles = Math.round((meters - 0.144) / 0.32);
+        if (meters > this.forwardRoom(before, yaw) + 1e-9) {
+          return done("failed", this.blocked(before, yaw, meters), "BLOCKED");
+        }
         // 与 walk 同样的预算思路：动画按帧推进，卡住由 loco 的进度看门狗判定
         const raced = await this.withTimeout(this.loco.run ? this.loco.run(meters) : Promise.reject(new Error("no run")), 180000 + cycles * 15000);
         const after = this.loco.position();
@@ -299,12 +334,21 @@ export class ActionExecutor {
           return done("unsupported", { supported: [0.02, 0.04, 0.06, 0.08] }, "CAPABILITY_DISABLED");
         }
         const before = { ...this.loco.position() };
+        const yaw = this.loco.yaw();
+        if (meters > this.forwardRoom(before, yaw) + 1e-9) {
+          return done("failed", this.blocked(before, yaw, meters), "BLOCKED");
+        }
         const raced = await this.withTimeout(this.loco.adjust(meters), 90000);
         const after = this.loco.position();
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
         if (!raced.ok) return done("unknown", { distance_m: round(moved), partial: true }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { distance_m: round(moved) }, "CANCELLED");
-        if (Math.abs(moved - meters) > 0.004) return done("failed", { requested_m: meters, distance_m: round(moved) }, "DISPLACEMENT_MISMATCH");
+        if (Math.abs(moved - meters) > 0.004) {
+          const limit = this.half - this.margin;
+          const atWall = Math.abs(after.x) > limit - 0.002 || Math.abs(after.z) > limit - 0.002;
+          if (atWall) return done("failed", { ...this.blocked(after, yaw, meters), distance_m: round(moved) }, "BLOCKED");
+          return done("failed", { requested_m: meters, distance_m: round(moved) }, "DISPLACEMENT_MISMATCH");
+        }
         return done("succeeded", { distance_m: round(moved) }, "OK");
       }
 
