@@ -244,3 +244,42 @@ canvas { display: block; }
   box-shadow: 0 0 18px rgba(255, 176, 84, 0.25);
   color: rgba(255, 232, 204, 0.95);
 }
+
+/* 头顶“正在想”指示器：三个跳动的小点 */
+.thinking-badge {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  padding: 6px 9px;
+  border-radius: 999px;
+  background: rgba(10, 22, 42, 0.72);
+  border: 1px solid rgba(126, 190, 255, 0.5);
+  box-shadow: 0 0 14px rgba(88, 166, 255, 0.28);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+
+.thinking-badge.show { opacity: 1; }
+
+.thinking-badge i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #a9d6ff;
+  animation: think-bounce 1.15s infinite ease-in-out;
+}
+
+.thinking-badge i:nth-child(2) { animation-delay: 0.16s; }
+.thinking-badge i:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes think-bounce {
+  0%, 70%, 100% { transform: translateY(0); opacity: 0.55; }
+  35% { transform: translateY(-4px); opacity: 1; }
+}

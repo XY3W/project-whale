@@ -190,6 +190,17 @@ async function boot() {
   document.body.appendChild(errIcon);
   const setError = (on: boolean) => errIcon.classList.toggle("show", on);
 
+  // 头顶“正在想”指示器：模型思考/审核期间显示三个跳动的小点
+  const thinkBadge = document.createElement("div");
+  thinkBadge.className = "thinking-badge";
+  thinkBadge.innerHTML = "<i></i><i></i><i></i>";
+  document.body.appendChild(thinkBadge);
+  let llmThinking = false;
+  const setLlmThinking = (on: boolean) => {
+    llmThinking = on;
+    thinkBadge.classList.toggle("show", on);
+  };
+
   const bubble = document.createElement("div");
   bubble.className = "speech-bubble";
   document.body.appendChild(bubble);
@@ -860,6 +871,8 @@ async function boot() {
     onTaskState: (phase) => {
       taskActive = phase === "thinking" || phase === "executing" || phase === "checking";
       chat.setThinking(taskActive);
+      // 只有“等模型”的阶段才亮头顶图标；executing 是她在动，不是在想
+      setLlmThinking(phase === "thinking" || phase === "checking");
       if (phase === "idle") chat.setThinking(false);
     },
     onError: (code, message) => {
@@ -909,6 +922,7 @@ async function boot() {
         errorActive = true;
         currentExecutor?.cancel();
         player.setWalking(false);
+        setLlmThinking(false);
         setError(true);
       } else {
         chat.setError(null);
@@ -1050,6 +1064,15 @@ async function boot() {
     if (stateApplied && !readOnly && now - lastReport > 2000 && !player.state.walking && phase === "idle" && !taskActive) {
       lastReport = now;
       client.sendStateSnapshot(snapshot());
+    }
+
+    if (llmThinking) {
+      const p = root.position.clone();
+      p.y += 1.24;
+      p.project(stage.camera);
+      const x = (p.x * 0.5 + 0.5) * innerWidth;
+      const y = (-p.y * 0.5 + 0.5) * innerHeight;
+      thinkBadge.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
     }
 
     if (errIcon.classList.contains("show")) {
