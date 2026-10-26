@@ -13,6 +13,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
+import { GameService } from "./game.mjs";
 import { contextBudget, estimateRequest } from "./context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
 import { CAPABILITY_VERSION, ModelError, SYSTEM_PROMPT, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
@@ -54,6 +55,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 
 let nextTask = 100;
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
+const games = new GameService(path.join(process.cwd(), "data", "minesweeper.json"));
 function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -198,6 +200,7 @@ function statePayload(ws) {
     generation: session.generation,
     leaseEpoch: session.leaseEpoch,
     basin,
+    game: games.public(),
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,
@@ -325,6 +328,36 @@ wss.on("connection", (ws, req) => {
         if (isLease(ws)) session.leaseAt = Date.now();
         else send(ws, "session_state", statePayload(ws));
         break;
+
+      case "game_start": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能开局" }); break; }
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
+          break;
+        }
+        const board = games.start(msg.requestId);
+        send(ws, "game_state", { board });
+        broadcastState();
+        break;
+      }
+
+      case "dig_commit": {
+        if (!isLease(ws)) { send(ws, "dig_result", { ok: false, reason: "NOT_EXECUTOR" }); break; }
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+          send(ws, "dig_result", { ok: false, reason: "STALE_LEASE" });
+          break;
+        }
+        const cell = games.cellOf(msg.x, msg.z);
+        if (!cell) { send(ws, "dig_result", { ok: false, reason: "NOT_ON_BOARD" }); break; }
+        if (Number.isInteger(msg.row) && Number.isInteger(msg.col) && (msg.row !== cell.row || msg.col !== cell.col)) {
+          send(ws, "dig_result", { ok: false, reason: "NOT_IN_TARGET_CELL", actual: cell });
+          break;
+        }
+        const result = games.commit({ gameId: msg.gameId, row: cell.row, col: cell.col, expectedRevision: msg.expectedRevision });
+        send(ws, "dig_result", { actionInstanceId: msg.actionInstanceId, ...result });
+        if (result.ok) broadcastState();
+        break;
+      }
 
       case "state_snapshot": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能更新状态" }); break; }

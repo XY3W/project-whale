@@ -267,6 +267,64 @@ export class ActionExecutor {
         return done("succeeded", { duration_s: dur }, "OK");
       }
 
+      case "run": {
+        const meters = step.distance_m;
+        if (typeof meters !== "number" || !Number.isFinite(meters)) {
+          return done("failed", null, "PRECONDITION_FAILED");
+        }
+        const before = { ...this.loco.position() };
+        const yaw = this.loco.yaw();
+        const target = { x: before.x + Math.sin(yaw) * meters, z: before.z + Math.cos(yaw) * meters };
+        const limit = this.half - this.margin;
+        if (Math.abs(target.x) > limit || Math.abs(target.z) > limit) {
+          return done("failed", { target }, "OUT_OF_BOUNDS");
+        }
+        const cycles = Math.round((meters - 0.144) / 0.32);
+        const raced = await this.withTimeout(this.loco.run ? this.loco.run(meters) : Promise.reject(new Error("no run")), 20000 + cycles * 3000);
+        const after = this.loco.position();
+        const moved = Math.hypot(after.x - before.x, after.z - before.z);
+        const actual = { distance_m: round(moved) };
+        if (!raced.ok) return done("unknown", { ...actual, partial: true }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { ...actual, partial: moved > 0 }, "CANCELLED");
+        if (Math.abs(moved - meters) > 0.004) return done("failed", { requested_m: meters, ...actual }, "DISPLACEMENT_MISMATCH");
+        return done("succeeded", actual, "OK");
+      }
+
+      case "walk_adjust": {
+        const meters = step.distance_m;
+        if (![0.02, 0.04, 0.06, 0.08].some((d) => Math.abs(d - meters) < 1e-9) || !this.loco.adjust) {
+          return done("unsupported", { supported: [0.02, 0.04, 0.06, 0.08] }, "CAPABILITY_DISABLED");
+        }
+        const before = { ...this.loco.position() };
+        const raced = await this.withTimeout(this.loco.adjust(meters), 30000);
+        const after = this.loco.position();
+        const moved = Math.hypot(after.x - before.x, after.z - before.z);
+        if (!raced.ok) return done("unknown", { distance_m: round(moved), partial: true }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { distance_m: round(moved) }, "CANCELLED");
+        if (Math.abs(moved - meters) > 0.004) return done("failed", { requested_m: meters, distance_m: round(moved) }, "DISPLACEMENT_MISMATCH");
+        return done("succeeded", { distance_m: round(moved) }, "OK");
+      }
+
+      case "dig": {
+        const bridge = this.loco.dig;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const board = bridge.current();
+        if (!board) return done("failed", null, "PRECONDITION_FAILED");
+        if (board.status !== "playing") return done("failed", { status: board.status }, "PRECONDITION_FAILED");
+        if (board.gameId !== step.game_id) return done("failed", { game_id: step.game_id, actual: board.gameId }, "PRECONDITION_FAILED");
+        if (Number.isInteger(step.expected_revision) && step.expected_revision !== board.revision) {
+          return done("failed", { expected_revision: step.expected_revision, actual: board.revision }, "PRECONDITION_FAILED");
+        }
+        const cell = board.cells.find((c) => c.row === step.row && c.col === step.col);
+        if (!cell) return done("failed", { row: step.row, col: step.col }, "PRECONDITION_FAILED");
+        if (cell.state === "revealed") return done("failed", { row: step.row, col: step.col }, "PRECONDITION_FAILED");
+        const raced = await this.withTimeout(bridge.perform(step), 12000);
+        if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
+        const outcome = raced.value;
+        if (!outcome.ok) return done("failed", outcome as unknown as Record<string, unknown>, "PRECONDITION_FAILED");
+        return done(outcome.status === "lost" ? "failed" : "succeeded", outcome as unknown as Record<string, unknown>, outcome.status === "lost" ? "PRECONDITION_FAILED" : "OK");
+      }
+
       case "walk_to_basin": {
         const bridge = this.loco.basin;
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");

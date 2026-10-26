@@ -9,7 +9,8 @@ test("注册表：enabled 清单与 disabled 落盘一致", () => {
   assert.ok(ids.includes("pickup"));
   assert.ok(ids.includes("throw"));
   assert.ok(ids.includes("walk_to_basin"));
-  assert.ok(!ids.includes("run"));
+  assert.ok(ids.includes("run"));
+  assert.ok(ids.includes("dig"));
   assert.ok(!ids.includes("sit"));
   assert.equal(CAPABILITY_VERSION, "cap-v1");
 });
@@ -81,6 +82,7 @@ test("输出契约由注册表生成，不含禁用能力", () => {
   assert.ok(c.includes('"action":"walk"'));
   assert.ok(c.includes('"action":"pickup"'));
   assert.ok(c.includes("walk_to_basin"));
-  assert.ok(!c.includes('"action":"run"'));
+  assert.ok(c.includes('"action":"run"'));
+  assert.ok(c.includes('"action":"dig"'));
   assert.ok(c.includes("finish_task"));
 });

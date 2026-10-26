@@ -20,6 +20,9 @@ export const CAPABILITIES = [
   { id: "play", enabled: true, channels: ["upper"], params: { action_id: { enum: PLAYS } } },
   { id: "tail", enabled: true, channels: ["tail"], params: { style: { enum: TAILS }, duration_s: { type: "number", min: 0, max: 10 } } },
   { id: "wait", enabled: true, channels: [], params: { duration_s: { type: "number", min: 0, max: 5 } } },
+  { id: "run", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.464, 0.784, 1.104, 1.424, 1.744, 2.064, 2.384, 2.704, 3.024, 3.344, 3.664] } } },
+  { id: "walk_adjust", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.02, 0.04, 0.06, 0.08] } } },
+  { id: "dig", enabled: true, channels: ["item"], params: { game_id: { type: "string" }, row: { type: "number", min: 0, max: 9 }, col: { type: "number", min: 0, max: 9 }, expected_revision: { type: "number", min: 0 } } },
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
   { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
   { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
@@ -117,6 +120,33 @@ export function validateStep(step, id = "step") {
         throw new ModelError("INVALID_SCHEMA", `${id} duration_s 越界`, 0);
       }
       return { action: "wait", duration_s: step.duration_s };
+    }
+    case "run": {
+      const dist = step.distance_m;
+      const ok = typeof dist === "number" && Number.isFinite(dist) && Math.abs((dist - 0.144) / 0.32 - Math.round((dist - 0.144) / 0.32)) < 1e-9;
+      if (!ok || (dist - 0.144) / 0.32 < 1 || (dist - 0.144) / 0.32 > 11) {
+        throw new ModelError("UNSUPPORTED_DISTANCE", `${id} run 只支持 0.144+0.32N（N=1..11）`, 0);
+      }
+      return { action: "run", distance_m: dist };
+    }
+    case "walk_adjust": {
+      if (![0.02, 0.04, 0.06, 0.08].includes(step.distance_m)) {
+        throw new ModelError("UNSUPPORTED_DISTANCE", `${id} walk_adjust 只支持 0.02/0.04/0.06/0.08`, 0);
+      }
+      return { action: "walk_adjust", distance_m: step.distance_m };
+    }
+    case "dig": {
+      const { row, col, expected_revision: revision } = step;
+      if (!Number.isInteger(row) || row < 0 || row > 9 || !Number.isInteger(col) || col < 0 || col > 9) {
+        throw new ModelError("INVALID_SCHEMA", `${id} row/col 必须是 0..9 的整数`, 0);
+      }
+      if (!Number.isInteger(revision) || revision < 0) {
+        throw new ModelError("INVALID_SCHEMA", `${id} expected_revision 必须是非负整数`, 0);
+      }
+      if (typeof step.game_id !== "string" || !step.game_id) {
+        throw new ModelError("INVALID_SCHEMA", `${id} game_id 缺失`, 0);
+      }
+      return { action: "dig", game_id: step.game_id, row, col, expected_revision: revision };
     }
     case "walk_to_basin":
       return { action: "walk_to_basin" };

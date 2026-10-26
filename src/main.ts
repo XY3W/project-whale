@@ -15,7 +15,8 @@ import { Hud } from "./ui/Hud";
 import { PropItem } from "./prop/PropItem";
 import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
-import type { BasinBridge, BasinView } from "./behavior/protocol.ts";
+import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView } from "./behavior/protocol.ts";
+import { MinesweeperBoard } from "./game/MinesweeperBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = "/models/minesweeper-v1/character_minesweeper.glb";
@@ -115,6 +116,9 @@ async function boot() {
 
   /** catalog 里盆的拾取参考（旧代码直接读顶层 pickupReference） */
   const basinReference = basinCatalog.props!.basin.pickupReference;
+
+  const board = new MinesweeperBoard(stage.scene);
+  let gameBoard: GameView | null = null;
 
   // ---- 状态 ----
   let phase: Phase = "idle";
@@ -321,6 +325,15 @@ async function boot() {
       // 进展 = 已走距离；收步阶段也要算，否则最后 0.09 m 会被当成卡住
       await waitForProgress(
         () => !player.state.walking && player.state.base === "idle_stand",
+        () => root.position.distanceTo(from),
+        { idleMs: 8000 },
+      );
+    },
+    run: async (meters) => {
+      const from = root.position.clone();
+      if (!player.runDistance(meters)) return;
+      await waitForProgress(
+        () => !player.moving && player.state.base === "idle_stand",
         () => root.position.distanceTo(from),
         { idleMs: 8000 },
       );
@@ -538,6 +551,33 @@ async function boot() {
   };
   loco.basin = basinBridge;
 
+  const digBridge: DigBridge = {
+    current: () => gameBoard,
+    perform: async (step) => {
+      const meta = basinCatalog.actions.find((a) => a.id === "dig");
+      let pending: Promise<Record<string, unknown>> | null = null;
+      await player.perform("dig", (meta?.events ?? []).map((e) => ({ time: e.time, type: e.type })), (type) => {
+        if (type !== "dig_contact") return;
+        pending = client.commitDig({
+          gameId: step.game_id,
+          row: step.row,
+          col: step.col,
+          expectedRevision: step.expected_revision,
+          x: root.position.x,
+          z: root.position.z,
+        });
+      }, meta?.layer ?? "full_body");
+      const result = pending ? await pending : { ok: false, reason: "NO_CONTACT" };
+      return result as unknown as DigOutcome;
+    },
+  };
+  loco.dig = digBridge;
+
+  document.getElementById("start-minesweeper")?.addEventListener("click", () => {
+    if (!client.connected) return;
+    client.startGame(`r${Date.now()}`);
+  });
+
   const resetButton = document.getElementById("reset-basin");
   resetButton?.addEventListener("click", () => {
     basinBridge.reset();
@@ -646,6 +686,10 @@ async function boot() {
       root.position.x = THREE.MathUtils.clamp(s.x, -AREA_HALF, AREA_HALF);
       root.position.z = THREE.MathUtils.clamp(s.z, -AREA_HALF, AREA_HALF);
       root.rotation.y = (s.yawDeg * Math.PI) / 180;
+    },
+    onGame: (value) => {
+      gameBoard = (value as GameView) ?? null;
+      board.update((value as never) ?? null);
     },
     onBasin: (record) => {
       if (basinApplied) return;

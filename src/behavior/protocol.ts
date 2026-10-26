@@ -49,6 +49,9 @@ export type Step =
   | { action: "wear"; object_id: string }
   | { action: "unwear"; object_id: string }
   | { action: "throw"; object_id: string; yaw_deg: number; elevation_deg: number; speed_mps: number }
+  | { action: "run"; distance_m: number }
+  | { action: "walk_adjust"; distance_m: number }
+  | { action: "dig"; game_id: string; row: number; col: number; expected_revision: number }
   | { action: "parallel"; items: Step[] };
 
 export interface Plan {
@@ -62,6 +65,8 @@ export interface Locomotion {
   walk(meters: number): Promise<void>;
   /** 短步微调：0.02 / 0.04 / 0.06 / 0.08 米 */
   adjust?(meters: number): Promise<void>;
+  /** 跑动：0.144 + 0.32N 米 */
+  run?(meters: number): Promise<void>;
   turn(deg: number): Promise<void>;
   play(actionId: string): Promise<void>;
   tail(style: "tail_idle" | "tail_swish", durationS: number): Promise<void>;
@@ -70,6 +75,8 @@ export interface Locomotion {
   isMoving?(): boolean;
   /** 可选：钢盆互动能力。未接线时相关步骤返回 CAPABILITY_DISABLED。 */
   basin?: BasinBridge;
+  /** 可选：扫雷挖掘能力 */
+  dig?: DigBridge;
 }
 
 export interface BasinView {
@@ -121,6 +128,31 @@ export interface BasinBridge {
   /** 当前状态能否开始该动作 */
   canStart(objectId: string, actionId: string): boolean;
   cancel(): void;
+}
+
+export interface DigOutcome {
+  ok: boolean;
+  reason?: string;
+  status?: "playing" | "won" | "lost";
+  revision?: number;
+  changedCells?: { row: number; col: number; value: number | "mine" }[];
+}
+
+export interface GameView {
+  gameId: string;
+  revision: number;
+  status: "playing" | "won" | "lost";
+  size: number;
+  mineCount: number;
+  cells: { row: number; col: number; state: "hidden" | "revealed"; value?: number | "mine" }[];
+  revealedSafe: number;
+  remainingSafe: number;
+}
+
+export interface DigBridge {
+  current(): GameView | null;
+  /** 播放挖掘并在接触点提交，返回服务端结算结果 */
+  perform(step: { game_id: string; row: number; col: number; expected_revision: number }): Promise<DigOutcome>;
 }
 
 export interface ApproachSummary {

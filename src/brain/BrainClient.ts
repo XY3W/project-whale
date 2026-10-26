@@ -27,6 +27,7 @@ type Handlers = {
   onReconcile?: () => void;
   onSnapshot?: (s: { x: number; z: number; yawDeg: number }) => void;
   onBasin?: (basin: Record<string, unknown>) => void;
+  onGame?: (board: unknown) => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -36,6 +37,8 @@ export class BrainClient {
   private handlers: Handlers = {};
   private retry = 0;
   leaseEpoch = 0;
+  private digSeq = 0;
+  private digWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
   private takeover: ReturnType<typeof setInterval> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
 
@@ -107,6 +110,15 @@ export class BrainClient {
             this.handlers.onSnapshot?.(ch);
           }
           if (msg.basin) this.handlers.onBasin?.(msg.basin as Record<string, unknown>);
+          if (msg.game) this.handlers.onGame?.(msg.game);
+          break;
+        }
+        case "game_state":
+          this.handlers.onGame?.(msg.board);
+          break;
+        case "dig_result": {
+          const resolve = this.digWaiters.get(String(msg.actionInstanceId));
+          if (resolve) { this.digWaiters.delete(String(msg.actionInstanceId)); resolve(msg); }
           break;
         }
         case "error":
@@ -160,6 +172,23 @@ export class BrainClient {
 
   setChatOpen(open: boolean) {
     return this.send(open ? "chat_opened" : "chat_closed", {});
+  }
+
+  /** 开局：同一 requestId 幂等 */
+  startGame(requestId = `r${Date.now()}`) {
+    return this.send("game_start", { requestId, leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 挖掘提交：由执行器在 dig_contact 时刻调用，等待服务端结算 */
+  commitDig(payload: Record<string, unknown>, timeoutMs = 6000): Promise<Record<string, unknown>> {
+    const actionInstanceId = `d${++this.digSeq}`;
+    return new Promise((resolve) => {
+      this.digWaiters.set(actionInstanceId, resolve);
+      this.send("dig_commit", { ...payload, actionInstanceId, leaseEpoch: this.leaseEpoch });
+      setTimeout(() => {
+        if (this.digWaiters.delete(actionInstanceId)) resolve({ ok: false, reason: "TIMEOUT" });
+      }, timeoutMs);
+    });
   }
 
   sendStateSnapshot(snapshot: Record<string, unknown>) {
