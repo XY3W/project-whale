@@ -109,6 +109,13 @@ export class PropItem {
     this.setMorph = opts.setMorph ?? (() => {});
     this.def = (opts.catalog.props as Record<string, PropDef>)[opts.id];
     if (!this.def) throw new Error(`catalog 缺少物品 ${opts.id}`);
+    // 物件也要投影：地板（扫雷时就是棋盘）接收阴影，贴地时才有“放住了”的感觉
+    opts.scene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+    });
     this.object.add(opts.scene);
     opts.parent.add(this.object);
 

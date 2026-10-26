@@ -41,7 +41,12 @@ const ACCENT_CSS: Record<string, string> = {
  * 只渲染服务端下发的公开棋盘，未揭示格不携带任何数值。
  */
 export class MinesweeperBoard {
+  /** 射线命中目标：给了地板就直接用地板，否则用自带平面 */
   readonly mesh: THREE.Mesh;
+  /** 棋盘直接画在地板上：换贴图而不是叠一层平面 */
+  private readonly floor: THREE.Mesh | null = null;
+  private readonly floorMap: THREE.Texture | null = null;
+  private active = false;
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
@@ -54,7 +59,7 @@ export class MinesweeperBoard {
   private pulseStart = 0;
   private lastGameId: string | null = null;
 
-  constructor(parent: THREE.Object3D) {
+  constructor(parent: THREE.Object3D, floor?: THREE.Mesh) {
     this.canvas = document.createElement("canvas");
     this.canvas.width = 1024;
     this.canvas.height = 1024;
@@ -71,12 +76,21 @@ export class MinesweeperBoard {
       polygonOffsetFactor: -2,
       polygonOffsetUnits: -2,
     });
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(SIZE_M, SIZE_M), material);
-    this.mesh.rotation.x = -Math.PI / 2;
-    this.mesh.position.y = 0.0025;
-    this.mesh.visible = false;
-    this.mesh.renderOrder = 1;
-    parent.add(this.mesh);
+    if (floor) {
+      // 直接复用地板：棋盘就是地面，贴地物件不会被第二层平面切到
+      this.floor = floor;
+      const mat = floor.material as THREE.MeshStandardMaterial;
+      this.floorMap = mat.map;
+      this.mesh = floor;
+      this.mesh.renderOrder = 0;
+    } else {
+      this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(SIZE_M, SIZE_M), material);
+      this.mesh.rotation.x = -Math.PI / 2;
+      this.mesh.position.y = 0.0025;
+      this.mesh.visible = false;
+      this.mesh.renderOrder = 1;
+      parent.add(this.mesh);
+    }
 
     // 四面很矮的发光墙，贴在棋盘边缘：一眼能看出“场地现在是扫雷模式”
     this.fieldMat = new THREE.MeshBasicMaterial({
@@ -102,23 +116,37 @@ export class MinesweeperBoard {
   }
 
   get visible() {
-    return this.mesh.visible;
+    return this.active;
   }
 
   /** 调试/探针：当前悬停格与盘面数据 */
   get state() {
-    return { board: this.board, hover: this.hover, visible: this.mesh.visible };
+    return { board: this.board, hover: this.hover, visible: this.active };
   }
 
   show(visible: boolean) {
-    this.mesh.visible = visible;
+    this.active = visible;
+    if (!this.floor) this.mesh.visible = visible;
+    this.syncFloor();
     if (!visible) this.draw();
+  }
+
+  /** 有地板时：棋盘开 = 换贴图，关 = 还原装饰网格 */
+  private syncFloor() {
+    if (!this.floor) return;
+    const mat = this.floor.material as THREE.MeshStandardMaterial;
+    const next = this.active ? this.texture : this.floorMap;
+    if (mat.map === next) return;
+    mat.map = next;
+    mat.needsUpdate = true;
   }
 
   update(board: PublicBoard | null) {
     this.board = board;
-    this.mesh.visible = !!board;
-    this.field.visible = !!board;
+    this.active = !!board;
+    if (!this.floor) this.mesh.visible = !!board;
+    this.field.visible = board?.status === "playing";
+    this.syncFloor();
     if (board) {
       if (board.gameId !== this.lastGameId) {
         this.lastGameId = board.gameId;
@@ -132,9 +160,10 @@ export class MinesweeperBoard {
 
   /** 每帧调用：围栏呼吸 + 开局扫光期间重绘，平时不重画 canvas */
   tick() {
-    if (!this.mesh.visible) return;
+    if (!this.active) return;
     const now = performance.now();
     const accent = ACCENTS[this.board?.status ?? "playing"] ?? ACCENTS.playing;
+    this.field.visible = this.board?.status === "playing";
     this.fieldMat.color.setRGB(...accent);
     this.fieldMat.opacity = 0.15 + 0.09 * Math.sin(now / 420) + this.pulse * 0.18;
     if (!this.pulseStart) return;

@@ -117,7 +117,7 @@ async function boot() {
   /** catalog 里盆的拾取参考（旧代码直接读顶层 pickupReference） */
   const basinReference = basinCatalog.props!.basin.pickupReference;
 
-  const board = new MinesweeperBoard(stage.scene);
+  const board = new MinesweeperBoard(stage.scene, stage.groundTop);
   let gameBoard: GameView | null = null;
 
   /** 左上角状态条：没开局时隐藏，开局后显示盘面信息 */

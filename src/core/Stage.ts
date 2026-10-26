@@ -16,6 +16,10 @@ export class Stage {
   private readonly resizeObserver: ResizeObserver;
   /** 场地半边长（米） */
   readonly roomHalf = 4;
+  /** 地板顶面（8×8）。扫雷期间棋盘直接换它的贴图，避免多一层悬空平面 */
+  readonly groundTop!: THREE.Mesh;
+  /** 地板原本的装饰网格贴图，棋盘关掉时要还原 */
+  readonly groundMap!: THREE.Texture;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -148,6 +152,8 @@ export class Stage {
     top.position.y = 0.002;
     top.receiveShadow = true;
     this.scene.add(top);
+    (this as { groundTop: THREE.Mesh }).groundTop = top;
+    (this as { groundMap: THREE.Texture }).groundMap = gridTex;
   }
 
   /** 固定房间视角：按场地外接圆反算距离，整个区域完整入画 */
