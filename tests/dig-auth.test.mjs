@@ -338,14 +338,19 @@ test("手动结束的暂停不会被任务收尾覆盖", async (t) => {
   await sleep(1500);
   assert.equal(unseenGame(), null, "手动结束后的暂停期内不该自己开新局");
 
-  // 暂停过后会恢复自主开局
+  // 一局结束后不自动重开：暂停过期也不会自己再开
+  await sleep(2500);
+  assert.equal(unseenGame(), null, "一局结束后不该自动重开，必须手动开局");
+
+  // 手动开局可以继续
+  send("game_start", { requestId: "pause-2", leaseEpoch: epoch });
   let resumed = null;
   const t0 = Date.now();
-  while (!resumed && Date.now() - t0 < 6000) {
+  while (!resumed && Date.now() - t0 < 5000) {
     resumed = unseenGame();
     if (!resumed) await sleep(100);
   }
-  assert.ok(resumed, "暂停结束后应当恢复自主开局");
+  assert.ok(resumed, "手动开局应当可以继续");
 });
 
 

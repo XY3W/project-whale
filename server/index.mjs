@@ -45,9 +45,9 @@ const AUTO_START_IDLE_MS = Number(process.env.AUTO_START_IDLE_MS ?? 90_000);
 /**
  * 自主回合的**模型调用**预算（不是回合数）：一个回合 = 1 次 planning + 最多 3 次 review，
  * 按回合计会把实际开销低估 4 倍。思考模式下每次调用约 7k 输入 + 3~7k 输出，
- * 这个数字就是给钱包用的刹车；`AUTO_MAX_CALLS=0` 表示不限制。
+ * 一局之内尽量让她下完，所以默认给到 300；`AUTO_MAX_CALLS=0` 表示不限制。
  */
-const AUTO_MAX_CALLS_PER_HOUR = Number(process.env.AUTO_MAX_CALLS ?? 60);
+const AUTO_MAX_CALLS_PER_HOUR = Number(process.env.AUTO_MAX_CALLS ?? 300);
 /**
  * 扫雷进行中但模型一分钟没动静 → 宿主主动发一条提醒把她叫醒。
  * 这是“活着”的兜底：退避、预算、模型报错之后都不该让棋盘一直晾着。
@@ -55,7 +55,7 @@ const AUTO_MAX_CALLS_PER_HOUR = Number(process.env.AUTO_MAX_CALLS ?? 60);
 const AUTO_STILL_PLAYING_MS = Number(process.env.AUTO_STILL_PLAYING_MS ?? 60_000);
 const AUTO_MAX_BACKOFF_MS = 600_000;
 /** 用户点了「扫雷结束」之后，别马上又自己开一局 */
-const AUTO_AFTER_MANUAL_END_MS = Number(process.env.AUTO_AFTER_MANUAL_END_MS ?? 1_800_000);
+const AUTO_AFTER_MANUAL_END_MS = Number(process.env.AUTO_AFTER_MANUAL_END_MS ?? Infinity);
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -298,8 +298,11 @@ function tickAutoPlay() {
     return;
   }
   const board = games.public();
+  // 一局结束（通关/踩雷/已结束）之后不自动重开：必须由用户手动点「扫雷开局」。
+  // 这样“一局”就是一个明确的成本边界。
+  if (board && board.status !== "playing") return;
   console.log(`[autoplay] tick board=${board?.status ?? "none"} revision=${board?.revision ?? "-"}`);
-  if (board && board.status === "playing") {
+  if (board) {
     noteAutoPlayDelay(AUTO_CONTINUE_IDLE_MS * autoplay.backoff);
     gameEvents.push({
       eventId: `ev${++eventSeq}`,
