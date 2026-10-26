@@ -510,8 +510,15 @@ async function boot() {
       player.clearGesture();
       player.setWalking(false);
       player.cancelPerformance();
-      if (objectId) itemOf(objectId)?.resetToCenter();
-      else for (const item of items.values()) item.resetToCenter();
+      const put = (id: string) => {
+        const item = itemOf(id);
+        if (!item) return;
+        // 盆回正中心；勺子挪开半米，否则两件物品会叠在同一格上
+        if (id === "rice_scoop") item.resetToCenter(0.85, 0.85);
+        else item.resetToCenter();
+      };
+      if (objectId) put(objectId);
+      else for (const item of items.values()) put(item.id);
     },
     canStart: (objectId, actionId) => itemOf(objectId)?.canStart(actionId) ?? false,
     cancel: () => { player.cancelPerformance(); },
@@ -676,14 +683,14 @@ async function boot() {
       const result = pending ? await pending : { ok: false, reason: "NO_CONTACT" };
       // 服务端回包里带着整张公开棋盘（256 格）；棋盘本来就单独在上下文里，
       // 这里必须剥掉，否则一次挖掘的执行报告会多出 6k+ tokens。
-      const { board: _board, ...rest } = result as Record<string, unknown>;
+      const { board: _board, changedCells: _cells, ...rest } = result as Record<string, unknown>;
       void _board;
-      const changed = Array.isArray(rest.changedCells) ? (rest.changedCells as unknown[]) : [];
+      const changed = Array.isArray(_cells) ? (_cells as unknown[]) : [];
       return {
         ...rest,
         changedCount: changed.length,
-        // 大范围展开只给数量，格子列表过长会把上下文撑爆
-        ...(changed.length <= 24 ? { changedCells: changed } : {}),
+        // 零格展开可能一次翻开上百格：只给数量，格子列表过长会把上下文撑爆
+        ...(changed.length <= 16 ? { changedCells: changed } : {}),
       } as unknown as DigOutcome;
     },
   };
@@ -699,10 +706,13 @@ async function boot() {
     client.startGame(`r${Date.now()}`);
   });
 
-  const resetButton = document.getElementById("reset-basin");
-  resetButton?.addEventListener("click", () => {
-    basinBridge.reset();
+  document.getElementById("reset-basin")?.addEventListener("click", () => {
+    basinBridge.reset("basin");
     speak("盆放回场地中心了", 1800);
+  });
+  document.getElementById("reset-scoop")?.addEventListener("click", () => {
+    basinBridge.reset("rice_scoop");
+    speak("勺子放回场地上了", 1800);
   });
 
   // 每次运行独立执行器：过期 run 的取消不会复活，也不会影响新 run
@@ -1029,7 +1039,8 @@ async function boot() {
     getGame: () => gameBoard,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
-    resetBasin: () => basinBridge.reset(),
+    resetBasin: () => basinBridge.reset("basin"),
+    resetScoop: () => basinBridge.reset("rice_scoop"),
     /** 调试用：不经模型直接跑一套计划（与模型下发走同一条调度路径） */
     run: (plan: Plan) => runOwned("plan", plan),
   };

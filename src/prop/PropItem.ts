@@ -401,11 +401,12 @@ export class PropItem {
     return target;
   }
 
-  resetToCenter(): Pose {
+  /** 放回场地中心；offset 用于让两件物品不要叠在同一格上 */
+  resetToCenter(offsetX = 0, offsetZ = 0): Pose {
     this.physics.stop();
     this.actionId = null;
     const pose: Pose = {
-      position: new THREE.Vector3(0, this.def.pickupReference.position[1], 0),
+      position: new THREE.Vector3(offsetX, this.def.pickupReference.position[1], offsetZ),
       quaternion: new THREE.Quaternion(...(this.def.pickupReference.quaternion as [number, number, number, number])),
     };
     this.state = "resting";

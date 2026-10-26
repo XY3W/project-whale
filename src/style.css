@@ -199,7 +199,7 @@ canvas { display: block; }
 .game-chip {
   position: fixed;
   left: 18px;
-  top: 180px;
+  top: 226px;
   z-index: 100;
   padding: 8px 12px;
   border-radius: 10px;
