@@ -425,7 +425,7 @@ async function boot() {
       const reference = referenceOf(objectId);
       // 距离远时先按最大支持距离走近，再求精确站位；最多 10 段，避免无限循环
       for (let leg = 0; leg < 10; leg++) {
-        const plan = planApproach({
+        let plan = planApproach({
           character: { x: root.position.x, z: root.position.z },
           basin: { x: item.position.x, z: item.position.z },
           yawDeg: degYaw(),
@@ -434,10 +434,27 @@ async function boot() {
           margin: 0.3,
         });
         if (!("error" in plan)) {
-          if (Math.abs(plan.turn1Deg) > 0.01) await loco.turn(plan.turn1Deg);
-          if (plan.distanceM > 0) await loco.walk(plan.distanceM);
-          if (Math.abs(plan.turn2Deg) > 0.01) await loco.turn(plan.turn2Deg);
-          const check = alignInfo(objectId);
+          // 走近一次后可能还差一点（残差、恢复位置的时序），再按新位姿小修一到两次
+          let check = alignInfo(objectId);
+          for (let attempt = 0; attempt < 3 && !check.ok; attempt++) {
+            if (Math.abs(plan.turn1Deg) > 0.01) await loco.turn(plan.turn1Deg);
+            if (plan.distanceM > 0) await loco.walk(plan.distanceM);
+            if (Math.abs(plan.turn2Deg) > 0.01) await loco.turn(plan.turn2Deg);
+            // 等一帧再读，避免收步/转身归一化还没落到读数上
+            await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+            check = alignInfo(objectId);
+            if (check.ok) break;
+            const retry = planApproach({
+              character: { x: root.position.x, z: root.position.z },
+              basin: { x: item.position.x, z: item.position.z },
+              yawDeg: degYaw(),
+              reference,
+              half: AREA_HALF,
+              margin: 0.3,
+            });
+            if ("error" in retry) break;
+            plan = retry;
+          }
           return {
             ok: check.ok,
             plan: {

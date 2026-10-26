@@ -190,12 +190,17 @@ export class PropItem {
   matchVariant(): string | null {
     const variants = this.def.pickupVariants;
     if (!variants) return "default";
+    // 变体参考是“物品相对角色”的朝向，所以要把物品转到角色坐标系再比，
+    // 否则角色转身之后同一个落地姿态会被误判成不支持。
     this.charRoot.updateWorldMatrix(true, false);
+    const charQuat = new THREE.Quaternion();
+    this.charRoot.getWorldQuaternion(charQuat);
+    const local = charQuat.invert().multiply(this.object.quaternion.clone());
     let best: string | null = null;
     let bestDot = -Infinity;
     for (const [name, variant] of Object.entries(variants)) {
-      const expected = PropItem.toWorld(this.charRoot, variant.reference.position, variant.reference.quaternion);
-      const dot = Math.abs(this.object.quaternion.dot(expected.quaternion));
+      const reference = new THREE.Quaternion(...(variant.reference.quaternion as [number, number, number, number]));
+      const dot = Math.abs(local.dot(reference));
       if (dot > bestDot) { bestDot = dot; best = name; }
     }
     const angle = (2 * Math.acos(Math.min(1, bestDot)) * 180) / Math.PI;
