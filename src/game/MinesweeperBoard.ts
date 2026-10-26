@@ -40,10 +40,19 @@ export class MinesweeperBoard {
     this.ctx = this.canvas.getContext("2d")!;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    const material = new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false });
+    // 贴地：地板顶面在 y=0.002。棋盘只抬高 0.5mm（polygonOffset 保证压过地板纹理），
+    // 否则 5mm 的平面会切进盆/角色贴地的那一截，看起来像“网格线有厚度、盆陷进去了”。
+    const material = new THREE.MeshBasicMaterial({
+      map: this.texture,
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
+    });
     this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(SIZE_M, SIZE_M), material);
     this.mesh.rotation.x = -Math.PI / 2;
-    this.mesh.position.y = 0.005;
+    this.mesh.position.y = 0.0025;
     this.mesh.visible = false;
     this.mesh.renderOrder = 1;
     parent.add(this.mesh);

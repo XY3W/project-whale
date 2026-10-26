@@ -997,7 +997,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board,
+    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board, THREE,
     getGame: () => gameBoard,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
