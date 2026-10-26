@@ -11,8 +11,21 @@ export interface BasinAction {
   events?: BasinEvent[];
 }
 
+export interface PropDefinition {
+  file: string;
+  allowedHolders: string[];
+  binding: string;
+  headBinding?: string;
+  pickupReference: { position: number[]; quaternion: number[]; wearMorph?: number };
+  pickupVariants?: Record<string, { bodyClip: string; motionClip: string; reference: { position: number[]; quaternion: number[] } }>;
+  bowlOpeningNormalLocal?: number[];
+  collisionProxies?: { shape: string; halfExtents: number[]; center: number[] }[];
+  massKgCandidate?: number;
+}
+
 export interface BasinCatalog {
   assetVersion?: string;
+  props?: Record<string, PropDefinition>;
   bindings: {
     hand: { bone: string; matrixColumnMajor: number[] };
     head: { bone: string; matrixColumnMajor: number[] };

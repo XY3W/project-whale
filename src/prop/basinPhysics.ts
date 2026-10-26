@@ -50,9 +50,11 @@ export class BasinPhysics {
   private flightTime = 0;
   private readonly lastPosition = new THREE.Vector3();
   private readonly lastQuaternion = new THREE.Quaternion();
+  private readonly shape: "cylinder" | "box";
 
-  private constructor(hull: Float32Array, half: number) {
+  private constructor(hull: Float32Array, half: number, shape: "cylinder" | "box" = "cylinder") {
     this.hull = hull;
+    this.shape = shape;
     const gravity = { x: 0, y: -9.81, z: 0 };
     this.world = new RAPIER.World(gravity);
     this.world.timestep = STEP;
@@ -78,9 +80,10 @@ export class BasinPhysics {
     }
   }
 
-  static async create(hull: Float32Array, half = ARENA_HALF): Promise<BasinPhysics> {
+  /** 碰撞体形状：盆用外接圆柱，饭勺这类细长物品用外接长方体 */
+  static async create(hull: Float32Array, half = ARENA_HALF, shape: "cylinder" | "box" = "cylinder"): Promise<BasinPhysics> {
     await RAPIER.init();
-    const physics = new BasinPhysics(hull, half);
+    const physics = new BasinPhysics(hull, half, shape);
     physics.initialised = true;
     return physics;
   }
@@ -121,6 +124,11 @@ export class BasinPhysics {
    * 画面表现为“抽搐”），圆柱的平面/直线接触稳定得多，且外接圆柱不会让视觉穿地。
    */
   private colliderDesc(): RAPIER.ColliderDesc {
+    if (this.shape === "box") {
+      const bounds = boxFromHull(this.hull);
+      return RAPIER.ColliderDesc.cuboid(bounds.halfExtents.x, bounds.halfExtents.y, bounds.halfExtents.z)
+        .setTranslation(bounds.center.x, bounds.center.y, bounds.center.z);
+    }
     const shape = cylinderFromHull(this.hull);
     const desc = RAPIER.ColliderDesc.cylinder(shape.halfHeight, shape.radius);
     return desc.setTranslation(shape.center.x, shape.center.y, shape.center.z);
@@ -210,4 +218,23 @@ export function cylinderFromHull(points: Float32Array): ColliderShape {
     radius = Math.max(radius, Math.hypot(points[i] - center.x, points[i + 2] - center.z));
   }
   return { kind: "cylinder", radius, halfHeight: Math.max(0.01, (maxY - minY) / 2), center };
+}
+
+/** 由点集求外接长方体（细长物品用，避免圆柱把勺子滚成轮胎） */
+export function boxFromHull(points: Float32Array) {
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < points.length; i += 3) {
+    minX = Math.min(minX, points[i]); maxX = Math.max(maxX, points[i]);
+    minY = Math.min(minY, points[i + 1]); maxY = Math.max(maxY, points[i + 1]);
+    minZ = Math.min(minZ, points[i + 2]); maxZ = Math.max(maxZ, points[i + 2]);
+  }
+  return {
+    center: new THREE.Vector3((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2),
+    halfExtents: new THREE.Vector3(
+      Math.max(0.005, (maxX - minX) / 2),
+      Math.max(0.005, (maxY - minY) / 2),
+      Math.max(0.005, (maxZ - minZ) / 2),
+    ),
+  };
 }
