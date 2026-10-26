@@ -6,7 +6,7 @@
  * - 不含 API Key、服务端私有路径或内部执行器字段。
  */
 import { OBJECTS } from "./capabilities.mjs";
-import { SIZE, cellAt, cellCenter } from "./minesweeper.mjs";
+import { DIG_TOLERANCE_M, SIZE, cellAt, cellCenter } from "./minesweeper.mjs";
 
 /** 只有这三种状态会落盘：飞行和转移中要么回到稳定态，要么按 unknown 处理 */
 export const PERSISTED_PROP_STATES = new Set(["resting", "held", "worn"]);
@@ -118,6 +118,10 @@ export function boardContext(board, character = null) {
     rows.push(line);
   }
   const current = character && Number.isFinite(character.x) && Number.isFinite(character.z) ? cellAt(character.x, character.z) : null;
+  const currentCenter = current ? cellCenter(current.row, current.col) : null;
+  const currentOffset = currentCenter && character
+    ? Math.round(Math.hypot(character.x - currentCenter.x, character.z - currentCenter.z) * 1000) / 1000
+    : null;
   return {
     gameId: board.gameId,
     revision: board.revision,
@@ -129,7 +133,11 @@ export function boardContext(board, character = null) {
     revealedSafe: board.revealedSafe,
     remainingSafe: board.remainingSafe,
     currentCell: current,
-    currentCellCenter: current ? cellCenter(current.row, current.col) : null,
+    currentCellCenter: currentCenter,
+    /** 当前离所在格格心还有多远；挖掘要求 ≤ digToleranceM */
+    currentCellDistanceM: currentOffset,
+    digToleranceM: DIG_TOLERANCE_M,
+    digRule: `dig 要求根位置距目标格格心 ≤ ${DIG_TOLERANCE_M}m；currentCell 只表示“你在这格里”，不代表够近，用 currentCellCenter 算还差多少`,
     coordinateRule: `row 从 -Z 向 +Z、col 从 -X 向 +X；每格 ${cellSize}m，格心 x=${-half}+(col+0.5)*${cellSize}，z=${-half}+(row+0.5)*${cellSize}；|x| 或 |z| ≥${half} 不属于棋盘`,
     legend: "rows[row][col]：. = 未揭示（未知）；0-9 = 已揭示格的邻雷数；* = 已引爆的雷",
     rows,

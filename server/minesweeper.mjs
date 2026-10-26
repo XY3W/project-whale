@@ -2,18 +2,24 @@
  * 扫雷规则核心（服务端私有）。
  *
  * 只有这里持有雷表；公开快照永远不含未揭示格的 value、邻雷数或其它可推断答案的字段。
- * 首次挖掘格安全、16×16 / 53 雷、八邻计数、零格一次展开、挖完所有非雷格获胜。
+ * 首次挖掘格安全、16×16 / 40 雷、八邻计数、零格一次展开、挖完所有非雷格获胜。
  */
 
 export const SIZE = 16;
 /**
- * 密度对齐经典扫雷「高级」（30×16 / 99 雷 ≈ 20.63%）：
- * 16×16 = 256 格，53 雷 ≈ 20.70%，取下限后最接近的一档。
+ * 第 14 轮调整：高级密度（20.6%）在 16×16 上太难，一局要好几个小时。
+ * 改成 40 雷 = 15.63%，对齐经典「中级」（16×16 / 40 雷）。
  */
-export const MINE_COUNT = 53;
+export const MINE_COUNT = 40;
 export const SAFE_TOTAL = SIZE * SIZE - MINE_COUNT;
 /** 棋盘仍占 8m × 8m 场地：16 格 → 每格 0.5m，边缘仍在 ±4m */
 export const CELL_M = 0.5;
+/**
+ * 挖掘站位容差：根位置到格心的水平距离。
+ * 0.5m 的格子半宽 0.25m，0.12 对模型来说太苛刻（实测大量 0.16–0.24m 的失败），
+ * 放到 0.18 仍然保证整个人站在目标格内，还留 7cm 余量。
+ */
+export const DIG_TOLERANCE_M = 0.18;
 export const BOARD_HALF = (SIZE * CELL_M) / 2;
 
 /** 小整数种子 PRNG（mulberry32），保证同一 seed 复现同一雷区 */
@@ -141,6 +147,7 @@ export function publicBoard(game) {
     status: game.status,
     size: SIZE,
     cellSize: CELL_M,
+    digToleranceM: DIG_TOLERANCE_M,
     boardHalf: BOARD_HALF,
     mineCount: MINE_COUNT,
     cells,

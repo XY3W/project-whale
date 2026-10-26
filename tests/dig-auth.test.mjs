@@ -347,3 +347,40 @@ test("手动结束的暂停不会被任务收尾覆盖", async (t) => {
   }
   assert.ok(resumed, "暂停结束后应当恢复自主开局");
 });
+
+
+test("扫雷进行中一分钟没有模型活动会被主动唤醒", async (t) => {
+  const { proc, dir } = await startServer({
+    AUTO_MINESWEEPER: "1",
+    // 把正常续玩/开局都推远，只留看门狗一条路径
+    AUTO_START_IDLE_MS: "600000",
+    AUTO_CONTINUE_IDLE_MS: "600000",
+    AUTO_STILL_PLAYING_MS: "500",
+    AUTO_TICK_MS: "150",
+    AUTO_MAX_CALLS: "50",
+  });
+  const { ws, inbox, send } = await connect();
+  t.after(() => {
+    ws.close();
+    proc.kill();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const epoch = state.leaseEpoch;
+  send("chat_opened", { leaseEpoch: epoch });
+  send("game_start", { requestId: "still-1", leaseEpoch: epoch });
+  const game = await waitFor(inbox, (m) => m.type === "game_state" && m.board);
+  assert.ok(game, "先要有一局在进行");
+  send("chat_closed", { leaseEpoch: epoch });
+
+  // 之后什么都不做：超过阈值没有模型活动时，宿主应当自己发一条提醒
+  const t0 = Date.now();
+  let hit = null;
+  while (!hit && Date.now() - t0 < 8000) {
+    hit = requests.find((r) => (r?.attentionEvents ?? []).some((e) => e.type === "game_still_active")) ?? null;
+    if (!hit) await sleep(120);
+  }
+  assert.ok(hit, "扫雷进行中超过阈值没有模型活动，应当主动唤醒");
+  assert.equal(hit.board?.status, "playing", "提醒时棋盘应当仍在进行中");
+});

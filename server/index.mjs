@@ -14,7 +14,7 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
-import { cellCenter } from "./minesweeper.mjs";
+import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest } from "./context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
 import { createGameEventQueue } from "./events.mjs";
@@ -43,10 +43,16 @@ const AUTO_PLAY = (process.env.AUTO_MINESWEEPER ?? "1") !== "0";
 const AUTO_CONTINUE_IDLE_MS = Number(process.env.AUTO_CONTINUE_IDLE_MS ?? 45_000);
 const AUTO_START_IDLE_MS = Number(process.env.AUTO_START_IDLE_MS ?? 90_000);
 /**
- * 每小时最多派几个自主回合（一个回合 = 一次 planning + 最多 3 次 review）。
- * 思考模式下每次调用约 7k 输入 + 7k 输出，这个上限就是给钱包用的刹车。
+ * 自主回合的**模型调用**预算（不是回合数）：一个回合 = 1 次 planning + 最多 3 次 review，
+ * 按回合计会把实际开销低估 4 倍。思考模式下每次调用约 7k 输入 + 3~7k 输出，
+ * 这个数字就是给钱包用的刹车；`AUTO_MAX_CALLS=0` 表示不限制。
  */
-const AUTO_MAX_TURNS_PER_HOUR = Number(process.env.AUTO_MAX_TURNS ?? 6);
+const AUTO_MAX_CALLS_PER_HOUR = Number(process.env.AUTO_MAX_CALLS ?? 60);
+/**
+ * 扫雷进行中但模型一分钟没动静 → 宿主主动发一条提醒把她叫醒。
+ * 这是“活着”的兜底：退避、预算、模型报错之后都不该让棋盘一直晾着。
+ */
+const AUTO_STILL_PLAYING_MS = Number(process.env.AUTO_STILL_PLAYING_MS ?? 60_000);
 const AUTO_MAX_BACKOFF_MS = 600_000;
 /** 用户点了「扫雷结束」之后，别马上又自己开一局 */
 const AUTO_AFTER_MANUAL_END_MS = Number(process.env.AUTO_AFTER_MANUAL_END_MS ?? 1_800_000);
@@ -251,11 +257,15 @@ const autoplay = {
   nextAt: 0,
   /** 没有进展时的退避倍数 */
   backoff: 1,
-  /** 最近一小时的自主体回合时间戳 */
-  turns: [],
+  /** 最近一小时自主体回合的模型调用时间戳 */
+  calls: [],
   /** 用户手动「扫雷结束」后的硬暂停：普通退避不许缩短它 */
   manualPauseUntil: 0,
 };
+
+/** 最近一次模型调用的时间：看门狗用它判断“是不是真的没动静了” */
+let lastLlmAt = Date.now();
+const noteLlmActivity = () => { lastLlmAt = Date.now(); };
 
 function noteAutoPlayDelay(ms) {
   // 手动收摊的暂停优先：任何普通退避都不能把它缩短
@@ -278,15 +288,17 @@ function tickAutoPlay() {
     if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] wait ${Math.round((autoplay.nextAt - now) / 1000)}s`);
     return;
   }
-  autoplay.turns = autoplay.turns.filter((t) => now - t < 3_600_000);
-  if (autoplay.turns.length >= AUTO_MAX_TURNS_PER_HOUR) {
-    noteAutoPlayDelay(AUTO_MAX_BACKOFF_MS);
-    console.log("[autoplay] 每小时上限到了，冷却 5 分钟");
+  autoplay.calls = autoplay.calls.filter((t) => now - t < 3_600_000);
+  if (AUTO_MAX_CALLS_PER_HOUR > 0 && autoplay.calls.length >= AUTO_MAX_CALLS_PER_HOUR) {
+    // 等到最早那次调用滑出 1 小时窗口，而不是固定冷却
+    const oldest = autoplay.calls[0] ?? now;
+    const waitMs = Math.max(30_000, oldest + 3_600_000 - now + 1_000);
+    noteAutoPlayDelay(waitMs);
+    console.log(`[autoplay] 自主调用预算用尽（${autoplay.calls.length}/${AUTO_MAX_CALLS_PER_HOUR} 次/小时），${Math.round(waitMs / 1000)}s 后恢复`);
     return;
   }
   const board = games.public();
   console.log(`[autoplay] tick board=${board?.status ?? "none"} revision=${board?.revision ?? "-"}`);
-  autoplay.turns.push(now);
   if (board && board.status === "playing") {
     noteAutoPlayDelay(AUTO_CONTINUE_IDLE_MS * autoplay.backoff);
     gameEvents.push({
@@ -305,6 +317,42 @@ function tickAutoPlay() {
   console.log(`[autoplay] 自己开了一局 ${started.gameId}`);
   broadcastState();
   noteGameEvent("game_started", started, { trigger: "self" });
+}
+
+/**
+ * 扫雷看门狗：只要还有一局在进行、又没人占用任务，超过一分钟没有模型活动
+ * 就主动入队一条 game_still_active 提醒，把她叫回来继续。每分钟最多一次。
+ */
+function tickStillPlaying() {
+  if (!AUTO_PLAY || !hasKey()) return;
+  const board = games.public();
+  if (!board || board.status !== "playing") return;
+  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown") return;
+  if (Date.now() < autoplay.manualPauseUntil) return;
+  const idleMs = Date.now() - lastLlmAt;
+  if (idleMs < AUTO_STILL_PLAYING_MS) return;
+  autoplay.calls = autoplay.calls.filter((t) => Date.now() - t < 3_600_000);
+  if (AUTO_MAX_CALLS_PER_HOUR > 0 && autoplay.calls.length >= AUTO_MAX_CALLS_PER_HOUR) {
+    if (Date.now() - (autoplay.stillWarnedAt ?? 0) > 60_000) {
+      autoplay.stillWarnedAt = Date.now();
+      console.log("[autoplay] 想唤醒但自主调用预算已用尽");
+    }
+    return;
+  }
+  autoplay.stillWarnedAt = 0;
+  console.log(`[autoplay] 扫雷进行中已 ${Math.round(idleMs / 1000)}s 没有模型活动，主动唤醒`);
+  gameEvents.push({
+    eventId: `ev${++eventSeq}`,
+    type: "game_still_active",
+    gameId: board.gameId,
+    revision: board.revision,
+    status: board.status,
+    at: new Date().toISOString(),
+    idleMs,
+  });
+  scheduleEventTurn();
+  // 先推一次时间，避免 5 秒的调度周期里重复入队；真正的调用会再刷新
+  lastLlmAt = Date.now();
 }
 
 /** 场地事件：先入队去重，再由模型回合合并处理 */
@@ -590,6 +638,8 @@ async function runPlanning(task, ws) {
       return;
     }
     console.log(`[ctx] planning ${ctx.snapshotId} ~${budget.total} tokens · events=${ctx.attentionEvents.length}`);
+    if (task.origin === "event") autoplay.calls.push(Date.now());
+    noteLlmActivity();
     const out = await callModel(planningMessages(ctx));
     applyOutput(ws, task, out);
   } catch (err) {
@@ -839,7 +889,7 @@ wss.on("connection", (ws, req) => {
         const dx = Number(msg.x) - center.x;
         const dz = Number(msg.z) - center.z;
         const distance = Math.hypot(dx, dz);
-        if (!Number.isFinite(distance) || distance > 0.12) {
+        if (!Number.isFinite(distance) || distance > DIG_TOLERANCE_M) {
           return reply({ ok: false, reason: "NOT_IN_CELL", distance_m: Math.round(distance * 1000) / 1000, targetCellCenter: center });
         }
         const result = games.commit({ gameId: auth.gameId, row: auth.row, col: auth.col, expectedRevision: auth.expectedRevision });
@@ -986,6 +1036,8 @@ wss.on("connection", (ws, req) => {
               return;
             }
             console.log(`[ctx] review ${ctx.snapshotId} ~${budget.total} tokens · events=${ctx.attentionEvents.length}`);
+            if (task.origin === "event") autoplay.calls.push(Date.now());
+            noteLlmActivity();
             const out = await callModel(reviewMessages(ctx));
             applyOutput(ws, task, out);
           } catch (err) {
@@ -1028,8 +1080,10 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-setInterval(tickAutoPlay, Number(process.env.AUTO_TICK_MS ?? 5000)).unref();
+const TICK_MS = Number(process.env.AUTO_TICK_MS ?? 5000);
+setInterval(tickAutoPlay, TICK_MS).unref();
+setInterval(tickStillPlaying, TICK_MS).unref();
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`whale brain on :${PORT} (ws /ws)`);
-  console.log(`[autoplay] ${AUTO_PLAY ? "开" : "关"} · 续玩 ${AUTO_CONTINUE_IDLE_MS}ms · 新局 ${AUTO_START_IDLE_MS}ms · 上限 ${AUTO_MAX_TURNS_PER_HOUR}/h`);
+  console.log(`[autoplay] ${AUTO_PLAY ? "开" : "关"} · 续玩 ${AUTO_CONTINUE_IDLE_MS}ms · 新局 ${AUTO_START_IDLE_MS}ms · 调用预算 ${AUTO_MAX_CALLS_PER_HOUR || "不限"}/h`);
 });

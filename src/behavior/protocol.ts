@@ -147,6 +147,8 @@ export interface GameView {
   /** 每格边长（米）：16×16 仍占 8m 场地，所以是 0.5 */
   cellSize: number;
   boardHalf?: number;
+  /** 挖掘站位容差（米），由服务端下发，避免两边各写一份 */
+  digToleranceM?: number;
   mineCount: number;
   cells: { row: number; col: number; state: "hidden" | "revealed"; value?: number | "mine" }[];
   revealedSafe: number;

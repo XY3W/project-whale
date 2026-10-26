@@ -673,7 +673,8 @@ async function boot() {
       }
       const center = cellCenterOf(step.row, step.col);
       const distance = Math.hypot(root.position.x - center.x, root.position.z - center.z);
-      if (distance > 0.12) {
+      const tolerance = board.digToleranceM ?? 0.18;
+      if (distance > tolerance) {
         return {
           ok: false,
           reason: "PRECONDITION_FAILED",
@@ -985,9 +986,12 @@ async function boot() {
     }
 
     // ---- 机械漫游门禁 ----
+    // 有进行中的扫雷局时不启动机械漫游：那是她的“棋盘时间”，
+    // 模型在思考/退避时也该待在盘边，而不是走开去闲逛。
+    const gameInProgress = gameBoard?.status === "playing";
     const canRoam =
-      stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !chat.open && !wantChat && !destination && !roamBusy && !taskActive && phase === "idle" &&
-      !player.state.walking && player.state.base === "idle_stand";
+      stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !chat.open && !wantChat && !destination && !roamBusy && !taskActive &&
+      !gameInProgress && phase === "idle" && !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {
       roamTimer -= dt;
