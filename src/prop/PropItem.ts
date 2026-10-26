@@ -147,6 +147,8 @@ export class PropItem {
   get stationary(): boolean { return this.state !== "flying" || this.lastCalm > 0.4; }
   get bindings() { return { slot: this.slot, bone: this.def.binding, headBinding: this.def.headBinding ?? null }; }
   get variants(): string[] { return Object.keys(this.def.pickupVariants ?? {}); }
+  /** catalog 里的原始定义（调试/对齐用） */
+  get definition() { return this.def; }
 
   static toWorld(charRoot: THREE.Object3D, position: number[], quaternion: number[]): Pose {
     charRoot.updateWorldMatrix(true, false);

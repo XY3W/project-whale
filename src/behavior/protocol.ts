@@ -60,6 +60,8 @@ export interface Locomotion {
   yaw(): number;
   position(): { x: number; z: number };
   walk(meters: number): Promise<void>;
+  /** 短步微调：0.02 / 0.04 / 0.06 / 0.08 米 */
+  adjust?(meters: number): Promise<void>;
   turn(deg: number): Promise<void>;
   play(actionId: string): Promise<void>;
   tail(style: "tail_idle" | "tail_swish", durationS: number): Promise<void>;

@@ -325,6 +325,15 @@ async function boot() {
         { idleMs: 8000 },
       );
     },
+    adjust: async (meters) => {
+      const from = root.position.clone();
+      player.adjustDistance(meters);
+      await waitForProgress(
+        () => !player.moving && player.state.base === "idle_stand",
+        () => root.position.distanceTo(from),
+        { idleMs: 8000 },
+      );
+    },
     turn: async (deg) => {
       const from = root.rotation.y;
       startTurn(from + (deg * Math.PI) / 180, null);
@@ -423,6 +432,44 @@ async function boot() {
       const item = itemOf(objectId);
       if (!item) return { ok: false, plan: null, error: "OBJECT_NOT_FOUND" };
       const reference = referenceOf(objectId);
+      // 有落地变体的物品（饭勺）朝向固定：站位朝向必须由物品朝向反推，
+      // 否则从任意方位走过去都会让“脚尖挑勺”的动画方向不对。
+      if (item.variants.length > 0) {
+        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(item.object.quaternion);
+        const itemYaw = (Math.atan2(forward.x, forward.z) * 180) / Math.PI;
+        // 站位朝向来自“参考四元数”的朝向，而不是参考位置的方位角
+        const refQuat = new THREE.Quaternion(...(item.definition.pickupReference.quaternion as [number, number, number, number]));
+        const refForward = new THREE.Vector3(0, 0, 1).applyQuaternion(refQuat);
+        const referenceYaw = (Math.atan2(refForward.x, refForward.z) * 180) / Math.PI;
+        const finalYaw = itemYaw - referenceYaw;
+        const rad = (finalYaw * Math.PI) / 180;
+        const stand = {
+          x: item.position.x - (reference.x * Math.cos(rad) + reference.z * Math.sin(rad)),
+          z: item.position.z - (-reference.x * Math.sin(rad) + reference.z * Math.cos(rad)),
+        };
+        const bearing = (Math.atan2(stand.x - root.position.x, stand.z - root.position.z) * 180) / Math.PI;
+        await loco.turn(signedDeltaDeg(degYaw(), bearing));
+        // 用 walk + walk_adjust 把点落到 1cm 以内
+        for (let step = 0; step < 16; step++) {
+          const remaining = Math.hypot(stand.x - root.position.x, stand.z - root.position.z);
+          if (remaining <= 0.01) break;
+          const walkDistances = [1.89, 1.71, 1.53, 1.35, 1.17, 0.99, 0.81, 0.63, 0.45, 0.27, 0.09];
+          const walk = walkDistances.find((d) => d <= remaining + 1e-6);
+          if (walk !== undefined) { await loco.walk(walk); continue; }
+          const adjusts = [0.08, 0.06, 0.04, 0.02];
+          const adjust = adjusts.find((d) => d <= remaining + 1e-6);
+          if (adjust === undefined || !loco.adjust) break;
+          await loco.adjust(adjust);
+        }
+        await loco.turn(signedDeltaDeg(degYaw(), finalYaw));
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+        const check = alignInfo(objectId);
+        return {
+          ok: check.ok,
+          plan: { distanceM: 0, turn1Deg: 0, turn2Deg: 0, stand, finalYawDeg: finalYaw, reach: Math.hypot(reference.x, reference.z) },
+          error: check.ok ? undefined : "NOT_ALIGNED",
+        };
+      }
       // 距离远时先按最大支持距离走近，再求精确站位；最多 10 段，避免无限循环
       for (let leg = 0; leg < 10; leg++) {
         let plan = planApproach({
