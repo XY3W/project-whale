@@ -10,7 +10,7 @@ export interface PublicCell {
 export interface PublicBoard {
   gameId: string;
   revision: number;
-  status: "playing" | "won" | "lost";
+  status: "playing" | "won" | "lost" | "ended";
   size: number;
   cellSize?: number;
   mineCount: number;
@@ -22,6 +22,19 @@ export interface PublicBoard {
 const SIZE_M = 8;
 /** 开局扫光时长（毫秒） */
 const PULSE_MS = 1300;
+/** 状态色：进行中蓝 / 通关绿 / 踩雷红 / 用户结束琥珀 */
+const ACCENTS: Record<string, [number, number, number]> = {
+  playing: [0.345, 0.651, 1],
+  won: [0.29, 0.871, 0.502],
+  lost: [1, 0.373, 0.427],
+  ended: [1, 0.69, 0.33],
+};
+const ACCENT_CSS: Record<string, string> = {
+  playing: "88, 166, 255",
+  won: "74, 222, 128",
+  lost: "255, 95, 109",
+  ended: "255, 176, 84",
+};
 
 /**
  * 扫雷盘面：8m × 8m 地面上的 16×16 网格（每格 0.5m），用一张 canvas 纹理绘制。
@@ -32,6 +45,9 @@ export class MinesweeperBoard {
   private readonly canvas: HTMLCanvasElement;
   private readonly ctx: CanvasRenderingContext2D;
   private readonly texture: THREE.CanvasTexture;
+  /** 场地边缘的“能量围栏”：只要有局就呼吸式发光 */
+  private readonly field = new THREE.Group();
+  private readonly fieldMat: THREE.MeshBasicMaterial;
   private board: PublicBoard | null = null;
   private hover: { row: number; col: number } | null = null;
   /** 进入新一局的时间点：用来播“开局扫光” */
@@ -61,6 +77,27 @@ export class MinesweeperBoard {
     this.mesh.visible = false;
     this.mesh.renderOrder = 1;
     parent.add(this.mesh);
+
+    // 四面很矮的发光墙，贴在棋盘边缘：一眼能看出“场地现在是扫雷模式”
+    this.fieldMat = new THREE.MeshBasicMaterial({
+      color: 0x58a6ff,
+      transparent: true,
+      opacity: 0.16,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const wallHeight = 0.3;
+    const wall = new THREE.PlaneGeometry(SIZE_M, wallHeight);
+    for (const [x, z, rotY] of [[0, -SIZE_M / 2, 0], [0, SIZE_M / 2, 0], [-SIZE_M / 2, 0, Math.PI / 2], [SIZE_M / 2, 0, Math.PI / 2]]) {
+      const mesh = new THREE.Mesh(wall, this.fieldMat);
+      mesh.position.set(x, wallHeight / 2, z);
+      mesh.rotation.y = rotY;
+      this.field.add(mesh);
+    }
+    this.field.visible = false;
+    this.field.renderOrder = 2;
+    parent.add(this.field);
     this.draw();
   }
 
@@ -80,24 +117,28 @@ export class MinesweeperBoard {
 
   update(board: PublicBoard | null) {
     this.board = board;
+    this.mesh.visible = !!board;
+    this.field.visible = !!board;
     if (board) {
-      this.mesh.visible = true;
       if (board.gameId !== this.lastGameId) {
         this.lastGameId = board.gameId;
         this.pulseStart = performance.now();
       }
+    } else {
+      this.pulseStart = 0;
     }
     this.draw();
   }
 
-  /** 每帧调用：只在开局扫光期间重绘，平时不花 CPU */
+  /** 每帧调用：围栏呼吸 + 开局扫光期间重绘，平时不重画 canvas */
   tick() {
+    if (!this.mesh.visible) return;
+    const now = performance.now();
+    const accent = ACCENTS[this.board?.status ?? "playing"] ?? ACCENTS.playing;
+    this.fieldMat.color.setRGB(...accent);
+    this.fieldMat.opacity = 0.15 + 0.09 * Math.sin(now / 420) + this.pulse * 0.18;
     if (!this.pulseStart) return;
-    if (performance.now() - this.pulseStart > PULSE_MS) {
-      this.pulseStart = 0;
-      this.draw();
-      return;
-    }
+    if (now - this.pulseStart > PULSE_MS) this.pulseStart = 0;
     this.draw();
   }
 
@@ -121,7 +162,7 @@ export class MinesweeperBoard {
     const cell = px / size;
     const pulse = this.pulse;
     const status = this.board?.status ?? "playing";
-    const accent = status === "won" ? "74, 222, 128" : status === "lost" ? "255, 95, 109" : "88, 166, 255";
+    const accent = ACCENT_CSS[status] ?? ACCENT_CSS.playing;
     ctx.clearRect(0, 0, px, px);
 
     // 底盘：几乎不透明的深靛蓝，和地板那张 16×16 装饰网格一眼区分开
@@ -206,7 +247,8 @@ export class MinesweeperBoard {
     ctx.restore();
 
     if (this.board && status !== "playing") {
-      ctx.fillStyle = status === "won" ? "rgba(40, 160, 90, 0.28)" : "rgba(170, 40, 40, 0.3)";
+      ctx.fillStyle =
+        status === "won" ? "rgba(40, 160, 90, 0.28)" : status === "ended" ? "rgba(120, 110, 70, 0.26)" : "rgba(170, 40, 40, 0.3)";
       ctx.fillRect(0, 0, px, px);
     }
     this.texture.needsUpdate = true;

@@ -129,11 +129,23 @@ async function boot() {
       gameChip.classList.remove("show");
       return;
     }
-    const label = view.status === "won" ? "通关" : view.status === "lost" ? "踩雷" : "进行中";
+    const label =
+      view.status === "won" ? "通关" : view.status === "lost" ? "踩雷" : view.status === "ended" ? "已结束" : "进行中";
     gameChip.textContent = `扫雷 ${view.size}×${view.size} · ${view.mineCount} 雷 · ${label} · 剩 ${view.remainingSafe}`;
     gameChip.classList.toggle("lost", view.status === "lost");
     gameChip.classList.toggle("won", view.status === "won");
+    gameChip.classList.toggle("ended", view.status === "ended");
     gameChip.classList.add("show");
+    syncStartButton();
+  };
+
+  /** 进行中时按钮变成「扫雷结束」，点了直接收摊 */
+  const startButton = document.getElementById("start-minesweeper") as HTMLButtonElement | null;
+  const syncStartButton = () => {
+    if (!startButton) return;
+    const playing = gameBoard?.status === "playing";
+    startButton.textContent = playing ? "扫雷结束" : "扫雷开局";
+    startButton.style.background = playing ? "#8a3a3a" : "#3d62ad";
   };
 
   // ---- 状态 ----
@@ -696,13 +708,22 @@ async function boot() {
   };
   loco.dig = digBridge;
 
-  document.getElementById("start-minesweeper")?.addEventListener("click", () => {
-    // 连接还没就绪时给个提示，而不是静默失败
+  startButton?.addEventListener("click", () => {
+    // 连接还没就绪、或这个页面只是只读镜像时给个提示，而不是静默失败
     if (!client.connected) {
       chat.setError("还没有连上大脑服务，稍等一下再开局");
       return;
     }
+    if (readOnly) {
+      chat.setError("另一个页面正在执行角色，这里只读");
+      return;
+    }
     chat.setError(null);
+    if (gameBoard?.status === "playing") {
+      client.endGame();
+      speak("这局先到这里。", 1800);
+      return;
+    }
     client.startGame(`r${Date.now()}`);
   });
 

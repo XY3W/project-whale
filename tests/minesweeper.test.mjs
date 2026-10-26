@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  SIZE, MINE_COUNT, SAFE_TOTAL, createGame, dig, placeMines, countAdjacentMines,
+  SIZE, MINE_COUNT, SAFE_TOTAL, createGame, dig, endGame, placeMines, countAdjacentMines,
   indexOf, cellOf, cellAt, cellCenter, inBounds, publicBoard, restoreGame, serializeGame,
 } from "../server/minesweeper.mjs";
 
@@ -150,6 +150,33 @@ test("旧尺寸存档：不会把 10×10 的索引误读成 16×16", () => {
   const saved = serializeGame(newGame());
   assert.equal(saved.size, SIZE);
   assert.equal(saved.mineCount, MINE_COUNT);
+});
+
+test("用户结束：状态 ended、揭开雷区、之后不能再挖", () => {
+  const game = newGame(5);
+  dig(game, 3, 3); // 先挖一下，雷区才会生成
+  const revision = game.revision;
+  const result = endGame(game);
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "ended");
+  assert.equal(game.status, "ended");
+  assert.equal(game.revision, revision + 1);
+  const board = publicBoard(game);
+  assert.equal(board.status, "ended");
+  const mines = board.cells.filter((c) => c.value === "mine");
+  assert.equal(mines.length, MINE_COUNT, "结束时要揭开所有雷");
+  const again = endGame(game);
+  assert.equal(again.ok, false);
+  assert.equal(again.reason, "GAME_OVER");
+  assert.equal(dig(game, 4, 4).reason, "GAME_OVER");
+});
+
+test("用户结束：还没挖过就结束也不会崩", () => {
+  const game = newGame(6);
+  const result = endGame(game);
+  assert.equal(result.ok, true);
+  assert.equal(game.mineSet, null);
+  assert.equal(publicBoard(game).status, "ended");
 });
 
 test("公开快照：未揭示格永远不含 value", () => {

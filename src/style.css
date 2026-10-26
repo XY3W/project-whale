@@ -232,3 +232,9 @@ canvas { display: block; }
   box-shadow: 0 0 18px rgba(255, 95, 109, 0.25);
   color: rgba(255, 214, 218, 0.95);
 }
+
+.game-chip.ended {
+  border-color: rgba(255, 176, 84, 0.6);
+  box-shadow: 0 0 18px rgba(255, 176, 84, 0.25);
+  color: rgba(255, 232, 204, 0.95);
+}

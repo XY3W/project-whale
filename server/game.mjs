@@ -4,7 +4,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { createGame, dig, publicBoard, restoreGame, serializeGame, cellAt } from "./minesweeper.mjs";
+import { createGame, dig, endGame, publicBoard, restoreGame, serializeGame, cellAt } from "./minesweeper.mjs";
 
 export class GameService {
   constructor(file) {
@@ -58,6 +58,14 @@ export class GameService {
       return { ok: false, reason: "STALE_REVISION", revision: this.game.revision };
     }
     const result = dig(this.game, row, col);
+    if (result.ok) this.save();
+    return { ...result, board: this.public() };
+  }
+
+  /** 用户点「扫雷结束」：结束当前局，揭开雷区 */
+  end() {
+    if (!this.game) return { ok: false, reason: "NO_GAME" };
+    const result = endGame(this.game);
     if (result.ok) this.save();
     return { ...result, board: this.public() };
   }

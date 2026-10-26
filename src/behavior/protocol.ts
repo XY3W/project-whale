@@ -142,7 +142,7 @@ export interface DigOutcome {
 export interface GameView {
   gameId: string;
   revision: number;
-  status: "playing" | "won" | "lost";
+  status: "playing" | "won" | "lost" | "ended";
   size: number;
   /** 每格边长（米）：16×16 仍占 8m 场地，所以是 0.5 */
   cellSize: number;

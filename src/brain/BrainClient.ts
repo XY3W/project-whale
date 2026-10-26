@@ -179,6 +179,11 @@ export class BrainClient {
     return this.send("game_start", { requestId, leaseEpoch: this.leaseEpoch });
   }
 
+  /** 用户主动结束当前局（按钮变成「扫雷结束」时调用） */
+  endGame() {
+    return this.send("game_end", { leaseEpoch: this.leaseEpoch });
+  }
+
   /** 挖掘提交：由执行器在 dig_contact 时刻调用，等待服务端结算 */
   commitDig(payload: Record<string, unknown>, timeoutMs = 6000): Promise<Record<string, unknown>> {
     const actionInstanceId = `d${++this.digSeq}`;

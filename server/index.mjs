@@ -46,6 +46,8 @@ const AUTO_START_IDLE_MS = Number(process.env.AUTO_START_IDLE_MS ?? 90_000);
  */
 const AUTO_MAX_TURNS_PER_HOUR = Number(process.env.AUTO_MAX_TURNS ?? 6);
 const AUTO_MAX_BACKOFF_MS = 600_000;
+/** 用户点了「扫雷结束」之后，别马上又自己开一局 */
+const AUTO_AFTER_MANUAL_END_MS = Number(process.env.AUTO_AFTER_MANUAL_END_MS ?? 1_800_000);
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -671,9 +673,29 @@ wss.on("connection", (ws, req) => {
         const board = games.start(msg.requestId);
         send(ws, "game_state", { board });
         broadcastState();
+        // 用户主动点开局：解除“手动结束”的暂停
+        autoplay.nextAt = 0;
         // 只有真的换了局（而不是幂等重发）才算新局事件
         if (board && board.gameId !== previous) {
           noteGameEvent("game_started", board, { trigger: "user_button" });
+        }
+        break;
+      }
+
+      case "game_end": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能结束对局" }); break; }
+        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
+          break;
+        }
+        const result = games.end();
+        send(ws, "game_state", { board: games.public(), ended: result.ok });
+        broadcastState();
+        if (result.ok) {
+          // 用户主动收摊：给自主开局按下暂停，别过一分钟又自己开一局
+          noteAutoPlayDelay(AUTO_AFTER_MANUAL_END_MS);
+          console.log(`[game] 用户结束了 ${result.board?.gameId}`);
+          noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
         }
         break;
       }

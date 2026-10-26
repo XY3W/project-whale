@@ -97,7 +97,7 @@ export function restoreGame(raw) {
   game.mines = Array.isArray(raw.mines) ? raw.mines.map(Number) : null;
   game.mineSet = game.mines ? new Set(game.mines) : null;
   game.revealed = new Set(Array.isArray(raw.revealed) ? raw.revealed.map(Number) : []);
-  game.status = ["playing", "won", "lost"].includes(raw.status) ? raw.status : "playing";
+  game.status = ["playing", "won", "lost", "ended"].includes(raw.status) ? raw.status : "playing";
   game.revision = Number.isFinite(raw.revision) ? raw.revision : 0;
   game.digs = Number.isFinite(raw.digs) ? raw.digs : 0;
   game.startedAt = Number.isFinite(raw.startedAt) ? raw.startedAt : Date.now();
@@ -208,6 +208,15 @@ export function dig(game, row, col) {
   const revealedSafe = [...game.revealed].filter((i) => !game.mineSet.has(i)).length;
   if (revealedSafe >= SAFE_TOTAL) game.status = "won";
   return { ok: true, firstDig, status: game.status, revision: game.revision, changedCells };
+}
+
+/** 用户主动结束：揭开雷区给个交代，状态记为 ended，之后不能再挖 */
+export function endGame(game) {
+  if (!game || game.status !== "playing") return { ok: false, reason: "GAME_OVER" };
+  game.status = "ended";
+  game.revision += 1;
+  if (game.mineSet) for (const index of game.mineSet) game.revealed.add(index);
+  return { ok: true, status: game.status, revision: game.revision };
 }
 
 /** 角色根位置 → 棋盘格子（半开区间；+4 不属于棋盘） */
