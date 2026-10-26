@@ -15,7 +15,7 @@ import { Hud } from "./ui/Hud";
 import { PropItem } from "./prop/PropItem";
 import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
-import type { BasinBridge } from "./behavior/protocol.ts";
+import type { BasinBridge, BasinView } from "./behavior/protocol.ts";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = "/models/minesweeper-v1/character_minesweeper.glb";
@@ -347,13 +347,20 @@ async function boot() {
     isMoving: () => player.state.walking || phase !== "idle",
   };
   const degYaw = () => (root.rotation.y * 180) / Math.PI;
-  const alignInfo = () => {
-    const ref = basinReference.position;
-    const reach = Math.hypot(ref[0], ref[2]);
-    const dx = basin.position.x - root.position.x;
-    const dz = basin.position.z - root.position.z;
+  const items = new Map<string, PropItem>([["basin", basin], ["rice_scoop", scoop]]);
+  const itemOf = (objectId: string) => items.get(objectId) ?? null;
+  const referenceOf = (objectId: string) => {
+    const def = basinCatalog.props?.[objectId as "basin" | "rice_scoop"];
+    return def ? { x: def.pickupReference.position[0], z: def.pickupReference.position[2] } : { x: basinReference.position[0], z: basinReference.position[2] };
+  };
+  const alignInfo = (objectId = "basin") => {
+    const item = itemOf(objectId) ?? basin;
+    const ref = referenceOf(objectId);
+    const reach = Math.hypot(ref.x, ref.z);
+    const dx = item.position.x - root.position.x;
+    const dz = item.position.z - root.position.z;
     const direct = Math.hypot(dx, dz);
-    const offsetBearing = (Math.atan2(ref[0], ref[2]) * 180) / Math.PI;
+    const offsetBearing = (Math.atan2(ref.x, ref.z) * 180) / Math.PI;
     const wantYaw = (Math.atan2(dx, dz) * 180) / Math.PI - offsetBearing;
     const yawErrorDeg = signedDeltaDeg(degYaw(), wantYaw);
     const distanceError = direct - reach;
@@ -388,33 +395,39 @@ async function boot() {
   };
 
   const basinBridge: BasinBridge = {
-    snapshot: () => basin.snapshot(),
-    alignment: alignInfo,
-    upright: async () => {
-      const started = basin.startUpright(0.45);
+    items: () => [...items.values()].map((item) => item.snapshot() as unknown as BasinView),
+    snapshot: (objectId) => (itemOf(objectId)?.snapshot() as unknown as BasinView) ?? null,
+    alignment: (objectId) => alignInfo(objectId),
+    upright: async (objectId) => {
+      const item = itemOf(objectId);
+      if (!item) return { ok: false, moved: 0, rotatedDeg: 0 };
+      const started = item.startUpright(0.45);
       if (!started.ok) return started;
       // 扶正按帧推进：低帧率机器上 0.45 秒可能要跑十几秒墙钟
       const t0 = performance.now();
-      while (basin.uprighting && performance.now() - t0 < 20000) {
+      while (item.uprighting && performance.now() - t0 < 20000) {
         await new Promise((r) => setTimeout(r, 50));
       }
-      return { ...basin.lastUpright, ok: !basin.uprighting && basin.upright };
+      return { ...item.lastUpright, ok: !item.uprighting && item.upright };
     },
-    reset: () => {
+    reset: (objectId) => {
       player.clearGesture();
       player.setWalking(false);
       player.cancelPerformance();
-      basin.resetToCenter();
+      if (objectId) itemOf(objectId)?.resetToCenter();
+      else for (const item of items.values()) item.resetToCenter();
     },
-    canStart: (id) => basin.canStart(id),
+    canStart: (objectId, actionId) => itemOf(objectId)?.canStart(actionId) ?? false,
     cancel: () => { player.cancelPerformance(); },
-    align: async () => {
-      const reference = { x: basinReference.position[0], z: basinReference.position[2] };
+    align: async (objectId) => {
+      const item = itemOf(objectId);
+      if (!item) return { ok: false, plan: null, error: "OBJECT_NOT_FOUND" };
+      const reference = referenceOf(objectId);
       // 距离远时先按最大支持距离走近，再求精确站位；最多 10 段，避免无限循环
       for (let leg = 0; leg < 10; leg++) {
         const plan = planApproach({
           character: { x: root.position.x, z: root.position.z },
-          basin: { x: basin.position.x, z: basin.position.z },
+          basin: { x: item.position.x, z: item.position.z },
           yawDeg: degYaw(),
           reference,
           half: AREA_HALF,
@@ -424,7 +437,7 @@ async function boot() {
           if (Math.abs(plan.turn1Deg) > 0.01) await loco.turn(plan.turn1Deg);
           if (plan.distanceM > 0) await loco.walk(plan.distanceM);
           if (Math.abs(plan.turn2Deg) > 0.01) await loco.turn(plan.turn2Deg);
-          const check = alignInfo();
+          const check = alignInfo(objectId);
           return {
             ok: check.ok,
             plan: {
@@ -439,7 +452,7 @@ async function boot() {
           };
         }
         if (plan.error === "NO_SUPPORTED_DISTANCE" && plan.direct > plan.reach + 1.89 + 0.2) {
-          const bearing = (Math.atan2(basin.position.x - root.position.x, basin.position.z - root.position.z) * 180) / Math.PI;
+          const bearing = (Math.atan2(item.position.x - root.position.x, item.position.z - root.position.z) * 180) / Math.PI;
           await loco.turn(signedDeltaDeg(degYaw(), bearing));
           await loco.walk(1.89);
           continue;
@@ -448,12 +461,14 @@ async function boot() {
       }
       return { ok: false, plan: null, error: "TOO_FAR" };
     },
-    perform: async (actionId, spec) => {
-      if (!basin.begin(actionId, spec)) return false;
+    perform: async (objectId, actionId, spec) => {
+      const item = itemOf(objectId);
+      if (!item) return false;
+      if (!item.begin(actionId, spec)) return false;
       const meta = basinCatalog.actions.find((a) => a.id === actionId);
       const events = (meta?.events ?? []).map((e) => ({ time: e.time, type: e.type }));
-      const ok = await player.perform(actionId, events, (type) => basin.handleEvent(type), meta?.layer ?? "full_body");
-      basin.finish(ok);
+      const ok = await player.perform(actionId, events, (type) => item.handleEvent(type), meta?.layer ?? "full_body");
+      item.finish(ok);
       return ok;
     },
   };

@@ -104,18 +104,20 @@ export interface UprightReport {
 }
 
 export interface BasinBridge {
-  snapshot(): BasinView;
-  alignment(): BasinAlignment;
-  /** 把静止但侧躺/倒扣的盆扶成正放；返回实际挪动量 */
-  upright(): Promise<UprightReport>;
-  /** 回到场地正中心的静止姿态 */
-  reset(): void;
+  /** 所有物品的公开快照 */
+  items(): BasinView[];
+  snapshot(objectId: string): BasinView | null;
+  alignment(objectId: string): BasinAlignment;
+  /** 把静止但姿态不支持的物品摆正；返回实际挪动量 */
+  upright(objectId: string): Promise<UprightReport>;
+  /** 把指定物品放回场地中心 */
+  reset(objectId?: string): void;
   /** 走到拾取站位并对准朝向；返回是否到位 */
-  align(): Promise<{ ok: boolean; plan: ApproachSummary | null; error?: string }>;
+  align(objectId: string): Promise<{ ok: boolean; plan: ApproachSummary | null; error?: string }>;
   /** 播放互动片段，返回是否到达终态 */
-  perform(actionId: string, spec?: ThrowRequest): Promise<boolean>;
+  perform(objectId: string, actionId: string, spec?: ThrowRequest): Promise<boolean>;
   /** 当前状态能否开始该动作 */
-  canStart(actionId: string): boolean;
+  canStart(objectId: string, actionId: string): boolean;
   cancel(): void;
 }
 

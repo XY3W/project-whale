@@ -275,6 +275,8 @@ function makeBasinLoco() {
   const calls = [];
   let alignment = { distanceError: 0.005, yawErrorDeg: 0.4, ok: true };
   loco.basin = {
+    items: () => [{ ...view }],
+    reset: () => calls.push("reset"),
     snapshot: () => ({ ...view }),
     alignment: () => alignment,
     align: async () => {
@@ -290,7 +292,7 @@ function makeBasinLoco() {
       view.upright = true;
       return { ok: true, moved, rotatedDeg: 88 };
     },
-    perform: async (id) => {
+    perform: async (_objectId, id) => {
       calls.push(id);
       if (id === "pickup_basin") { view.state = "held"; view.holder = "hand"; view.available = false; }
       if (id === "wear_basin") { view.state = "worn"; view.holder = "head"; }
@@ -343,8 +345,8 @@ test("钢盆：落地后 state 变 resting，throw 仍算成功", async () => {
   const { loco, view } = makeBasinLoco();
   view.state = "held";
   const original = loco.basin.perform;
-  loco.basin.perform = async (id) => {
-    const ok = await original(id);
+  loco.basin.perform = async (objectId, id) => {
+    const ok = await original(objectId, id);
     if (id === "throw_basin") { view.state = "resting"; view.upright = true; view.available = true; }
     return ok;
   };
