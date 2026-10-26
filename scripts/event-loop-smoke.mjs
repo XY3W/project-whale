@@ -23,6 +23,8 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "whale-event-"));
 const log = (...args) => console.log(...args);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const requests = [];
+/** 第 4 段把假模型切到“只收尾”模式，好让任务尽快结束、暴露自主回合 */
+let stubQuiet = false;
 
 /** 从模型消息里还原 REQUEST_CONTEXT_JSON（大括号配对，后面还跟着输出契约） */
 function contextOf(body) {
@@ -59,11 +61,15 @@ function contextOf(body) {
 function reply(body) {
   const ctx = contextOf(body);
   requests.push({ phase: ctx?.phase, ctx, at: Date.now() });
+  if (stubQuiet) return { type: "finish_task", outcome: "completed", speech: "", memory_proposals: [] };
   const board = ctx?.board ?? null;
   const events = ctx?.attentionEvents ?? [];
   const report = ctx?.executionReport ?? null;
   const digged = (report?.steps ?? []).some((s) => s.action === "dig" && s.status === "succeeded");
 
+  if (events.some((e) => e.type === "self_play")) {
+    return { type: "finish_task", outcome: "completed", speech: "", memory_proposals: [] };
+  }
   if (ctx?.phase === "planning" && events.some((e) => e.type === "game_started")) {
     // 自主回合也要能真的下指令：先看一眼棋盘，不说话
     return { type: "execute_plan", speech: "", steps: [{ action: "play", action_id: "notice" }], memory_proposals: [] };
@@ -162,6 +168,9 @@ async function main() {
       DEEPSEEK_BASE_URL: `http://127.0.0.1:${STUB_PORT}/chat/completions`,
       DEEPSEEK_MODEL: "stub-model",
       DEEPSEEK_THINKING: "0",
+      AUTO_START_IDLE_MS: "120000",
+      AUTO_CONTINUE_IDLE_MS: "1200",
+      AUTOPLAY_DEBUG: "1",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -188,6 +197,9 @@ async function main() {
     listen(ws);
     await waitFor((m) => m.type === "session_state", "session_state");
     const initial = await waitFor((m) => m.type === "session_state", "initial state");
+    // 真实页面每 5 秒心跳；没有心跳租约会被判死，自主回合也就不会派发
+    const heartbeat = setInterval(() => send(ws, "heartbeat", {}), 3000);
+    ws.on("close", () => clearInterval(heartbeat));
     send(ws, "chat_opened", {});
 
     log("\n[1] 按钮开局 → 服务端自主唤醒模型");
@@ -298,6 +310,51 @@ async function main() {
     // 同一批事件不会被重复投喂
     const dupes = requests.filter((r) => (r.ctx?.attentionEvents ?? []).some((e) => e.type === "board_updated" && e.revision === 1));
     check(dupes.length === 1, `board_updated@1 只消费一次（实际 ${dupes.length} 次）`);
+
+    // 让第二个计划收尾（假客户端这次报告失败），任务结束才会进入自主回合
+    send(ws, "plan_result", {
+      taskId: plan2.taskId,
+      generation: plan2.generation,
+      planId: plan2.planId,
+      leaseEpoch: idle.leaseEpoch,
+      result: {
+        status: "failed",
+        steps: [
+          {
+            stepId: "s1",
+            action: "dig",
+            status: "failed",
+            requested: {},
+            actual: { error: "STALE_REVISION" },
+            startState: {},
+            endState: null,
+            reasonCode: "PRECONDITION_FAILED",
+            durationMs: 300,
+          },
+        ],
+      },
+      snapshot: { x: center.x, z: center.z, yawDeg: 0, objects: [] },
+    });
+    await waitFor((m) => m.type === "session_state" && m.phase === "idle", "idle after second plan", 10000).catch(() => null);
+
+    // 关掉聊天：她自己玩的前提是“用户没在聊”
+    send(ws, "chat_closed", {});
+    await sleep(400);
+
+    log("\n[4] 局还没结束 → 宿主自己请她继续（self_play）");
+    stubQuiet = true; // 让服务端任务尽快收尾，暴露自主回合
+    // 用户点一次开局（宿主替她开新局），之后就该轮到“她继续玩”的自主回合
+    send(ws, "game_start", { requestId: "smoke-2", leaseEpoch: idle.leaseEpoch });
+    await waitFor((m) => m.type === "game_state" && m.board?.cells?.length === 256, "game_state#2", 8000).catch(() => null);
+    const t0 = Date.now();
+    let selfReq = null;
+    while (Date.now() - t0 < 30000 && !selfReq) {
+      selfReq = requests.find((r) => (r.ctx?.attentionEvents ?? []).some((e) => e.type === "self_play")) ?? null;
+      if (!selfReq) await sleep(500);
+    }
+    check(!!selfReq, "自主回合带 self_play 事件");
+    check(selfReq?.ctx?.board?.status === "playing", "self_play 的棋盘仍是进行中");
+    check(typeof selfReq?.ctx?.attentionEvents?.[0]?.gameId === "string", "self_play 指向具体一局");
   } catch (err) {
     failures.push(String(err));
     log("  ✘", err);

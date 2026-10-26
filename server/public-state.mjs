@@ -156,3 +156,29 @@ function round4(v) {
 }
 
 export { SIZE };
+
+/**
+ * 执行报告瘦身：客户端可能上报整张棋盘（旧页面、或服务端回包原样转发），
+ * 而棋盘本来就单独在上下文里。这里统一剥掉 board，并把过长的 changedCells
+ * 压成数量，保证上下文大小与客户端版本无关。
+ */
+export function trimExecutionReport(result) {
+  if (!result || typeof result !== "object" || !Array.isArray(result.steps)) return result;
+  return {
+    ...result,
+    steps: result.steps.map((step) => {
+      if (!step || typeof step !== "object" || !step.actual || typeof step.actual !== "object") return step;
+      const { board: _board, changedCells: _cells, ...rest } = step.actual;
+      void _board;
+      const changed = Array.isArray(_cells) ? _cells : [];
+      return {
+        ...step,
+        actual: {
+          ...rest,
+          ...(changed.length ? { changedCount: changed.length } : {}),
+          ...(changed.length && changed.length <= 16 ? { changedCells: changed } : {}),
+        },
+      };
+    }),
+  };
+}

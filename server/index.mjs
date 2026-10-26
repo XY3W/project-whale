@@ -17,7 +17,7 @@ import { GameService } from "./game.mjs";
 import { contextBudget, estimateRequest } from "./context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
 import { createGameEventQueue } from "./events.mjs";
-import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf } from "./public-state.mjs";
+import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
 import { CAPABILITY_VERSION, ModelError, SYSTEM_PROMPT, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
@@ -33,6 +33,19 @@ const EVENT_COALESCE_MS = 400;
  * 8000 会把“带棋盘的合法请求”误判成超限，这里按实测留出余量。
  */
 const MAX_INPUT_TOKENS = 14_000;
+/**
+ * 扫雷是她自己玩的：宿主负责开局和“续玩”，模型只负责这一局怎么走。
+ * AUTO_MINESWEEPER=0 可以整体关掉；三个间隔都可以用环境变量覆盖。
+ */
+const AUTO_PLAY = (process.env.AUTO_MINESWEEPER ?? "1") !== "0";
+const AUTO_CONTINUE_IDLE_MS = Number(process.env.AUTO_CONTINUE_IDLE_MS ?? 45_000);
+const AUTO_START_IDLE_MS = Number(process.env.AUTO_START_IDLE_MS ?? 90_000);
+/**
+ * 每小时最多派几个自主回合（一个回合 = 一次 planning + 最多 3 次 review）。
+ * 思考模式下每次调用约 7k 输入 + 7k 输出，这个上限就是给钱包用的刹车。
+ */
+const AUTO_MAX_TURNS_PER_HOUR = Number(process.env.AUTO_MAX_TURNS ?? 6);
+const AUTO_MAX_BACKOFF_MS = 600_000;
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -193,6 +206,8 @@ function grantLease(ws) {
   session.lease = ws;
   session.leaseEpoch += 1;
   session.leaseAt = Date.now();
+  // 页面刚打开时给场景几秒稳定，再自己开局
+  if (!autoplay.nextAt || autoplay.nextAt < Date.now()) autoplay.nextAt = Date.now() + Math.min(AUTO_START_IDLE_MS, 8000);
   console.log(`[lease] grant epoch=${session.leaseEpoch} to ${ws._connId ?? "?"}`);
   return session.leaseEpoch;
 }
@@ -211,6 +226,66 @@ function statePayload(ws) {
     character,
     needsReconcile: !!session.task && ws === session.lease && (session.task.unknown || session.task.originWs !== ws),
   };
+}
+
+/* ---------------- 自主开局 / 续玩 ---------------- */
+
+let autoGameSeq = 0;
+const autoplay = {
+  /** 下一次可以自主体回合的绝对时间 */
+  nextAt: 0,
+  /** 没有进展时的退避倍数 */
+  backoff: 1,
+  /** 最近一小时的自主体回合时间戳 */
+  turns: [],
+};
+
+function noteAutoPlayDelay(ms) {
+  autoplay.nextAt = Date.now() + ms;
+}
+
+/**
+ * 条件全满足时给自己派一个回合：没有进行中的局就开一局，
+ * 局还没结束就发 self_play 请她继续。用户聊天、任务进行中、没有执行端都不打扰。
+ */
+function tickAutoPlay() {
+  if (!AUTO_PLAY || !hasKey()) return;
+  const now = Date.now();
+  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown") {
+    if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
+    return;
+  }
+  if (now < autoplay.nextAt) {
+    if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] wait ${Math.round((autoplay.nextAt - now) / 1000)}s`);
+    return;
+  }
+  autoplay.turns = autoplay.turns.filter((t) => now - t < 3_600_000);
+  if (autoplay.turns.length >= AUTO_MAX_TURNS_PER_HOUR) {
+    noteAutoPlayDelay(AUTO_MAX_BACKOFF_MS);
+    console.log("[autoplay] 每小时上限到了，冷却 5 分钟");
+    return;
+  }
+  const board = games.public();
+  console.log(`[autoplay] tick board=${board?.status ?? "none"} revision=${board?.revision ?? "-"}`);
+  autoplay.turns.push(now);
+  if (board && board.status === "playing") {
+    noteAutoPlayDelay(AUTO_CONTINUE_IDLE_MS * autoplay.backoff);
+    gameEvents.push({
+      eventId: `ev${++eventSeq}`,
+      type: "self_play",
+      gameId: board.gameId,
+      revision: board.revision,
+      status: board.status,
+      at: new Date().toISOString(),
+    });
+    scheduleEventTurn();
+    return;
+  }
+  noteAutoPlayDelay(AUTO_START_IDLE_MS);
+  const started = games.start(`auto${++autoGameSeq}`);
+  console.log(`[autoplay] 自己开了一局 ${started.gameId}`);
+  broadcastState();
+  noteGameEvent("game_started", started, { trigger: "self" });
 }
 
 /** 场地事件：先入队去重，再由模型回合合并处理 */
@@ -258,12 +333,25 @@ function broadcastState() {
 }
 
 function endTask(reason) {
+  const finished = session.task;
   if (session.budgetTimer) { clearTimeout(session.budgetTimer); session.budgetTimer = null; }
   session.task = null;
   session.phase = "idle";
   persist();
   broadcastState();
   if (reason) console.log(`[task] ${reason}`);
+  // 自主回合按“这一轮有没有真的推进棋盘”决定下一轮的间隔：
+  // 挖到了就按正常节奏继续，原地打转就指数退避，避免空转烧 API
+  if (finished && finished.origin === "event") {
+    const board = games.public();
+    const progressed = finished.gameRevision != null && board && board.revision > finished.gameRevision;
+    autoplay.backoff = progressed ? 1 : Math.min(autoplay.backoff * 2, 8);
+    const base = board && board.status === "playing" ? AUTO_CONTINUE_IDLE_MS : AUTO_START_IDLE_MS;
+    noteAutoPlayDelay(Math.min(base * autoplay.backoff, AUTO_MAX_BACKOFF_MS));
+  } else if (finished) {
+    autoplay.backoff = 1;
+    noteAutoPlayDelay(AUTO_START_IDLE_MS);
+  }
   // 任务结束后如果还有没被消化的场地事件，再唤醒一轮，让模型看见最终棋盘
   scheduleEventTurn();
 }
@@ -298,7 +386,7 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
   session.budgetTimer = setTimeout(() => {
     if (session.task?.id !== taskId) return;
     session.phase = "blocked";
-    send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
+    if (origin !== "event") send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
     endTask("budget timer");
   }, BUDGET_MS);
   session.task = {
@@ -316,6 +404,7 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     originWs: ws,
     pendingEvents: events,
     snapshot,
+    gameRevision: games.public()?.revision ?? null,
   };
   if (text) {
     session.history.push({ role: "user", content: text });
@@ -336,12 +425,21 @@ function takeTaskEvents(task) {
 /** 模型的每次调用都带同样的公开快照结构，只是触发原因和执行报告不同 */
 function modelContext(task, phase, extra = {}) {
   const board = games.public();
+  // 自主回合没有用户指令：显式写清楚，并且不带历史对话，
+  // 否则模型会把 history 里上一句旧指令（比如“把勺扔出去”）当成这一轮的目标。
+  const selfPlay = task.origin === "event";
   return {
     phase,
     snapshotId: `snap${++snapshotSeq}`,
     timestamp: new Date().toISOString(),
     taskId: task.id,
-    goal: { originalText: task.originalText, origin: task.origin },
+    goal: selfPlay
+      ? {
+          originalText: null,
+          origin: "event",
+          note: eventNote(extra.attentionEvents),
+        }
+      : { originalText: task.originalText, origin: task.origin },
     userMessage: task.text || null,
     leaseAndBudget: {
       leaseEpoch: session.leaseEpoch,
@@ -362,10 +460,17 @@ function modelContext(task, phase, extra = {}) {
     characterState: characterContext(character),
     props: propsContext(props),
     board: boardContext(board, character),
-    ...contextBudget({ history: session.history }),
+    ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: session.history })),
     memory: confirmedMemories(store.state.memories),
     ...extra,
   };
+}
+
+/** 自主回合的触发原因，写进 goal.note 让模型一眼看到这一轮为什么被叫醒 */
+function eventNote(events) {
+  const types = [...new Set((events ?? []).map((e) => e.type))];
+  const head = types.length ? `本轮触发：${types.join(" / ")}。` : "";
+  return `${head}没有新的用户指令，这是你自己那一局扫雷的自主回合；历史对话已省略，不要引用旧对话里的目标。`;
 }
 
 function checkBudget(ctx) {
@@ -375,6 +480,23 @@ function checkBudget(ctx) {
     context: ctx,
     maxInputTokens: MAX_INPUT_TOKENS,
   });
+  if (ctx.executionReport && JSON.stringify(ctx.executionReport).length > 5000) {
+    const rep = ctx.executionReport;
+    console.log("[ctx] report breakdown", JSON.stringify((rep.steps ?? []).map((st) => ({
+      action: st.action,
+      requested: JSON.stringify(st.requested ?? null).length,
+      actual: JSON.stringify(st.actual ?? null).length,
+      startState: JSON.stringify(st.startState ?? null).length,
+      endState: JSON.stringify(st.endState ?? null).length,
+      ...(st.action === "dig" ? { keys: Object.keys(st.actual ?? {}), changed: st.actual?.changedCells?.length ?? null } : {}),
+    }))));
+  }
+  if (budget.total > 10_000) {
+    const sizes = Object.fromEntries(
+      Object.entries(ctx).map(([k, v]) => [k, JSON.stringify(v)?.length ?? 0]).sort((a, b) => b[1] - a[1]).slice(0, 6),
+    );
+    console.log(`[ctx] ${ctx.snapshotId} ~${budget.total} tokens · biggest fields ${JSON.stringify(sizes)}`);
+  }
   return { ...budget, ok: budget.ok };
 }
 
@@ -473,7 +595,7 @@ function applyOutput(ws, task, out) {
   }
   if (task.rounds >= MAX_ROUNDS) {
     session.phase = "blocked";
-    send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
+    if (task.origin !== "event") send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
     endTask("round budget");
     return;
   }
@@ -661,6 +783,8 @@ wss.on("connection", (ws, req) => {
           return;
         }
         if (entry && entry.state === "processing") return; // 首次结果正在处理，忽略重复
+        // 进入模型上下文前先瘦身：旧客户端可能把整张棋盘塞在 dig.actual 里
+        msg.result = trimExecutionReport(msg.result);
         if (msg.planId) session.ledger.set(msg.planId, { state: "processing", result: msg.result });
 
         if (Date.now() - task.startedAt > BUDGET_MS) {
@@ -680,7 +804,7 @@ wss.on("connection", (ws, req) => {
             return;
           }
           if (task.rounds >= MAX_ROUNDS) {
-            send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
+            if (task.origin !== "event") send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
             endTask("round budget");
             return;
           }
@@ -724,6 +848,8 @@ wss.on("connection", (ws, req) => {
         }
         session.chatOpen = true;
         session.chatEpoch = session.leaseEpoch;
+        // 聊天期间 tickAutoPlay 会自己跳过；不用把时间表往后推，
+        // 关掉聊天后她就能回到自己的局
         broadcastState();
         break;
       case "chat_closed":
@@ -747,4 +873,8 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => console.log(`whale brain on :${PORT} (ws /ws)`));
+setInterval(tickAutoPlay, 5000).unref();
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`whale brain on :${PORT} (ws /ws)`);
+  console.log(`[autoplay] ${AUTO_PLAY ? "开" : "关"} · 续玩 ${AUTO_CONTINUE_IDLE_MS}ms · 新局 ${AUTO_START_IDLE_MS}ms · 上限 ${AUTO_MAX_TURNS_PER_HOUR}/h`);
+});

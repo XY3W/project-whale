@@ -194,3 +194,41 @@ canvas { display: block; }
 
 .hud-bar em { font-style: normal; }
 .hud-title span:last-child { color: rgba(122, 162, 255, 0.75); letter-spacing: 0.08em; }
+
+/* 扫雷状态条：开局后出现在左上角按钮组下方 */
+.game-chip {
+  position: fixed;
+  left: 18px;
+  top: 180px;
+  z-index: 100;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: rgba(12, 26, 48, 0.86);
+  border: 1px solid rgba(88, 166, 255, 0.55);
+  box-shadow: 0 0 18px rgba(88, 166, 255, 0.22);
+  color: rgba(214, 232, 255, 0.92);
+  font: 500 12px/1.3 system-ui, -apple-system, "PingFang SC", sans-serif;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.game-chip.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.game-chip.won {
+  border-color: rgba(74, 222, 128, 0.6);
+  box-shadow: 0 0 18px rgba(74, 222, 128, 0.25);
+  color: rgba(198, 255, 218, 0.95);
+}
+
+.game-chip.lost {
+  border-color: rgba(255, 95, 109, 0.6);
+  box-shadow: 0 0 18px rgba(255, 95, 109, 0.25);
+  color: rgba(255, 214, 218, 0.95);
+}

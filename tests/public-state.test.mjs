@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { boardContext, characterContext, propsContext, sanitizeProp, slotsOf } from "../server/public-state.mjs";
+import { boardContext, characterContext, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "../server/public-state.mjs";
 import { createGame, dig, publicBoard } from "../server/minesweeper.mjs";
 import { createGameEventQueue } from "../server/events.mjs";
 
@@ -110,4 +110,37 @@ test("事件队列：同类合并、旧 revision 丢弃、异类并存、消费�
   const taken = q.take();
   assert.equal(taken.length, 3);
   assert.equal(q.size(), 0);
+});
+
+test("执行报告瘦身：剥掉棋盘、压掉超长 changedCells", () => {
+  const board = { cells: Array.from({ length: 256 }, (_, i) => ({ row: Math.floor(i / 16), col: i % 16, state: "hidden" })) };
+  const report = {
+    status: "completed",
+    steps: [
+      {
+        stepId: "s1",
+        action: "dig",
+        status: "succeeded",
+        requested: {},
+        startState: {},
+        endState: null,
+        actual: { ok: true, status: "playing", revision: 1, board, changedCells: Array.from({ length: 120 }, (_, i) => ({ row: 0, col: i, value: 0 })) },
+      },
+      { stepId: "s2", action: "turn", status: "succeeded", actual: { angle_deg: 90 }, requested: {}, startState: {}, endState: null },
+    ],
+  };
+  const trimmed = trimExecutionReport(report);
+  const digActual = trimmed.steps[0].actual;
+  assert.ok(!("board" in digActual), "棋盘必须被剥掉");
+  assert.equal(digActual.changedCount, 120);
+  assert.ok(!("changedCells" in digActual), "超长列表只保留数量");
+  assert.deepEqual(trimmed.steps[1].actual, { angle_deg: 90 }, "其它步骤原样保留");
+  assert.ok(JSON.stringify(trimmed).length < 400);
+});
+
+test("执行报告瘦身：小范围 changedCells 保留明细", () => {
+  const report = { status: "completed", steps: [{ action: "dig", actual: { ok: true, changedCells: [{ row: 1, col: 2, value: 0 }] } }] };
+  const actual = trimExecutionReport(report).steps[0].actual;
+  assert.equal(actual.changedCount, 1);
+  assert.deepEqual(actual.changedCells, [{ row: 1, col: 2, value: 0 }]);
 });

@@ -35,7 +35,11 @@ const EFFORT_RAW = (process.env.DEEPSEEK_REASONING_EFFORT ?? "").trim().toLowerC
 const DEFAULT_EFFORT = "minimal";
 const REASONING_EFFORT = EFFORT_LEVELS.includes(EFFORT_RAW) ? EFFORT_RAW : THINKING ? DEFAULT_EFFORT : null;
 if (EFFORT_RAW && !REASONING_EFFORT) console.warn(`[llm] 忽略未知的 DEEPSEEK_REASONING_EFFORT=${EFFORT_RAW}`);
-const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS ?? (THINKING ? 2400 : 800));
+/**
+ * 思考 token 和 JSON 输出共用 max_tokens。16×16 棋盘上模型有时会思考到 2000+，
+ * 2400 的预算会把 JSON 截断成非法输出（表现为 INVALID_JSON），所以默认给到 8000。
+ */
+const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS ?? (THINKING ? 8000 : 1200));
 const TIMEOUT_MS = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? (THINKING ? 90_000 : 30_000));
 
 export const thinkingEnabled = () => THINKING;
@@ -116,6 +120,9 @@ export async function callModel(messages) {
     console.log(
       `[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${reasoningTokens} · ${String(reasoning ?? "").slice(0, 80).replace(/\s+/g, " ")}`,
     );
+  }
+  if (choice?.finish_reason === "length") {
+    throw new ModelError("TRUNCATED", `模型输出被 max_tokens=${MAX_TOKENS} 截断（思考与 JSON 共用预算）`, 0);
   }
   if (typeof content !== "string") throw new ModelError("EMPTY", "模型返回空内容", 0);
   let parsed;

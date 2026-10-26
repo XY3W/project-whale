@@ -120,6 +120,22 @@ async function boot() {
   const board = new MinesweeperBoard(stage.scene);
   let gameBoard: GameView | null = null;
 
+  /** 左上角状态条：没开局时隐藏，开局后显示盘面信息 */
+  const gameChip = document.createElement("div");
+  gameChip.className = "game-chip";
+  document.body.appendChild(gameChip);
+  const renderChip = (view: GameView | null) => {
+    if (!view) {
+      gameChip.classList.remove("show");
+      return;
+    }
+    const label = view.status === "won" ? "通关" : view.status === "lost" ? "踩雷" : "进行中";
+    gameChip.textContent = `扫雷 ${view.size}×${view.size} · ${view.mineCount} 雷 · ${label} · 剩 ${view.remainingSafe}`;
+    gameChip.classList.toggle("lost", view.status === "lost");
+    gameChip.classList.toggle("won", view.status === "won");
+    gameChip.classList.add("show");
+  };
+
   // ---- 状态 ----
   let phase: Phase = "idle";
   let destination: THREE.Vector3 | null = null;
@@ -658,7 +674,17 @@ async function boot() {
         });
       }, meta?.layer ?? "full_body");
       const result = pending ? await pending : { ok: false, reason: "NO_CONTACT" };
-      return result as unknown as DigOutcome;
+      // 服务端回包里带着整张公开棋盘（256 格）；棋盘本来就单独在上下文里，
+      // 这里必须剥掉，否则一次挖掘的执行报告会多出 6k+ tokens。
+      const { board: _board, ...rest } = result as Record<string, unknown>;
+      void _board;
+      const changed = Array.isArray(rest.changedCells) ? (rest.changedCells as unknown[]) : [];
+      return {
+        ...rest,
+        changedCount: changed.length,
+        // 大范围展开只给数量，格子列表过长会把上下文撑爆
+        ...(changed.length <= 24 ? { changedCells: changed } : {}),
+      } as unknown as DigOutcome;
     },
   };
   loco.dig = digBridge;
@@ -809,6 +835,7 @@ async function boot() {
     onGame: (value) => {
       gameBoard = (value as GameView) ?? null;
       board.update((value as never) ?? null);
+      renderChip(gameBoard);
     },
     onBasin: (record) => {
       if (basinApplied) return;
@@ -979,6 +1006,7 @@ async function boot() {
     }
 
     root.updateMatrixWorld(true);
+    board.tick();
     basin.update(dt, player.performanceTime);
     scoop.update(dt, player.performanceTime);
     // 拾取/取下片段收尾时立刻接管持盆姿势，避免 0.15s 淡出把手臂拉回 idle
