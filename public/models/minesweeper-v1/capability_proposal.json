@@ -1,0 +1,159 @@
+{
+  "schemaVersion": 1,
+  "status": "implementation proposal, not deployed",
+  "parameterCase": "snake_case matching current server",
+  "capabilities": [
+    {
+      "id": "run",
+      "enabled": false,
+      "enableAfter": "asset integration + cancellation/lease + measured displacement tests",
+      "changesPosition": true,
+      "channels": [
+        "motion"
+      ],
+      "params": {
+        "distance_m": {
+          "type": "number",
+          "enum": [
+            0.464,
+            0.784,
+            1.104,
+            1.424,
+            1.744,
+            2.064,
+            2.384,
+            2.704,
+            3.024,
+            3.344,
+            3.664
+          ]
+        }
+      },
+      "notes": "fixed 1x; .08 start + N*.32 cycle + .064 stop; stop before turning"
+    },
+    {
+      "id": "walk_adjust",
+      "enabled": false,
+      "enableAfter": "short-step distance and stance tests",
+      "changesPosition": true,
+      "channels": [
+        "motion"
+      ],
+      "params": {
+        "distance_m": {
+          "type": "number",
+          "enum": [
+            0.02,
+            0.04,
+            0.06,
+            0.08
+          ]
+        }
+      },
+      "notes": "0.8s; map to walk_adjust_02/04/06/08; nominal quantization residual <=.01m; verify actual target"
+    },
+    {
+      "id": "pickup_scoop",
+      "enabled": false,
+      "enableAfter": "toe-lift/catch events and authoritative object recovery",
+      "changesPosition": false,
+      "channels": [
+        "motion",
+        "right_arm",
+        "object"
+      ],
+      "params": {
+        "object_id": {
+          "type": "string",
+          "enum": [
+            "rice_scoop"
+          ]
+        }
+      },
+      "preconditions": [
+        "right hand empty",
+        "object resting flat face-up or face-down",
+        "aligned to supplied pickupReference",
+        "lease and object revision current"
+      ]
+    },
+    {
+      "id": "throw_scoop",
+      "enabled": false,
+      "enableAfter": "release/physics envelope validation",
+      "changesPosition": false,
+      "channels": [
+        "motion",
+        "right_arm",
+        "object"
+      ],
+      "params": {
+        "object_id": {
+          "type": "string",
+          "enum": [
+            "rice_scoop"
+          ]
+        },
+        "angle_deg": {
+          "type": "number",
+          "min": -45,
+          "max": 45
+        },
+        "elevation_deg": {
+          "type": "number",
+          "min": 0,
+          "max": 45
+        },
+        "speed_mps": {
+          "type": "number",
+          "min": 0.5,
+          "max": 3
+        },
+        "spin_rps": {
+          "type": "number",
+          "min": -2,
+          "max": 2
+        }
+      },
+      "rangeStatus": "conservative candidates, not engine-validated; keep disabled until sandbox passes"
+    },
+    {
+      "id": "dig",
+      "enabled": false,
+      "enableAfter": "game rules + event transaction + endpoint validation",
+      "changesPosition": false,
+      "channels": [
+        "motion",
+        "right_arm",
+        "game"
+      ],
+      "params": {
+        "game_id": {
+          "type": "string"
+        },
+        "row": {
+          "type": "integer",
+          "min": 0,
+          "max": 9
+        },
+        "col": {
+          "type": "integer",
+          "min": 0,
+          "max": 9
+        },
+        "expected_revision": {
+          "type": "integer",
+          "min": 0
+        }
+      },
+      "preconditions": [
+        "stationary in target cell within .12m of center",
+        "scoop blade projection within same cell",
+        "right hand holds rice_scoop",
+        "unrevealed cell and live game",
+        "lease and game revision current"
+      ],
+      "planRule": "at most one dig; last step in plan"
+    }
+  ]
+}
