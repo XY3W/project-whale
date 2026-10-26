@@ -18,7 +18,8 @@ export type ReasonCode =
   | "OBJECT_NOT_FOUND"
   | "OBJECT_UNAVAILABLE"
   | "NOT_ALIGNED"
-  | "BASIN_STATE_MISMATCH";
+  | "BASIN_STATE_MISMATCH"
+  | "OBJECT_POSE_UNSUPPORTED";
 
 export interface StepResult {
   stepId: string;
@@ -149,8 +150,17 @@ export interface GameView {
   remainingSafe: number;
 }
 
+export interface DigPrecheck {
+  ok: boolean;
+  reason?: ReasonCode;
+  /** 给模型看的具体原因：NO_GAME / NO_SCOOP / NOT_IN_CELL / STALE_REVISION ... */
+  detail?: Record<string, unknown>;
+}
+
 export interface DigBridge {
   current(): GameView | null;
+  /** 挖掘前置条件：右手持勺、站在目标格 0.12m 内、棋盘版本一致 */
+  precheck?(step: { game_id: string; row: number; col: number; expected_revision: number }): DigPrecheck;
   /** 播放挖掘并在接触点提交，返回服务端结算结果 */
   perform(step: { game_id: string; row: number; col: number; expected_revision: number }): Promise<DigOutcome>;
 }

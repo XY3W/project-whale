@@ -16,6 +16,8 @@ import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { contextBudget, estimateRequest } from "./context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
+import { createGameEventQueue } from "./events.mjs";
+import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf } from "./public-state.mjs";
 import { CAPABILITY_VERSION, ModelError, SYSTEM_PROMPT, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
@@ -24,6 +26,13 @@ const PROTOCOL = 1;
 const HEARTBEAT_MS = 8_000;
 const MAX_ROUNDS = 4;
 const BUDGET_MS = 180_000;
+/** 场地事件的合并窗口：同一批动作只唤醒一次模型 */
+const EVENT_COALESCE_MS = 400;
+/**
+ * 整轮输入预算（估算 token）。扫雷棋盘 100 格是主要开销，
+ * 8000 会把“带棋盘的合法请求”误判成超限，这里按实测留出余量。
+ */
+const MAX_INPUT_TOKENS = 14_000;
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -64,42 +73,21 @@ function loadState() {
   return { x: 0, z: 0, yawDeg: 0, updatedAt: 0 };
 }
 
-/** 只持久化“落地 / 手持 / 戴头”三种稳定状态，飞行和转移中不落盘 */
-const PERSISTED_BASIN_STATES = new Set(["resting", "held", "worn"]);
-
-/** 钢盆快照：状态 + 位置 + 姿态，刷新页面后用来恢复现场 */
-function sanitizeBasin(raw) {
-  if (!raw || typeof raw !== "object") return null;
-  const pos = Array.isArray(raw.position) && raw.position.length === 3 && raw.position.every(Number.isFinite)
-    ? raw.position.map(Number)
-    : null;
-  if (!pos) return null;
-  const quat = Array.isArray(raw.quaternion) && raw.quaternion.length === 4 && raw.quaternion.every(Number.isFinite)
-    ? raw.quaternion.map(Number)
-    : null;
-  const state = typeof raw.state === "string" ? raw.state : "resting";
-  if (!PERSISTED_BASIN_STATES.has(state)) return null;
-  return {
-    object_id: "basin",
-    state,
-    position: pos,
-    quaternion: quat,
-    upright: raw.upright === true,
-    holder: raw.holder === "hand" || raw.holder === "head" ? raw.holder : null,
-    revision: Number.isFinite(raw.revision) ? raw.revision : 0,
-    updatedAt: Date.now(),
-  };
-}
-
 const loaded = loadState();
 let character = { x: loaded.x, z: loaded.z, yawDeg: loaded.yawDeg, updatedAt: loaded.updatedAt ?? 0 };
-let basin = sanitizeBasin(loaded.basin);
+/** 物品注册表：basin 与 rice_scoop 各一份，刷新后按稳定状态恢复现场 */
+const props = new Map();
+for (const raw of Array.isArray(loaded.props) ? loaded.props : loaded.basin ? [loaded.basin] : []) {
+  const record = sanitizeProp(raw);
+  if (record) props.set(record.object_id, record);
+}
 let lastSave = 0;
-/** 用客户端上报的快照刷新角色状态（坐标越界时夹到可走范围） */
+
+/** 客户端上报的快照是位姿与槽位的唯一实时来源；越界坐标夹回可走范围 */
 function applyClientSnapshot(snap) {
   if (!snap) return false;
   let changed = false;
-  let basinChanged = false;
+  let propsChanged = false;
   if (Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
     character = {
       x: Math.max(-3.7, Math.min(3.7, snap.x)),
@@ -111,16 +99,17 @@ function applyClientSnapshot(snap) {
   }
   if (Array.isArray(snap.objects)) {
     for (const object of snap.objects) {
-      if (!object || (object.object_id ?? object.id) !== "basin") continue;
-      const next = sanitizeBasin(object);
+      const objectId = propIdOf(object);
+      if (!objectId) continue;
+      const next = sanitizeProp(object, props.get(objectId) ?? null);
       if (next) {
-        basin = next;
+        props.set(objectId, next);
         changed = true;
-        basinChanged = true;
+        propsChanged = true;
       }
     }
   }
-  if (changed) saveState(basinChanged);
+  if (changed) saveState(propsChanged);
   return changed;
 }
 
@@ -129,10 +118,26 @@ function saveState(force = false) {
   lastSave = Date.now();
   try {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ ...character, basin, updatedAt: Date.now() }));
+    const list = [...props.values()];
+    fs.writeFileSync(
+      STATE_FILE,
+      JSON.stringify({ ...character, props: list, basin: props.get("basin") ?? null, updatedAt: Date.now() }),
+    );
   } catch (err) {
     console.error("state save failed", err.message);
   }
+}
+
+/** 给客户端的物品状态：顶层是盆（兼容旧恢复路径），同时带全部物品与槽位 */
+function propPayload() {
+  const slots = slotsOf(props);
+  const objects = [...props.values()];
+  const basinRecord = props.get("basin") ?? null;
+  return {
+    basin: basinRecord ? { ...basinRecord, objects } : objects.length ? { objects } : null,
+    objects,
+    slots,
+  };
 }
 
 const session = {
@@ -199,13 +204,48 @@ function statePayload(ws) {
     taskId: session.task?.id ?? null,
     generation: session.generation,
     leaseEpoch: session.leaseEpoch,
-    basin,
+    ...propPayload(),
     game: games.public(),
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,
     needsReconcile: !!session.task && ws === session.lease && (session.task.unknown || session.task.originWs !== ws),
   };
+}
+
+/** 场地事件：先入队去重，再由模型回合合并处理 */
+const gameEvents = createGameEventQueue();
+let eventSeq = 0;
+let eventTurnTimer = null;
+
+function noteGameEvent(type, board, extra = {}) {
+  if (!board) return;
+  // 没有 Key 时不驱动模型，事件只留在权威棋盘里
+  if (!hasKey()) return;
+  gameEvents.push({
+    eventId: `ev${++eventSeq}`,
+    type,
+    gameId: board.gameId,
+    revision: board.revision,
+    status: board.status,
+    at: new Date().toISOString(),
+    ...extra,
+  });
+  scheduleEventTurn();
+}
+
+/**
+ * 没有进行中的任务时，场地事件自己唤醒一轮 planning。
+ * 有任务时不动：事件留给该任务下一次 planning/review 合并，不打断用户指令。
+ */
+function scheduleEventTurn() {
+  if (session.task || eventTurnTimer || !gameEvents.size()) return;
+  if (!isLeaseAlive()) return;
+  eventTurnTimer = setTimeout(() => {
+    eventTurnTimer = null;
+    if (session.task || !gameEvents.size()) return;
+    startEventTask();
+  }, EVENT_COALESCE_MS);
 }
 
 function broadcastState() {
@@ -224,6 +264,8 @@ function endTask(reason) {
   persist();
   broadcastState();
   if (reason) console.log(`[task] ${reason}`);
+  // 任务结束后如果还有没被消化的场地事件，再唤醒一轮，让模型看见最终棋盘
+  scheduleEventTurn();
 }
 
 function planFor(text) {
@@ -241,6 +283,170 @@ function summary(result) {
   return `做好了（${steps.filter((s) => s.status === "succeeded").length} 个动作）。`;
 }
 
+/* ---------------- 任务与模型回合 ---------------- */
+
+let snapshotSeq = 0;
+
+/**
+ * 统一的任务入口：用户消息和场地事件走同一套预算、代际与租约规则，
+ * 游戏事件不能私建一条不受聊天/预算控制的循环。
+ */
+function beginTask({ text, messageId, origin = "user", events = [], snapshot = null, ws }) {
+  const taskId = `t${nextTask++}`;
+  const generation = ++session.generation;
+  if (session.budgetTimer) clearTimeout(session.budgetTimer);
+  session.budgetTimer = setTimeout(() => {
+    if (session.task?.id !== taskId) return;
+    session.phase = "blocked";
+    send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
+    endTask("budget timer");
+  }, BUDGET_MS);
+  session.task = {
+    id: taskId,
+    generation,
+    text,
+    messageId,
+    origin,
+    originalText: origin === "user" ? text : null,
+    rounds: 0,
+    startedAt: Date.now(),
+    superseded: false,
+    plan: null,
+    planId: null,
+    originWs: ws,
+    pendingEvents: events,
+    snapshot,
+  };
+  if (text) {
+    session.history.push({ role: "user", content: text });
+    if (session.history.length > 12) session.history = session.history.slice(-12);
+  }
+  persist();
+  session.phase = "thinking";
+  broadcastState();
+  return session.task;
+}
+
+function takeTaskEvents(task) {
+  const out = task.pendingEvents ?? [];
+  task.pendingEvents = [];
+  return out;
+}
+
+/** 模型的每次调用都带同样的公开快照结构，只是触发原因和执行报告不同 */
+function modelContext(task, phase, extra = {}) {
+  const board = games.public();
+  return {
+    phase,
+    snapshotId: `snap${++snapshotSeq}`,
+    timestamp: new Date().toISOString(),
+    taskId: task.id,
+    goal: { originalText: task.originalText, origin: task.origin },
+    userMessage: task.text || null,
+    leaseAndBudget: {
+      leaseEpoch: session.leaseEpoch,
+      hasExecutor: isLeaseAlive(),
+      roundsUsed: task.rounds,
+      maxRounds: MAX_ROUNDS,
+      budgetMs: BUDGET_MS,
+      remainingMs: Math.max(0, BUDGET_MS - (Date.now() - task.startedAt)),
+    },
+    capabilities: describeCapabilities(),
+    disabledCapabilities: describeDisabled(),
+    capabilityVersion: CAPABILITY_VERSION,
+    world: {
+      walkableHalf: 3.7,
+      stageHalf: 4,
+      coordinateSystem: "glTF +Y up, +Z forward; yaw=0 指向 +Z",
+    },
+    characterState: characterContext(character),
+    props: propsContext(props),
+    board: boardContext(board, character),
+    ...contextBudget({ history: session.history }),
+    memory: confirmedMemories(store.state.memories),
+    ...extra,
+  };
+}
+
+function checkBudget(ctx) {
+  const budget = estimateRequest({
+    system: SYSTEM_PROMPT,
+    capabilities: ctx.capabilities,
+    context: ctx,
+    maxInputTokens: MAX_INPUT_TOKENS,
+  });
+  return { ...budget, ok: budget.ok };
+}
+
+/** 没有 Key：本地 FakeBrain，不装作在线，也不驱动自主回合 */
+function fakeBrain(task, ws) {
+  if (task.origin === "event") {
+    endTask("event turn skipped without key");
+    return;
+  }
+  const plan = planFor(task.text);
+  if (!plan) {
+    send(ws, "public_reply", { taskId: task.id, speech: `我听到了：${task.text}` });
+    endTask();
+    return;
+  }
+  task.plan = plan;
+  task.rounds = 1;
+  task.planId = `${task.id}-p1-g${task.generation}`;
+  session.ledger.set(task.planId, { state: "dispatched" });
+  persist();
+  session.phase = "executing";
+  broadcastState();
+  send(ws, "execute_plan", {
+    taskId: task.id,
+    generation: task.generation,
+    planId: task.planId,
+    leaseEpoch: session.leaseEpoch,
+    turnId: 1,
+    speech: plan.speech,
+    plan: { steps: plan.steps },
+  });
+}
+
+async function runPlanning(task, ws) {
+  if (!session.task || session.task.id !== task.id) return;
+  if (!hasKey()) {
+    fakeBrain(task, ws);
+    return;
+  }
+  try {
+    const ctx = modelContext(task, "planning", {
+      attentionEvents: takeTaskEvents(task),
+      executionReport: null,
+      clientSnapshot: task.snapshot ?? null,
+    });
+    const budget = checkBudget(ctx);
+    if (!budget.ok) {
+      send(ws, "error", {
+        code: "CONTEXT_TOO_LARGE",
+        message: `请求估算 ${budget.total} tokens，超过 ${budget.maxInputTokens} 上限`,
+      });
+      endTask("context too large");
+      return;
+    }
+    console.log(`[ctx] planning ${ctx.snapshotId} ~${budget.total} tokens · events=${ctx.attentionEvents.length}`);
+    const out = await callModel(planningMessages(ctx));
+    applyOutput(ws, task, out);
+  } catch (err) {
+    fail(ws, task, err);
+  }
+}
+
+/** 事件驱动的自主回合：没有用户消息，目标来自棋盘变化 */
+function startEventTask() {
+  const ws = session.lease;
+  if (!ws) return;
+  const events = gameEvents.take();
+  const task = beginTask({ text: "", messageId: null, origin: "event", events, ws });
+  console.log(`[event] turn ${task.id} ← ${events.map((e) => `${e.type}@${e.revision}`).join(",")}`);
+  runPlanning(task, ws);
+}
+
 function absorbMemory(task, out) {
   const { accepted, rejected } = validateProposals(out.memoryProposals ?? [], task.messageId);
   if (accepted.length) {
@@ -254,10 +460,13 @@ function applyOutput(ws, task, out) {
   if (!session.task || session.task.id !== task.id) return;
   absorbMemory(task, out);
   if (out.type === "finish_task") {
-    const speech = out.speech || (out.outcome === "completed" ? "好了。" : "这个我还做不到。");
-    send(ws, "public_reply", { taskId: task.id, speech });
-    session.history.push({ role: "assistant", content: speech });
-    if (task.planId) session.ledger.set(task.planId, { state: "done", reply: speech });
+    // 自主回合允许完全沉默：没有值得说的就不发 public_reply
+    const speech = out.speech || (task.origin === "event" ? "" : out.outcome === "completed" ? "好了。" : "这个我还做不到。");
+    if (speech) {
+      send(ws, "public_reply", { taskId: task.id, speech });
+      session.history.push({ role: "assistant", content: speech });
+      if (task.planId) session.ledger.set(task.planId, { state: "done", reply: speech });
+    }
     persist();
     endTask();
     return;
@@ -275,6 +484,7 @@ function applyOutput(ws, task, out) {
   persist();
   session.phase = "executing";
   broadcastState();
+  console.log(`[plan] ${task.id} turn=${task.rounds} steps=${out.plan.steps.map((s) => s.action).join(",")} speech=${out.speech ? "yes" : "no"}`);
   if (out.speech) session.history.push({ role: "assistant", content: out.speech });
   send(ws, "execute_plan", {
     taskId: task.id,
@@ -335,9 +545,14 @@ wss.on("connection", (ws, req) => {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
+        const previous = games.public()?.gameId ?? null;
         const board = games.start(msg.requestId);
         send(ws, "game_state", { board });
         broadcastState();
+        // 只有真的换了局（而不是幂等重发）才算新局事件
+        if (board && board.gameId !== previous) {
+          noteGameEvent("game_started", board, { trigger: "user_button" });
+        }
         break;
       }
 
@@ -355,12 +570,20 @@ wss.on("connection", (ws, req) => {
         }
         const result = games.commit({ gameId: msg.gameId, row: cell.row, col: cell.col, expectedRevision: msg.expectedRevision });
         send(ws, "dig_result", { actionInstanceId: msg.actionInstanceId, ...result });
-        if (result.ok) broadcastState();
+        if (result.ok) {
+          broadcastState();
+          // 同一次揭示既是“棋盘更新”，也可能同时是“完局”：都入队，由下一轮调用合并
+          noteGameEvent("board_updated", result.board, { changedCells: result.changedCells?.length ?? 0 });
+          if (result.status && result.status !== "playing") {
+            noteGameEvent("game_finished", result.board, { result: result.status });
+          }
+        }
         break;
       }
 
       case "state_snapshot": {
-        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能更新状态" }); break; }
+        // 只读页面的周期上报不是用户动作：静默忽略，否则会在对方页面点亮断连红图标
+        if (!isLease(ws)) break;
         if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
@@ -401,77 +624,18 @@ wss.on("connection", (ws, req) => {
           });
         }
 
-        const taskId = `t${nextTask++}`;
-        const generation = ++session.generation;
-        session.budgetTimer = setTimeout(() => {
-          if (session.task?.id !== taskId) return;
-          session.phase = "blocked";
-          send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
-          endTask("budget timer");
-        }, BUDGET_MS);
-        session.task = { id: taskId, generation, text: msg.text, messageId: `msg-${taskId}`, rounds: 0, startedAt: Date.now(), superseded: false, plan: null, planId: null, originWs: ws };
-        session.history.push({ role: "user", content: msg.text });
-        if (session.history.length > 12) session.history = session.history.slice(-12);
-        persist();
-        session.phase = "thinking";
-        broadcastState();
+        // 用户指令优先级最高：同一轮里先回应人，再顺带处理攒下的场地事件
+        const task = beginTask({
+          text: msg.text,
+          messageId: null,
+          origin: "user",
+          events: gameEvents.take(),
+          snapshot: msg.snapshot ?? null,
+          ws,
+        });
+        task.messageId = `msg-${task.id}`;
 
-        setTimeout(async () => {
-          const task = session.task;
-          if (!task || task.id !== taskId || task.superseded) return;
-          if (!hasKey()) {
-            // 没有 Key：走本地 FakeBrain，不装作在线
-            const plan = planFor(msg.text);
-            session.phase = plan ? "executing" : "checking";
-            broadcastState();
-            if (plan) {
-              task.plan = plan;
-              task.rounds = 1;
-              task.planId = `${taskId}-p1-g${generation}`;
-              session.ledger.set(task.planId, { state: "dispatched" });
-  persist();
-              send(ws, "execute_plan", {
-                taskId, generation, planId: task.planId, leaseEpoch: session.leaseEpoch,
-                turnId: 1, speech: plan.speech, plan: { steps: plan.steps },
-              });
-            } else {
-              send(ws, "public_reply", { taskId, speech: `我听到了：${msg.text}` });
-              endTask();
-            }
-            return;
-          }
-          try {
-            const planningContext = {
-                taskId,
-                userMessage: msg.text,
-                characterState: character,
-                world: { walkableHalf: 3.7, coordinateSystem: "glTF +Y up, +Z forward" },
-                capabilities: describeCapabilities(),
-                disabledCapabilities: describeDisabled(),
-                capabilityVersion: CAPABILITY_VERSION,
-              ...contextBudget({ history: session.history }),
-              memory: confirmedMemories(storeSeed.memories),
-              clientSnapshot: msg.snapshot ?? null,
-            };
-            const budget = estimateRequest({
-              system: SYSTEM_PROMPT,
-              capabilities: describeCapabilities(),
-              context: planningContext,
-            });
-            if (!budget.ok) {
-              send(ws, "error", {
-                code: "CONTEXT_TOO_LARGE",
-                message: `请求估算 ${budget.total} tokens，超过 ${budget.maxInputTokens} 上限`,
-              });
-              endTask("context too large");
-              return;
-            }
-            const out = await callModel(planningMessages(planningContext));
-            applyOutput(ws, task, out);
-          } catch (err) {
-            fail(ws, task, err);
-          }
-        }, 300);
+        setTimeout(() => runPlanning(task, ws), 300);
         break;
       }
 
@@ -526,20 +690,24 @@ wss.on("connection", (ws, req) => {
             return;
           }
           try {
-            const out = await callModel(
-              reviewMessages({
-                taskId: task.id,
-                turn: task.rounds,
-                executionReport: msg.result,
-                characterState: character,
-                clientSnapshot: msg.snapshot ?? null,
-                capabilities: describeCapabilities(),
-                disabledCapabilities: describeDisabled(),
-                capabilityVersion: CAPABILITY_VERSION,
-                ...contextBudget({ history: session.history }),
-                memory: confirmedMemories(storeSeed.memories),
-              }),
-            );
+            const ctx = modelContext(task, "review", {
+              turn: task.rounds,
+              executionReport: msg.result,
+              // 执行期间攒下的棋盘事件和这次 plan_result 是同一批事实，一次调用合并处理
+              attentionEvents: gameEvents.take(),
+              clientSnapshot: msg.snapshot ?? null,
+            });
+            const budget = checkBudget(ctx);
+            if (!budget.ok) {
+              send(ws, "error", {
+                code: "CONTEXT_TOO_LARGE",
+                message: `请求估算 ${budget.total} tokens，超过 ${budget.maxInputTokens} 上限`,
+              });
+              endTask("context too large");
+              return;
+            }
+            console.log(`[ctx] review ${ctx.snapshotId} ~${budget.total} tokens · events=${ctx.attentionEvents.length}`);
+            const out = await callModel(reviewMessages(ctx));
             applyOutput(ws, task, out);
           } catch (err) {
             fail(ws, task, err);

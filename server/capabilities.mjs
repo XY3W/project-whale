@@ -6,6 +6,17 @@ const DISTANCES = [0.09, 0.27, 0.45, 0.63, 0.81, 0.99, 1.17, 1.35, 1.53, 1.71, 1
 const PLAYS = ["greet", "notice", "nod", "look_left", "look_right", "think"];
 const TAILS = ["tail_idle", "tail_swish"];
 
+/**
+ * 双手物品注册表：工具参数 object_id 与物品槽位的唯一来源。
+ * 盆在左手或头顶；饭勺只能在右手，不能佩戴。
+ */
+export const OBJECTS = {
+  basin: { type: "basin", slots: ["left_hand", "head"], pickup: true, throw: true, wear: true },
+  rice_scoop: { type: "scoop", slots: ["right_hand"], pickup: true, throw: true, wear: false },
+};
+export const HAND_OBJECTS = Object.keys(OBJECTS).filter((id) => OBJECTS[id].pickup);
+export const WEARABLE_OBJECTS = Object.keys(OBJECTS).filter((id) => OBJECTS[id].wear);
+
 export class ModelError extends Error {
   constructor(code, message, status) {
     super(message);
@@ -22,24 +33,33 @@ export const CAPABILITIES = [
   { id: "wait", enabled: true, channels: [], params: { duration_s: { type: "number", min: 0, max: 5 } } },
   { id: "run", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.464, 0.784, 1.104, 1.424, 1.744, 2.064, 2.384, 2.704, 3.024, 3.344, 3.664] } } },
   { id: "walk_adjust", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.02, 0.04, 0.06, 0.08] } } },
-  { id: "dig", enabled: true, channels: ["item"], params: { game_id: { type: "string" }, row: { type: "number", min: 0, max: 9 }, col: { type: "number", min: 0, max: 9 }, expected_revision: { type: "number", min: 0 } } },
+  {
+    id: "dig",
+    enabled: true,
+    channels: ["item"],
+    params: {
+      game_id: { type: "string", note: "当前公开棋盘的 gameId" },
+      row: { type: "number", min: 0, max: 9, note: "0 从 -Z 向 +Z" },
+      col: { type: "number", min: 0, max: 9, note: "0 从 -X 向 +X" },
+      expected_revision: { type: "number", min: 0, note: "必须等于公开棋盘 revision" },
+    },
+  },
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
   { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
-  { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
-  { id: "wear", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
-  { id: "unwear", enabled: true, channels: ["item"], params: { object_id: { enum: ["basin"] } } },
+  { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: HAND_OBJECTS, note: "盆→左手，饭勺→右手" } } },
+  { id: "wear", enabled: true, channels: ["item"], params: { object_id: { enum: WEARABLE_OBJECTS, note: "只有盆能戴" } } },
+  { id: "unwear", enabled: true, channels: ["item"], params: { object_id: { enum: WEARABLE_OBJECTS } } },
   {
     id: "throw",
     enabled: true,
     channels: ["item"],
     params: {
-      object_id: { enum: ["basin"] },
+      object_id: { enum: HAND_OBJECTS },
       yaw_deg: { type: "number", min: -180, max: 180, note: "相对角色朝向，正=左" },
       elevation_deg: { type: "number", min: 0, max: 45 },
       speed_mps: { type: "number", min: 1, max: 6 },
     },
   },
-  { id: "run", enabled: false, disabledReason: "没有跑步片段" },
   { id: "sit", enabled: false, disabledReason: "没有坐下片段" },
 ];
 
@@ -76,12 +96,36 @@ export function validatePlan(plan) {
   if (plan.type !== "execute_plan") throw new ModelError("INVALID_SCHEMA", "type 必须是 execute_plan 或 finish_task", 0);
   const steps = Array.isArray(plan.steps) ? plan.steps : [];
   if (!steps.length || steps.length > 6) throw new ModelError("INVALID_SCHEMA", "steps 数量必须是 1..6", 0);
+  assertDigPlacement(steps);
   return {
     type: "execute_plan",
     speech: String(plan.speech ?? "").slice(0, 200),
     plan: { steps: steps.map((s, i) => validateStep(s, `s${i + 1}`)) },
     memoryProposals: Array.isArray(plan.memory_proposals) ? plan.memory_proposals : [],
   };
+}
+
+/**
+ * 一次挖掘只改变一个格子的信息，所以一个计划最多一个 dig，且必须是最后一步。
+ * 这条规则写在代码里，不依赖模型读提示词；违规计划整体拒绝，不派发残步。
+ */
+export function assertDigPlacement(steps) {
+  const digAt = steps.map((s, i) => (s && s.action === "dig" ? i : -1)).filter((i) => i >= 0);
+  if (digInParallel(steps)) {
+    throw new ModelError("DIG_IN_PARALLEL", "dig 不能放进 parallel", 0);
+  }
+  if (digAt.length > 1) {
+    throw new ModelError("MULTIPLE_DIG_STEPS", "一个计划最多一个 dig", 0);
+  }
+  if (digAt.length === 1 && digAt[0] !== steps.length - 1) {
+    throw new ModelError("DIG_NOT_LAST", "dig 必须是一个计划的最后一步", 0);
+  }
+}
+
+function digInParallel(steps) {
+  return steps.some(
+    (s) => s && s.action === "parallel" && Array.isArray(s.items) && s.items.some((it) => it && it.action === "dig"),
+  );
 }
 
 export function validateStep(step, id = "step") {
@@ -153,14 +197,15 @@ export function validateStep(step, id = "step") {
     case "pickup":
     case "wear":
     case "unwear": {
-      if (step.object_id !== "basin") {
-        throw new ModelError("OBJECT_NOT_FOUND", `${id} 只有 basin 这一件物品`, 0);
+      const allowed = cap.id === "pickup" ? HAND_OBJECTS : WEARABLE_OBJECTS;
+      if (!allowed.includes(step.object_id)) {
+        throw new ModelError("OBJECT_NOT_FOUND", `${id} ${cap.id} 只支持 ${allowed.join(" / ")}`, 0);
       }
-      return { action: cap.id, object_id: "basin" };
+      return { action: cap.id, object_id: step.object_id };
     }
     case "throw": {
-      if (step.object_id !== "basin") {
-        throw new ModelError("OBJECT_NOT_FOUND", `${id} 只有 basin 这一件物品`, 0);
+      if (!HAND_OBJECTS.includes(step.object_id)) {
+        throw new ModelError("OBJECT_NOT_FOUND", `${id} throw 只支持 ${HAND_OBJECTS.join(" / ")}`, 0);
       }
       const num = (value, min, max, name) => {
         if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
@@ -170,7 +215,7 @@ export function validateStep(step, id = "step") {
       };
       return {
         action: "throw",
-        object_id: "basin",
+        object_id: step.object_id,
         yaw_deg: num(step.yaw_deg, -180, 180, "yaw_deg"),
         elevation_deg: num(step.elevation_deg, 0, 45, "elevation_deg"),
         speed_mps: num(step.speed_mps, 1, 6, "speed_mps"),
@@ -180,6 +225,7 @@ export function validateStep(step, id = "step") {
       const items = Array.isArray(step.items) ? step.items : [];
       if (!items.length || items.length > 3) throw new ModelError("INVALID_SCHEMA", `${id} items 数量必须是 1..3`, 0);
       if (items.some((it) => it && it.action === "parallel")) throw new ModelError("INVALID_SCHEMA", `${id} 不允许嵌套 parallel`, 0);
+      if (items.some((it) => it && it.action === "dig")) throw new ModelError("DIG_IN_PARALLEL", `${id} dig 不能放进 parallel`, 0);
       return { action: "parallel", items: items.map((it, j) => validateStep(it, `${id}.${j + 1}`)) };
     }
   }
@@ -192,7 +238,11 @@ export function outputContract() {
     .map((c) => {
       const props = Object.entries(c.params).map(([name, spec]) => {
         if (spec.enum) return `${name}:${JSON.stringify(spec.enum)}`;
-        if (spec.type === "number") return `${name}:number [${spec.min},${spec.max}]`;
+        if (spec.type === "number") {
+          if (spec.min !== undefined && spec.max !== undefined) return `${name}:number [${spec.min},${spec.max}]`;
+          if (spec.min !== undefined) return `${name}:number >=${spec.min}`;
+          return `${name}:number`;
+        }
         return `${name}:?`;
       });
       return props.length ? `  {"action":"${c.id}", ${props.join(", ")}}` : `  {"action":"${c.id}"}`;

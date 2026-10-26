@@ -33,16 +33,28 @@ test("类型严格：angle_deg 字符串被拒绝", () => {
 });
 
 test("禁用能力给出 disabled 原因", () => {
-  assert.throws(() => validateStep({ action: "run" }), /未启用/);
   assert.throws(() => validateStep({ action: "sit" }), /未启用/);
+  // run 已启用：缺参数时报距离不合法，而不是“未启用”
+  assert.equal(validateStep({ action: "run", distance_m: 0.464 }).distance_m, 0.464);
+  assert.throws(() => validateStep({ action: "run", distance_m: 0.5 }), /run 只支持/);
 });
 
-test("钢盆动作：object_id 只能是 basin", () => {
+test("双手物品：pickup/throw 两件都能，wear 只有盆", () => {
   assert.equal(validateStep({ action: "pickup", object_id: "basin" }).action, "pickup");
+  assert.equal(validateStep({ action: "pickup", object_id: "rice_scoop" }).object_id, "rice_scoop");
   assert.equal(validateStep({ action: "wear", object_id: "basin" }).object_id, "basin");
   assert.equal(validateStep({ action: "unwear", object_id: "basin" }).action, "unwear");
+  assert.throws(() => validateStep({ action: "wear", object_id: "rice_scoop" }), /只支持 basin/);
   assert.throws(() => validateStep({ action: "pickup", object_id: "cup" }), /basin/);
   assert.throws(() => validateStep({ action: "pickup" }), /basin/);
+});
+
+test("挖掘计划：最多一个 dig，且必须最后；不能放进 parallel", () => {
+  const dig = (row) => ({ action: "dig", game_id: "g1", row, col: 1, expected_revision: 0 });
+  assert.equal(validatePlan({ type: "execute_plan", steps: [{ action: "walk", distance_m: 0.45 }, dig(1)] }).plan.steps.length, 2);
+  assert.throws(() => validatePlan({ type: "execute_plan", steps: [dig(1), { action: "walk", distance_m: 0.45 }] }), /最后一步/);
+  assert.throws(() => validatePlan({ type: "execute_plan", steps: [dig(1), dig(2)] }), /最多一个/);
+  assert.throws(() => validatePlan({ type: "execute_plan", steps: [{ action: "parallel", items: [dig(1)] }] }), /parallel/);
 });
 
 test("投掷参数：范围严格，不给默认值", () => {

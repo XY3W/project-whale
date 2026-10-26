@@ -108,7 +108,8 @@ export class LayeredMotionPlayer {
     if (this.moveKind) return false;
     this.moveKind = 'walk';
     this.halted = false;
-    this.cyclesLeft = Math.max(0, n - 1); // n 圈需要 n-1 次“继续”，n=0 时起步后直接收步
+    // n 是完整步周期数：起步之后要真的走满 n 圈，n=0（0.09m）直接收步
+    this.cyclesLeft = n;
     this.setBase('walk_start');
     return true;
   }
@@ -152,7 +153,7 @@ export class LayeredMotionPlayer {
   setWalking(value: boolean) {
     if (this.perf) return;
     if (!value) this.haltMovement();
-    else if (!this.moveKind && this.base === 'idle_stand') { this.moveKind = 'walk'; this.cyclesLeft = -1; this.setBase('walk_start'); }
+    else if (!this.moveKind && this.base === 'idle_stand') { this.moveKind = 'walk'; this.cyclesLeft = Infinity; this.setBase('walk_start'); }
   }
   gesture(name: string) {
     if (this.perf) return;
@@ -370,10 +371,12 @@ export class LayeredMotionPlayer {
   /** 基础片段结束时的状态转移 */
   private completeBase() {
     const base = this.base;
-    if (base === 'walk_start') { this.setBase('walk'); return; }
-    if (base === 'run_start') { this.setBase('run'); return; }
+    if (base === 'walk_start') { this.setBase(this.cyclesLeft > 0 ? 'walk' : 'walk_stop'); return; }
+    if (base === 'run_start') { this.setBase(this.cyclesLeft > 0 ? 'run' : 'run_stop'); return; }
     if (base === 'walk' || base === 'run') {
       this.cyclesLeft--;
+      // 点击地面这种连续行走用 Infinity 表示无限循环；haltMovement 之后不再续圈
+      if (this.halted || this.moveKind === null) { this.setBase(base === 'walk' ? 'walk_stop' : 'run_stop'); return; }
       if (this.cyclesLeft > 0) { this.setBase(base); return; }
       this.setBase(base === 'walk' ? 'walk_stop' : 'run_stop');
       return;

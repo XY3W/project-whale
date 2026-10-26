@@ -180,7 +180,7 @@ async function boot() {
     slots: { left_hand: basin.state === "held" ? "basin" : null, right_hand: scoop.state === "held" ? "rice_scoop" : null, head: basin.state === "worn" ? "basin" : null },
     objects: [
       { ...basin.snapshot(), ...(basin.state === "resting" ? { approachCandidates: approachHint() } : {}) },
-      scoop.snapshot(),
+      { ...scoop.snapshot(), ...(scoop.state === "resting" ? { pickupStand: variantStand("rice_scoop") } : {}) },
     ],
   });
 
@@ -281,6 +281,22 @@ async function boot() {
     enterChat();
   });
 
+  /** 扫雷盘面悬停：只做渲染高亮，点击格子不会移动或挖掘（行为仍由模型下令） */
+  const hoverCellAt = (clientX: number, clientY: number) => {
+    if (!gameBoard || !board.visible) return null;
+    ndc.set((clientX / innerWidth) * 2 - 1, -((clientY / innerHeight) * 2 - 1));
+    raycaster.setFromCamera(ndc, stage.camera);
+    const hit = raycaster.intersectObject(board.mesh, false)[0];
+    if (!hit) return null;
+    const { x, z } = hit.point;
+    if (Math.abs(x) >= 4 || Math.abs(z) >= 4) return null;
+    return { row: Math.floor((z + 4) / 0.8), col: Math.floor((x + 4) / 0.8) };
+  };
+  canvas.addEventListener("pointermove", (e) => {
+    board.setHover(hoverCellAt(e.clientX, e.clientY));
+  });
+  canvas.addEventListener("pointerleave", () => board.setHover(null));
+
   // ---- 调试 HUD（仅 ?debug）----
   if (DEBUG) {
     new Hud((id) => {
@@ -350,10 +366,12 @@ async function boot() {
     turn: async (deg) => {
       const from = root.rotation.y;
       startTurn(from + (deg * Math.PI) / 180, null);
+      // 转向只有 0.3–1.15 秒动画；低帧率机器上两帧之间可能隔几秒，
+      // 15 秒没有任何角度变化才算真卡住。
       await waitForProgress(
         () => phase !== "turning",
         () => Math.abs(root.rotation.y - from),
-        { idleMs: 4000, maxMs: 60000 },
+        { idleMs: 15000, maxMs: 120000 },
       );
     },
     play: async (id) => {
@@ -390,6 +408,31 @@ async function boot() {
       distanceError: Math.round(distanceError * 10000) / 10000,
       yawErrorDeg: Math.round(yawErrorDeg * 1000) / 1000,
       ok: Math.abs(distanceError) <= 0.02 && Math.abs(yawErrorDeg) <= 2,
+    };
+  };
+
+  /**
+   * 有落地变体的物品（饭勺）：站位由“物品位置 − 朝向变换后的拾取偏移”唯一确定，
+   * 同时给出站位朝向。模型拿这个点自己 turn/walk，不用猜偏移。
+   */
+  const variantStand = (objectId: string) => {
+    const item = itemOf(objectId);
+    if (!item || item.variants.length === 0) return null;
+    const ref = referenceOf(objectId);
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(item.object.quaternion);
+    const itemYaw = (Math.atan2(forward.x, forward.z) * 180) / Math.PI;
+    // 站位朝向来自“参考四元数”的朝向，而不是参考位置的方位角
+    const refQuat = new THREE.Quaternion(...(item.definition.pickupReference.quaternion as [number, number, number, number]));
+    const refForward = new THREE.Vector3(0, 0, 1).applyQuaternion(refQuat);
+    const referenceYaw = (Math.atan2(refForward.x, refForward.z) * 180) / Math.PI;
+    const yawDeg = itemYaw - referenceYaw;
+    const rad = (yawDeg * Math.PI) / 180;
+    return {
+      x: item.position.x - (ref.x * Math.cos(rad) + ref.z * Math.sin(rad)),
+      z: item.position.z - (-ref.x * Math.sin(rad) + ref.z * Math.cos(rad)),
+      yawDeg: round3(yawDeg),
+      reach: round3(Math.hypot(ref.x, ref.z)),
+      variant: item.matchVariant(),
     };
   };
 
@@ -448,18 +491,9 @@ async function boot() {
       // 有落地变体的物品（饭勺）朝向固定：站位朝向必须由物品朝向反推，
       // 否则从任意方位走过去都会让“脚尖挑勺”的动画方向不对。
       if (item.variants.length > 0) {
-        const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(item.object.quaternion);
-        const itemYaw = (Math.atan2(forward.x, forward.z) * 180) / Math.PI;
-        // 站位朝向来自“参考四元数”的朝向，而不是参考位置的方位角
-        const refQuat = new THREE.Quaternion(...(item.definition.pickupReference.quaternion as [number, number, number, number]));
-        const refForward = new THREE.Vector3(0, 0, 1).applyQuaternion(refQuat);
-        const referenceYaw = (Math.atan2(refForward.x, refForward.z) * 180) / Math.PI;
-        const finalYaw = itemYaw - referenceYaw;
-        const rad = (finalYaw * Math.PI) / 180;
-        const stand = {
-          x: item.position.x - (reference.x * Math.cos(rad) + reference.z * Math.sin(rad)),
-          z: item.position.z - (-reference.x * Math.sin(rad) + reference.z * Math.cos(rad)),
-        };
+        const computed = variantStand(objectId)!;
+        const finalYaw = computed.yawDeg;
+        const stand = { x: computed.x, z: computed.z };
         const bearing = (Math.atan2(stand.x - root.position.x, stand.z - root.position.z) * 180) / Math.PI;
         await loco.turn(signedDeltaDeg(degYaw(), bearing));
         // 用 walk + walk_adjust 把点落到 1cm 以内
@@ -551,8 +585,45 @@ async function boot() {
   };
   loco.basin = basinBridge;
 
+  /** 格心：与服务端 cellCenter 同一套公式（8m 场地、10×10、每格 0.8m） */
+  const cellCenterOf = (row: number, col: number) => ({ x: -4 + (col + 0.5) * 0.8, z: -4 + (row + 0.5) * 0.8 });
+
   const digBridge: DigBridge = {
     current: () => gameBoard,
+    precheck: (step) => {
+      const board = gameBoard;
+      if (!board) return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NO_GAME" } };
+      if (board.gameId !== step.game_id) {
+        return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "STALE_GAME", gameId: board.gameId } };
+      }
+      if (board.status !== "playing") {
+        return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "GAME_OVER", status: board.status } };
+      }
+      if (Number.isInteger(step.expected_revision) && step.expected_revision !== board.revision) {
+        return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "STALE_REVISION", revision: board.revision } };
+      }
+      if (scoop.state !== "held") {
+        return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NO_SCOOP", scoop: scoop.snapshot() } };
+      }
+      const cell = board.cells.find((c) => c.row === step.row && c.col === step.col);
+      if (!cell) return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NO_SUCH_CELL", row: step.row, col: step.col } };
+      if (cell.state === "revealed") {
+        return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "ALREADY_REVEALED", row: step.row, col: step.col } };
+      }
+      const center = cellCenterOf(step.row, step.col);
+      const distance = Math.hypot(root.position.x - center.x, root.position.z - center.z);
+      if (distance > 0.12) {
+        return {
+          ok: false,
+          reason: "PRECONDITION_FAILED",
+          detail: { error: "NOT_IN_CELL", distance_m: +distance.toFixed(3), targetCellCenter: center, position: { x: +root.position.x.toFixed(3), z: +root.position.z.toFixed(3) } },
+        };
+      }
+      if (phase !== "idle" || player.state.walking || player.performing !== null) {
+        return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NOT_STILL" } };
+      }
+      return { ok: true };
+    },
     perform: async (step) => {
       const meta = basinCatalog.actions.find((a) => a.id === "dig");
       let pending: Promise<Record<string, unknown>> | null = null;
@@ -574,7 +645,12 @@ async function boot() {
   loco.dig = digBridge;
 
   document.getElementById("start-minesweeper")?.addEventListener("click", () => {
-    if (!client.connected) return;
+    // 连接还没就绪时给个提示，而不是静默失败
+    if (!client.connected) {
+      chat.setError("还没有连上大脑服务，稍等一下再开局");
+      return;
+    }
+    chat.setError(null);
     client.startGame(`r${Date.now()}`);
   });
 
@@ -650,8 +726,32 @@ async function boot() {
         const result = await runOwned("plan", msg.plan as unknown as Plan);
         if (result) {
           client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId }, snapshot());
-          lastReport = performance.now();
+        } else {
+          // 接管失败（身体停不下来）也必须回报，否则服务端会一直等 plan_result 到预算耗尽
+          client.sendPlanResult(
+            msg.taskId,
+            {
+              status: "failed",
+              stopped: true,
+              steps: [
+                {
+                  stepId: "s0",
+                  action: "plan",
+                  status: "unknown",
+                  requested: {},
+                  actual: null,
+                  startState: {},
+                  endState: null,
+                  reasonCode: "SUPERSEDED",
+                  durationMs: 0,
+                },
+              ],
+            },
+            { generation: msg.generation, planId: msg.planId },
+            snapshot(),
+          );
         }
+        lastReport = performance.now();
       });
     },
     onReply: (msg) => {
@@ -845,7 +945,7 @@ async function boot() {
 
     // 上报位置：停稳后每 2 秒一次，供刷新恢复
     const now = performance.now();
-    if (stateApplied && now - lastReport > 2000 && !player.state.walking && phase === "idle" && !taskActive) {
+    if (stateApplied && !readOnly && now - lastReport > 2000 && !player.state.walking && phase === "idle" && !taskActive) {
       lastReport = now;
       client.sendStateSnapshot(snapshot());
     }
@@ -869,16 +969,17 @@ async function boot() {
     stage.update();
   });
 
-  window.addEventListener("pagehide", () => client.sendStateSnapshot(snapshot()));
+  window.addEventListener("pagehide", () => { if (!readOnly) client.sendStateSnapshot(snapshot()); });
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") client.sendStateSnapshot(snapshot());
+    if (document.visibilityState === "hidden" && !readOnly) client.sendStateSnapshot(snapshot());
   });
 
   loading.classList.add("done");
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo,
+    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board,
+    getGame: () => gameBoard,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
     resetBasin: () => basinBridge.reset(),

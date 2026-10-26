@@ -53,6 +53,11 @@ export class MinesweeperBoard {
     return this.mesh.visible;
   }
 
+  /** 调试/探针：当前悬停格与盘面数据 */
+  get state() {
+    return { board: this.board, hover: this.hover, visible: this.mesh.visible };
+  }
+
   show(visible: boolean) {
     this.mesh.visible = visible;
     if (!visible) this.draw();
@@ -107,6 +112,14 @@ export class MinesweeperBoard {
       }
     }
     if (this.hover) {
+      // 悬停格显示坐标，方便对照提示词里的 row/col
+      ctx.save();
+      ctx.font = `${Math.round(cell * 0.26)}px system-ui, sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.fillStyle = "rgba(255,255,255,0.92)";
+      ctx.fillText(`${this.hover.row},${this.hover.col}`, this.hover.col * cell + 10, this.hover.row * cell + 10);
+      ctx.restore();
       ctx.strokeStyle = "rgba(255, 210, 120, 0.95)";
       ctx.lineWidth = 5;
       ctx.strokeRect(this.hover.col * cell + 3, this.hover.row * cell + 3, cell - 6, cell - 6);

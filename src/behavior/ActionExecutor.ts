@@ -215,9 +215,9 @@ export class ActionExecutor {
         if (Math.abs(target.x) > limit || Math.abs(target.z) > limit) {
           return done("failed", { target }, "OUT_OF_BOUNDS");
         }
-        // 预算：起步 0.8 + n 圈 * 1.6 + 收步 0.8 的动画时间；墙钟留足余量，
-        // 真正的“卡住”由 walk 的进度看门狗在 8 秒无进展时判定
-        const budget = 60000 + n * 5000;
+        // 预算只是“卡死”兜底：动画按帧推进，headless/低端设备上 17 秒的 1.89m
+        // 可能跑三四分钟。真正的卡住由 walk 的进度看门狗（8 秒无进展）判定。
+        const budget = 180000 + n * 15000;
         const raced = await this.withTimeout(this.loco.walk(meters), budget);
         const after = this.loco.position();
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
@@ -238,7 +238,7 @@ export class ActionExecutor {
         if (!PLAYABLE.has(step.action_id)) {
           return done("unsupported", { supported: [...PLAYABLE] }, "CAPABILITY_DISABLED");
         }
-        const raced = await this.withTimeout(this.loco.play(step.action_id), 30000);
+        const raced = await this.withTimeout(this.loco.play(step.action_id), 60000);
         if (!raced.ok) return done("timeout", { action_id: step.action_id }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { action_id: step.action_id }, "CANCELLED");
         return done("succeeded", { action_id: step.action_id }, "OK");
@@ -280,7 +280,8 @@ export class ActionExecutor {
           return done("failed", { target }, "OUT_OF_BOUNDS");
         }
         const cycles = Math.round((meters - 0.144) / 0.32);
-        const raced = await this.withTimeout(this.loco.run ? this.loco.run(meters) : Promise.reject(new Error("no run")), 20000 + cycles * 3000);
+        // 与 walk 同样的预算思路：动画按帧推进，卡住由 loco 的进度看门狗判定
+        const raced = await this.withTimeout(this.loco.run ? this.loco.run(meters) : Promise.reject(new Error("no run")), 180000 + cycles * 15000);
         const after = this.loco.position();
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
         const actual = { distance_m: round(moved) };
@@ -296,7 +297,7 @@ export class ActionExecutor {
           return done("unsupported", { supported: [0.02, 0.04, 0.06, 0.08] }, "CAPABILITY_DISABLED");
         }
         const before = { ...this.loco.position() };
-        const raced = await this.withTimeout(this.loco.adjust(meters), 30000);
+        const raced = await this.withTimeout(this.loco.adjust(meters), 90000);
         const after = this.loco.position();
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
         if (!raced.ok) return done("unknown", { distance_m: round(moved), partial: true }, "TIMEOUT");
@@ -308,17 +309,24 @@ export class ActionExecutor {
       case "dig": {
         const bridge = this.loco.dig;
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
-        const board = bridge.current();
-        if (!board) return done("failed", null, "PRECONDITION_FAILED");
-        if (board.status !== "playing") return done("failed", { status: board.status }, "PRECONDITION_FAILED");
-        if (board.gameId !== step.game_id) return done("failed", { game_id: step.game_id, actual: board.gameId }, "PRECONDITION_FAILED");
-        if (Number.isInteger(step.expected_revision) && step.expected_revision !== board.revision) {
-          return done("failed", { expected_revision: step.expected_revision, actual: board.revision }, "PRECONDITION_FAILED");
+        // 主场景的 precheck 是权威：右手持勺、站在格心 0.12m 内、棋盘版本一致、已经站稳
+        const pre = bridge.precheck?.(step);
+        if (pre && !pre.ok) return done("failed", pre.detail ?? null, pre.reason ?? "PRECONDITION_FAILED");
+        if (!pre) {
+          const board = bridge.current();
+          if (!board) return done("failed", null, "PRECONDITION_FAILED");
+          if (board.status !== "playing") return done("failed", { status: board.status }, "PRECONDITION_FAILED");
+          if (board.gameId !== step.game_id) return done("failed", { game_id: step.game_id, actual: board.gameId }, "PRECONDITION_FAILED");
+          if (Number.isInteger(step.expected_revision) && step.expected_revision !== board.revision) {
+            return done("failed", { expected_revision: step.expected_revision, actual: board.revision }, "PRECONDITION_FAILED");
+          }
+          const cell = board.cells.find((c) => c.row === step.row && c.col === step.col);
+          if (!cell) return done("failed", { row: step.row, col: step.col }, "PRECONDITION_FAILED");
+          if (cell.state === "revealed") return done("failed", { row: step.row, col: step.col }, "PRECONDITION_FAILED");
         }
-        const cell = board.cells.find((c) => c.row === step.row && c.col === step.col);
-        if (!cell) return done("failed", { row: step.row, col: step.col }, "PRECONDITION_FAILED");
-        if (cell.state === "revealed") return done("failed", { row: step.row, col: step.col }, "PRECONDITION_FAILED");
-        const raced = await this.withTimeout(bridge.perform(step), 12000);
+        // 挖掘按帧推进：低帧率机器上一段 2.5 秒的片段可能要跑几十秒墙钟，
+        // 这里只做“卡死”兜底，真正的完成判定由片段的结束回调给出。
+        const raced = await this.withTimeout(bridge.perform(step), 90000);
         if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
         const outcome = raced.value;
         if (!outcome.ok) return done("failed", outcome as unknown as Record<string, unknown>, "PRECONDITION_FAILED");
@@ -363,6 +371,10 @@ export class ActionExecutor {
           if (!upright.ok) {
             return done("failed", { upright, object: bridge.snapshot(objectId) }, "NOT_ALIGNED");
           }
+        }
+        // 落地姿态不支持（饭勺平躺以外的姿态）时明确拒绝，不悄悄扶正
+        if (bridge.canStart && !bridge.canStart(objectId, actionId)) {
+          return done("failed", { object: view, error: "POSE_UNSUPPORTED" }, "OBJECT_POSE_UNSUPPORTED");
         }
         const raced = await this.withTimeout(bridge.perform(objectId, actionId), 60000);
         const after = bridge.snapshot(objectId) as BasinView;

@@ -82,10 +82,15 @@ test("租约、代际与重复结果去重", async (t) => {
   const closed = await waitFor(a.inbox, (m) => m.type === "error");
   assert.equal(closed.code, "CHAT_CLOSED");
 
-  // 只读端不能改位置、不能开聊天、不能发消息
+  // 只读端的周期快照静默忽略（不是用户动作，不该在只读页点亮错误图标），
+  // 但绝不能改服务端位置：下面的广播里角色坐标必须还是原值
+  b.inbox.length = 0;
   b.ws.send(JSON.stringify({ protocolVersion: 1, type: "state_snapshot", snapshot: { x: 1.234, z: 0, yawDeg: 0 } }));
-  const snapDenied = await waitFor(b.inbox, (m) => m.type === "error" && m.code === "NOT_EXECUTOR");
-  assert.ok(snapDenied, "只读端快照必须被拒绝");
+  await sleep(150);
+  assert.equal(b.inbox.filter((m) => m.type === "error").length, 0, "只读端快照不应报错");
+  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));
+  const afterState = await waitFor(b.inbox, (m) => m.type === "session_state");
+  assert.notEqual(afterState.character?.x, 1.234, "只读端不能改位置");
 
   b.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));
   await sleep(150);

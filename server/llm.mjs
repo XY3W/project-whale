@@ -48,24 +48,27 @@ export const SYSTEM_PROMPT = readPrompt("system.txt");
 const OUTPUT_CONTRACT = outputContract();
 
 
+/**
+ * 上下文块的统一包装。用函数替换，避免 JSON 里的 `$&`/`$1` 被 String.replace 当成替换语法。
+ */
 function contextBlock(ctx) {
   return `REQUEST_CONTEXT_JSON:\n${JSON.stringify(ctx)}`;
 }
 
-export function planningMessages(ctx) {
-  const tpl = readPrompt("planning.txt").replace("{{REQUEST_CONTEXT_JSON}}", JSON.stringify({ ...ctx, phase: "planning" }, null, 0));
+function render(templateName, ctx) {
+  const tpl = readPrompt(templateName).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...ctx, phase: ctx.phase ?? templateName.replace(".txt", "") }));
   return [
     { role: "system", content: SYSTEM_PROMPT },
     { role: "user", content: tpl + "\n\n" + OUTPUT_CONTRACT },
   ];
 }
 
+export function planningMessages(ctx) {
+  return render("planning.txt", { ...ctx, phase: "planning" });
+}
+
 export function reviewMessages(ctx) {
-  const tpl = readPrompt("review.txt").replace("{{REQUEST_CONTEXT_JSON}}", JSON.stringify({ ...ctx, phase: "review" }, null, 0));
-  return [
-    { role: "system", content: SYSTEM_PROMPT },
-    { role: "user", content: tpl + "\n\n" + OUTPUT_CONTRACT },
-  ];
+  return render("review.txt", { ...ctx, phase: "review" });
 }
 
 export async function callModel(messages) {
