@@ -328,7 +328,7 @@ export class ActionExecutor {
         }
         // 挖掘按帧推进：低帧率机器上一段 2.5 秒的片段可能要跑几十秒墙钟，
         // 这里只做“卡死”兜底，真正的完成判定由片段的结束回调给出。
-        const raced = await this.withTimeout(bridge.perform(step), 90000);
+        const raced = await this.withTimeout(bridge.perform(step, stepId), 90000);
         if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
         const outcome = raced.value;
         if (!outcome.ok) return done("failed", outcome as unknown as Record<string, unknown>, "PRECONDITION_FAILED");

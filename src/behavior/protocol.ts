@@ -164,8 +164,8 @@ export interface DigBridge {
   current(): GameView | null;
   /** 挖掘前置条件：右手持勺、站在目标格 0.12m 内、棋盘版本一致 */
   precheck?(step: { game_id: string; row: number; col: number; expected_revision: number }): DigPrecheck;
-  /** 播放挖掘并在接触点提交，返回服务端结算结果 */
-  perform(step: { game_id: string; row: number; col: number; expected_revision: number }): Promise<DigOutcome>;
+  /** 播放挖掘并在接触点提交，返回服务端结算结果（stepId 用于服务端授权复检） */
+  perform(step: { game_id: string; row: number; col: number; expected_revision: number }, stepId?: string): Promise<DigOutcome>;
 }
 
 export interface ApproachSummary {

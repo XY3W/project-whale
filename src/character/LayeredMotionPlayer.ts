@@ -69,6 +69,8 @@ export class LayeredMotionPlayer {
   private soloLoop = false;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
   movementDelta = 0;
+  /** 调试用：这一帧持仓层实际作用/让位了哪些槽位 */
+  holdStats: { applied: string[]; skipped: string[]; layer: string | null } = { applied: [], skipped: [], layer: null };
   get speed() { return this.rate; }
   set speed(value: number) { this.rate = THREE.MathUtils.clamp(value, .75, 1.25); }
   constructor(private readonly root: THREE.Object3D, clips: THREE.AnimationClip[]) {
@@ -341,15 +343,35 @@ export class LayeredMotionPlayer {
     this.get('tail_swish').setEffectiveWeight(this.tailMix);
   }
 
-  /** 持物层：只写各自手臂的骨骼，顺序在 mixer 之后；互动片段接管某只手时让位 */
+  /**
+   * 动作是否接管了这只手。命名语义：full_except_left_arm = 全身动作但不含左臂，
+   * 所以它接管的是**右手**。之前这里写反了，挖掘时右手的持勺姿势被覆盖，右臂偏离原动画约 36°。
+   */
+  private perfOwnsArm(layer: string | null, slot: string): boolean {
+    if (!layer) return false;
+    if (layer === 'full_body') return true;
+    if (layer === 'left_arm') return slot === 'left_hand';
+    if (layer === 'right_arm') return slot === 'right_hand';
+    if (layer === 'full_except_left_arm') return slot === 'right_hand';
+    if (layer === 'full_except_right_arm') return slot === 'left_hand';
+    return false;
+  }
+
+  /** 持物层：只写各自手臂的骨骼，顺序在 mixer 之后；动作接管某只手时让位 */
   private applyHolds(dt: number) {
-    const layer = this.perf?.layer ?? null;
+    const perf = this.perf;
+    const layer = perf?.layer ?? null;
+    this.holdStats = { applied: [], skipped: [], layer };
     for (const [slot, hold] of this.holds) {
       if (!hold.enabled) continue;
-      if (layer === 'full_except_left_arm' && slot === 'left_hand') continue;
-      if (layer === 'full_except_right_arm' && slot === 'right_hand') continue;
+      // 收尾淡出阶段把手臂交回持仓层，避免 0.15s 淡出把持物姿势拉回 idle
+      if (this.perfOwnsArm(layer, slot) && !perf!.ending) {
+        this.holdStats.skipped.push(slot);
+        continue;
+      }
       hold.time += dt;
       hold.overlay.apply(hold.time);
+      this.holdStats.applied.push(slot);
     }
   }
 

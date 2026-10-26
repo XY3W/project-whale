@@ -14,6 +14,7 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
+import { cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest } from "./context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
 import { createGameEventQueue } from "./events.mjs";
@@ -25,7 +26,7 @@ const ROOT = path.resolve(process.cwd(), "dist");
 const PROTOCOL = 1;
 const HEARTBEAT_MS = 8_000;
 const MAX_ROUNDS = 4;
-const BUDGET_MS = 180_000;
+const BUDGET_MS = Number(process.env.BRAIN_BUDGET_MS ?? 180_000);
 /** 场地事件的合并窗口：同一批动作只唤醒一次模型 */
 const EVENT_COALESCE_MS = 400;
 /**
@@ -167,12 +168,21 @@ const session = {
   chatOpen: false,
   lastResult: null,     // { taskId, round } 用于去重
   history: [],          // 最近对话（限 12 条）
+  /** dig 授权表：只有服务端下发的计划才能提交挖掘（authId -> 授权记录） */
+  digAuth: new Map(),
+  digSeq: 0,
 };
 
 
 const store = createStore(path.join(process.cwd(), "data", "brain-state.json"));
 const storeSeed = reconcileOnLoad(store.state);
 for (const [planId, entry] of Object.entries(storeSeed.ledger ?? {})) session.ledger.set(planId, entry);
+// 任务号不能和上次进程撞车（否则账本里 t100-p1-g1 会被覆盖）
+for (const planId of Object.keys(storeSeed.ledger ?? {})) {
+  const match = /^t(\d+)-/.exec(planId);
+  if (match) nextTask = Math.max(nextTask, Number(match[1]) + 1);
+}
+if (Number.isFinite(storeSeed.session?.generation)) session.generation = storeSeed.session.generation;
 session.history = Array.isArray(storeSeed.history) ? storeSeed.history.slice(-12) : [];
 if (storeSeed.session?.phase === "unknown") {
   session.phase = "unknown";
@@ -187,7 +197,7 @@ function persist() {
     st.memories = st.memories ?? [];
     st.history = session.history.slice(-12);
     st.ledger = Object.fromEntries(session.ledger);
-    st.session = { id: session.id, phase: session.phase, taskId: session.task?.id ?? null };
+    st.session = { id: session.id, phase: session.phase, taskId: session.task?.id ?? null, generation: session.generation };
     st.task = session.task
       ? { id: session.task.id, generation: session.task.generation, text: session.task.text, rounds: session.task.rounds, planId: session.task.planId ?? null }
       : null;
@@ -200,6 +210,8 @@ function send(ws, type, payload = {}) {
 }
 
 const isLease = (ws) => session.lease === ws;
+/** 写操作必须带当前租约代际：缺字段不再放行（旧代码 undefined 也能过） */
+const epochOk = (msg) => typeof msg.leaseEpoch === "number" && msg.leaseEpoch === session.leaseEpoch;
 const isLeaseAlive = () =>
   !!session.lease && session.lease.readyState === 1 && Date.now() - session.leaseAt < HEARTBEAT_MS;
 
@@ -240,10 +252,13 @@ const autoplay = {
   backoff: 1,
   /** 最近一小时的自主体回合时间戳 */
   turns: [],
+  /** 用户手动「扫雷结束」后的硬暂停：普通退避不许缩短它 */
+  manualPauseUntil: 0,
 };
 
 function noteAutoPlayDelay(ms) {
-  autoplay.nextAt = Date.now() + ms;
+  // 手动收摊的暂停优先：任何普通退避都不能把它缩短
+  autoplay.nextAt = Math.max(Date.now() + ms, autoplay.manualPauseUntil);
 }
 
 /**
@@ -253,6 +268,7 @@ function noteAutoPlayDelay(ms) {
 function tickAutoPlay() {
   if (!AUTO_PLAY || !hasKey()) return;
   const now = Date.now();
+  if (Date.now() < autoplay.manualPauseUntil) return;
   if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown") {
     if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
     return;
@@ -334,6 +350,19 @@ function broadcastState() {
   for (const ws of wss.clients) send(ws, "session_state", { ...payload, ...statePayload(ws) });
 }
 
+/**
+ * 结束/打断一个已下发但还没跑完的计划：告诉执行端停下，并把账本从 dispatched 挪走，
+ * 不能只把任务置 idle 让动作继续在场上跑。
+ */
+function cancelCurrentPlan(reason) {
+  const task = session.task;
+  if (!task?.planId) return;
+  const entry = session.ledger.get(task.planId);
+  if (entry && entry.state === "dispatched") session.ledger.set(task.planId, { state: "cancelled", reason });
+  send(session.lease, "cancel_plan", { taskId: task.id, generation: task.generation, planId: task.planId, reason });
+  console.log(`[plan] cancel ${task.planId} (${reason})`);
+}
+
 function endTask(reason, opts = {}) {
   const finished = session.task;
   if (session.budgetTimer) { clearTimeout(session.budgetTimer); session.budgetTimer = null; }
@@ -393,7 +422,9 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     if (session.task?.id !== taskId) return;
     session.phase = "blocked";
     if (origin !== "event") send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
-    endTask("budget timer");
+    // 预算到期必须先让执行端停下，不能只把任务置 idle
+    cancelCurrentPlan("budget");
+    endTask("budget timer", { retryMs: null });
   }, BUDGET_MS);
   session.task = {
     id: taskId,
@@ -613,6 +644,9 @@ function applyOutput(ws, task, out) {
   session.phase = "executing";
   broadcastState();
   console.log(`[plan] ${task.id} turn=${task.rounds} steps=${out.plan.steps.map((s) => s.action).join(",")} speech=${out.speech ? "yes" : "no"}`);
+  // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
+  // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
+  const digAuthId = issueDigAuth(task, out.plan);
   if (out.speech) session.history.push({ role: "assistant", content: out.speech });
   send(ws, "execute_plan", {
     taskId: task.id,
@@ -621,8 +655,38 @@ function applyOutput(ws, task, out) {
     leaseEpoch: session.leaseEpoch,
     turnId: task.rounds,
     speech: out.speech ?? "",
+    digAuthId,
     plan: out.plan,
   });
+}
+
+/**
+ * 为计划里的 dig 发放一次性授权。计划里没有 dig 就返回 null。
+ * 旧的未使用授权立即作废，used 的保留少量用于幂等重放。
+ */
+function issueDigAuth(task, plan) {
+  const digStep = (plan.steps ?? []).find((step) => step.action === "dig");
+  if (!digStep) return null;
+  const authId = `dig${++session.digSeq}-g${task.generation}`;
+  session.digAuth.set(authId, {
+    authId,
+    taskId: task.id,
+    generation: task.generation,
+    planId: task.planId,
+    gameId: digStep.game_id,
+    row: digStep.row,
+    col: digStep.col,
+    expectedRevision: digStep.expected_revision,
+    issuedAt: Date.now(),
+    used: false,
+    response: null,
+  });
+  // 只留一份未使用授权 + 少量已完成记录
+  const unused = [...session.digAuth].filter(([, a]) => !a.used);
+  for (const [id] of unused.slice(0, -1)) session.digAuth.delete(id);
+  const used = [...session.digAuth].filter(([, a]) => a.used);
+  for (const [id] of used.slice(0, Math.max(0, used.length - 8))) session.digAuth.delete(id);
+  return authId;
 }
 
 function fail(ws, task, err) {
@@ -673,7 +737,7 @@ wss.on("connection", (ws, req) => {
 
       case "game_start": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能开局" }); break; }
-        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+        if (!epochOk(msg)) {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
@@ -682,6 +746,7 @@ wss.on("connection", (ws, req) => {
         send(ws, "game_state", { board });
         broadcastState();
         // 用户主动点开局：解除“手动结束”的暂停
+        autoplay.manualPauseUntil = 0;
         autoplay.nextAt = 0;
         // 只有真的换了局（而不是幂等重发）才算新局事件
         if (board && board.gameId !== previous) {
@@ -692,7 +757,7 @@ wss.on("connection", (ws, req) => {
 
       case "game_end": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能结束对局" }); break; }
-        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+        if (!epochOk(msg)) {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
@@ -701,8 +766,10 @@ wss.on("connection", (ws, req) => {
         send(ws, "game_state", { board: games.public(), ended: result.ok });
         broadcastState();
         if (result.ok) {
-          // 用户主动收摊：给自主开局按下暂停，别过一分钟又自己开一局
-          noteAutoPlayDelay(AUTO_AFTER_MANUAL_END_MS);
+          // 用户主动收摊：硬暂停，普通退避和任务收尾都不许把它缩短
+          autoplay.manualPauseUntil = Date.now() + AUTO_AFTER_MANUAL_END_MS;
+          autoplay.backoff = 1;
+          noteAutoPlayDelay(0);
           console.log(result.cleared ? `[game] 用户收起了 ${before}` : `[game] 用户结束了 ${result.board?.gameId}`);
           // 只有“进行中→结束”才需要告诉模型；收摊已经被用户拿走了
           if (!result.cleared) noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
@@ -711,22 +778,50 @@ wss.on("connection", (ws, req) => {
       }
 
       case "dig_commit": {
-        if (!isLease(ws)) { send(ws, "dig_result", { ok: false, reason: "NOT_EXECUTOR" }); break; }
-        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
-          send(ws, "dig_result", { ok: false, reason: "STALE_LEASE" });
-          break;
+        // 每一条回包都带回客户端给的 actionInstanceId，避免客户端只能等 6 秒超时
+        const reply = (body) => send(ws, "dig_result", { actionInstanceId: msg.actionInstanceId, ...body });
+        if (!isLease(ws)) return reply({ ok: false, reason: "NOT_EXECUTOR" });
+        if (!isLeaseAlive()) return reply({ ok: false, reason: "LEASE_STALE" });
+        if (!epochOk(msg)) return reply({ ok: false, reason: "STALE_LEASE" });
+
+        const task = session.task;
+        const auth = session.digAuth.get(String(msg.digAuthId ?? ""));
+        if (!auth) return reply({ ok: false, reason: "NO_AUTH" });
+        // 脱离当前任务/代际的迟到提交一律拒绝
+        if (!task || task.id !== auth.taskId || task.generation !== auth.generation) {
+          return reply({ ok: false, reason: "STALE_TASK", taskId: auth.taskId });
         }
-        const cell = games.cellOf(msg.x, msg.z);
-        if (!cell) { send(ws, "dig_result", { ok: false, reason: "NOT_ON_BOARD" }); break; }
-        if (Number.isInteger(msg.row) && Number.isInteger(msg.col) && (msg.row !== cell.row || msg.col !== cell.col)) {
-          send(ws, "dig_result", { ok: false, reason: "NOT_IN_TARGET_CELL", actual: cell });
-          break;
+        // 同一个实例重发：原样回放第一次的结算，不重复改棋盘
+        if (auth.used) return reply(auth.response ?? { ok: false, reason: "ALREADY_COMMITTED" });
+        if (!epochOk(msg) || (msg.planId && auth.planId && msg.planId !== auth.planId)) {
+          return reply({ ok: false, reason: "STALE_PLAN" });
         }
-        const result = games.commit({ gameId: msg.gameId, row: cell.row, col: cell.col, expectedRevision: msg.expectedRevision });
-        send(ws, "dig_result", { actionInstanceId: msg.actionInstanceId, ...result });
+        const board = games.public();
+        if (!board) return reply({ ok: false, reason: "NO_GAME" });
+        if (auth.gameId !== board.gameId || msg.gameId !== auth.gameId) return reply({ ok: false, reason: "STALE_GAME" });
+        if (board.status !== "playing") return reply({ ok: false, reason: "GAME_OVER", status: board.status });
+        if (Number(msg.expectedRevision) !== auth.expectedRevision) {
+          return reply({ ok: false, reason: "STALE_REVISION", revision: board.revision });
+        }
+        const scoop = props.get("rice_scoop");
+        if (!scoop || scoop.state !== "held" || scoop.holder !== "right_hand") {
+          return reply({ ok: false, reason: "NO_SCOOP", scoop: scoop ?? null });
+        }
+        // 接触点复检：客户端上报的坑位坐标必须落在授权格子里，且离格心足够近
+        const center = cellCenter(auth.row, auth.col);
+        const dx = Number(msg.x) - center.x;
+        const dz = Number(msg.z) - center.z;
+        const distance = Math.hypot(dx, dz);
+        if (!Number.isFinite(distance) || distance > 0.12) {
+          return reply({ ok: false, reason: "NOT_IN_CELL", distance_m: Math.round(distance * 1000) / 1000, targetCellCenter: center });
+        }
+        const result = games.commit({ gameId: auth.gameId, row: auth.row, col: auth.col, expectedRevision: auth.expectedRevision });
+        const response = { ...result, authId: auth.authId };
+        auth.used = true;
+        auth.response = response;
+        reply(response);
         if (result.ok) {
           broadcastState();
-          // 同一次揭示既是“棋盘更新”，也可能同时是“完局”：都入队，由下一轮调用合并
           noteGameEvent("board_updated", result.board, { changedCells: result.changedCells?.length ?? 0 });
           if (result.status && result.status !== "playing") {
             noteGameEvent("game_finished", result.board, { result: result.status });
@@ -736,15 +831,16 @@ wss.on("connection", (ws, req) => {
       }
 
       case "state_snapshot": {
-        // 只读页面的周期上报不是用户动作：静默忽略，否则会在对方页面点亮断连红图标
+        // 只读页面或旧页面的周期上报不是用户动作：静默忽略，不点亮断连红图标
         if (!isLease(ws)) break;
-        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
-          send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
-          break;
-        }
+        if (!epochOk(msg)) break;
         // 重连后对账：执行端报告实际状态，服务器不盲重播任务
         // 只有“不是本连接创建的任务”才需要对账结束；否则会把刚发的消息杀掉
         if (isLease(ws) && session.task && msg.reconciled && (session.task.unknown || session.task.originWs !== ws)) {
+          const plan = session.task.planId;
+          if (plan && session.ledger.get(plan)?.state === "dispatched") {
+            session.ledger.set(plan, { state: "unknown", reason: "reconciled" });
+          }
           endTask("reconciled after restart/reconnect");
         }
         applyClientSnapshot(msg.snapshot);
@@ -756,7 +852,7 @@ wss.on("connection", (ws, req) => {
           send(ws, "error", { code: "NOT_EXECUTOR", message: "另一个页面正在执行角色" });
           return;
         }
-        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+        if (!epochOk(msg)) {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期，请刷新" });
           return;
         }
@@ -771,11 +867,7 @@ wss.on("connection", (ws, req) => {
         // 抢占：取消旧任务未执行步骤，旧结果随后被丢弃
         if (session.task) {
           session.task.superseded = true;
-          send(ws, "cancel_plan", {
-            taskId: session.task.id,
-            generation: session.task.generation,
-            planId: session.task.planId ?? null,
-          });
+          cancelCurrentPlan("superseded");
         }
 
         // 用户指令优先级最高：同一轮里先回应人，再顺带处理攒下的场地事件
@@ -796,6 +888,8 @@ wss.on("connection", (ws, req) => {
       case "plan_result": {
         const task = session.task;
         if (!isLease(ws)) return;
+        // 心跳断档后的迟到结果不再接受：此时角色可能已经换人/换代际
+        if (!isLeaseAlive()) return;
         if (typeof msg.generation !== "number" || !msg.planId || typeof msg.leaseEpoch !== "number") {
           send(ws, "error", { code: "PROTOCOL_FIELD_MISSING", message: "结果缺少 generation/planId/leaseEpoch" });
           return;
@@ -822,6 +916,7 @@ wss.on("connection", (ws, req) => {
         if (Date.now() - task.startedAt > BUDGET_MS) {
           session.phase = "blocked";
           send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，需要新的指示。" });
+          cancelCurrentPlan("budget");
           endTask("budget exceeded");
           return;
         }
@@ -832,6 +927,7 @@ wss.on("connection", (ws, req) => {
           if (!task || task.id !== msg.taskId) return;
           if (Date.now() - task.startedAt > BUDGET_MS) {
             send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，需要新的指示。" });
+            cancelCurrentPlan("budget");
             endTask("budget exceeded");
             return;
           }
@@ -874,7 +970,7 @@ wss.on("connection", (ws, req) => {
 
       case "chat_opened":
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能打开聊天" }); break; }
-        if (msg.leaseEpoch !== undefined && msg.leaseEpoch !== session.leaseEpoch) {
+        if (!epochOk(msg)) {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
@@ -905,7 +1001,7 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-setInterval(tickAutoPlay, 5000).unref();
+setInterval(tickAutoPlay, Number(process.env.AUTO_TICK_MS ?? 5000)).unref();
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`whale brain on :${PORT} (ws /ws)`);
   console.log(`[autoplay] ${AUTO_PLAY ? "开" : "关"} · 续玩 ${AUTO_CONTINUE_IDLE_MS}ms · 新局 ${AUTO_START_IDLE_MS}ms · 上限 ${AUTO_MAX_TURNS_PER_HOUR}/h`);

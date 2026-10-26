@@ -646,6 +646,9 @@ async function boot() {
     return { x: -half + (col + 0.5) * size, z: -half + (row + 0.5) * size };
   };
 
+  /** 当前正在执行的计划：dig 提交要带上任务/计划/授权，服务端据此校验 */
+  let activePlan: { taskId: string; generation?: number; planId?: string; digAuthId: string | null } | null = null;
+
   const digBridge: DigBridge = {
     current: () => gameBoard,
     precheck: (step) => {
@@ -682,7 +685,7 @@ async function boot() {
       }
       return { ok: true };
     },
-    perform: async (step) => {
+    perform: async (step, stepId) => {
       const meta = basinCatalog.actions.find((a) => a.id === "dig");
       let pending: Promise<Record<string, unknown>> | null = null;
       await player.perform("dig", (meta?.events ?? []).map((e) => ({ time: e.time, type: e.type })), (type) => {
@@ -694,6 +697,11 @@ async function boot() {
           expectedRevision: step.expected_revision,
           x: root.position.x,
           z: root.position.z,
+          digAuthId: activePlan?.digAuthId ?? null,
+          taskId: activePlan?.taskId ?? null,
+          generation: activePlan?.generation ?? null,
+          planId: activePlan?.planId ?? null,
+          stepId: stepId ?? null,
         });
       }, meta?.layer ?? "full_body");
       const result = pending ? await pending : { ok: false, reason: "NO_CONTACT" };
@@ -832,6 +840,7 @@ async function boot() {
           );
         }
         lastReport = performance.now();
+        activePlan = null;
       });
     },
     onReply: (msg) => {
@@ -1045,8 +1054,9 @@ async function boot() {
     board.tick();
     basin.update(dt, player.performanceTime);
     scoop.update(dt, player.performanceTime);
-    // 拾取/取下片段收尾时立刻接管持盆姿势，避免 0.15s 淡出把手臂拉回 idle
-    player.setHoldEnabled("left_hand", basin.mode === "hand" && (!player.performing || player.performanceEnding));
+    // 持仓层只看“这只手现在有没有东西”；哪只手要被动作接管由动作的 layer 决定，
+    // 不能用“是否正在表演”一刀切——挖掘不含左臂，盆的姿势必须保留。
+    player.setHoldEnabled("left_hand", basin.mode === "hand");
     player.setHoldEnabled("right_hand", scoop.mode === "hand");
 
     stage.update();

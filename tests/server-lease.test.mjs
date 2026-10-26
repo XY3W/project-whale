@@ -88,8 +88,12 @@ test("租约、代际与重复结果去重", async (t) => {
   b.ws.send(JSON.stringify({ protocolVersion: 1, type: "state_snapshot", snapshot: { x: 1.234, z: 0, yawDeg: 0 } }));
   await sleep(150);
   assert.equal(b.inbox.filter((m) => m.type === "error").length, 0, "只读端快照不应报错");
+  // 写操作必须带当前租约代际；缺字段也要被拒绝
   a.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));
+  await sleep(150);
+  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened", leaseEpoch: aState.leaseEpoch }));
   const afterState = await waitFor(b.inbox, (m) => m.type === "session_state");
+  assert.ok(afterState, "带代际的请求应当被接受");
   assert.notEqual(afterState.character?.x, 1.234, "只读端不能改位置");
 
   b.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));

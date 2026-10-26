@@ -8,3 +8,5 @@ public/models/character.glb
 .DS_Store
 .env
 data/
+.env*
+!.env.example

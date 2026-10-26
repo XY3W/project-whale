@@ -9,6 +9,8 @@ export interface PlanMessage {
   generation?: number;
   planId?: string;
   leaseEpoch?: number;
+  /** 服务端为这次 dig 发放的授权 id，提交时必须原样带回 */
+  digAuthId?: string | null;
   speech: string;
   plan: { steps: unknown[] };
 }
@@ -134,7 +136,7 @@ export class BrainClient {
   }
 
   sendReconciled(snapshot: Record<string, unknown>) {
-    return this.send("state_snapshot", { snapshot, reconciled: true });
+    return this.send("state_snapshot", { snapshot, reconciled: true, leaseEpoch: this.leaseEpoch });
   }
 
   private scheduleRetry() {
@@ -171,7 +173,7 @@ export class BrainClient {
   }
 
   setChatOpen(open: boolean) {
-    return this.send(open ? "chat_opened" : "chat_closed", {});
+    return this.send(open ? "chat_opened" : "chat_closed", { leaseEpoch: this.leaseEpoch });
   }
 
   /** 开局：同一 requestId 幂等 */
@@ -197,7 +199,8 @@ export class BrainClient {
   }
 
   sendStateSnapshot(snapshot: Record<string, unknown>) {
-    return this.send("state_snapshot", { snapshot });
+    // 写操作必须带当前租约代际，服务端会拒绝没有代际的快照
+    return this.send("state_snapshot", { snapshot, leaseEpoch: this.leaseEpoch });
   }
 
   get connected() {
