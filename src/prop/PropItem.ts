@@ -67,7 +67,7 @@ interface PropDef {
 export class PropItem {
   readonly object = new THREE.Group();
   readonly id: "basin" | "rice_scoop";
-  state_: PropState = "resting";
+  state: PropState = "resting";
   mode: Mode = "world";
   variant: string | null = null;
 
@@ -144,7 +144,7 @@ export class PropItem {
     const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.object.quaternion);
     return up.y >= UPRIGHT_MIN_Y;
   }
-  get stationary(): boolean { return this.state_ !== "flying" || this.lastCalm > 0.4; }
+  get stationary(): boolean { return this.state !== "flying" || this.lastCalm > 0.4; }
   get bindings() { return { slot: this.slot, bone: this.def.binding, headBinding: this.def.headBinding ?? null }; }
   get variants(): string[] { return Object.keys(this.def.pickupVariants ?? {}); }
 
@@ -208,10 +208,10 @@ export class PropItem {
     const wear = this.id === "basin" ? "wear_basin" : null;
     const unwear = this.id === "basin" ? "unwear_basin" : null;
     const throwIt = `throw_${this.id === "basin" ? "basin" : "scoop"}`;
-    if (actionId === pickup) return this.state_ === "resting" && (this.autoUpright || this.matchVariant() !== null);
-    if (wear && actionId === wear) return this.state_ === "held" && this.slot === "left_hand";
-    if (unwear && actionId === unwear) return this.state_ === "worn";
-    if (actionId === throwIt) return this.state_ === "held";
+    if (actionId === pickup) return this.state === "resting" && (this.autoUpright || this.matchVariant() !== null);
+    if (wear && actionId === wear) return this.state === "held" && this.slot === "left_hand";
+    if (unwear && actionId === unwear) return this.state === "worn";
+    if (actionId === throwIt) return this.state === "held";
     return false;
   }
 
@@ -219,11 +219,11 @@ export class PropItem {
     if (this.actionId) return false;
     if (!this.canStart(actionId)) return false;
     this.actionId = actionId;
-    this.actionsBefore = this.state_;
+    this.actionsBefore = this.state;
     this.restorePose = { position: this.object.position.clone(), quaternion: this.object.quaternion.clone() };
     this.throwSpec = spec ?? null;
     this.variant = this.matchVariant();
-    if (actionId.startsWith("pickup_")) this.state_ = "reserved";
+    if (actionId.startsWith("pickup_")) this.state = "reserved";
     return true;
   }
 
@@ -240,18 +240,18 @@ export class PropItem {
     switch (type) {
       case "grasp":
       case "hand_catch":
-        this.state_ = "held";
+        this.state = "held";
         this.mode = "hand";
         this.setMorph(0);
         break;
       case "toe_lift":
       case "hand_release_to_transfer":
       case "head_release_to_transfer":
-        this.state_ = "transferring";
+        this.state = "transferring";
         this.mode = "curve";
         break;
       case "head_attach":
-        this.state_ = "worn";
+        this.state = "worn";
         this.mode = "head";
         this.setMorph(1);
         break;
@@ -278,7 +278,7 @@ export class PropItem {
       velocity,
       angularVelocity,
     });
-    this.state_ = "flying";
+    this.state = "flying";
     this.mode = "physics";
     this.lastCalm = 0;
   }
@@ -317,7 +317,7 @@ export class PropItem {
       const e = k * k * (3 - 2 * k);
       this.object.position.lerpVectors(this.uprightFrom.position, this.uprightTo.position, e);
       this.object.quaternion.slerpQuaternions(this.uprightFrom.quaternion, this.uprightTo.quaternion, e);
-      if (k >= 1) { this.mode = "world"; this.state_ = "resting"; this.bump(); }
+      if (k >= 1) { this.mode = "world"; this.state = "resting"; this.bump(); }
       return;
     }
     if (this.mode === "physics") {
@@ -333,7 +333,7 @@ export class PropItem {
       if (result.resting) {
         this.physics.stop();
         this.mode = "world";
-        this.state_ = "resting";
+        this.state = "resting";
         this.bump();
       }
     }
@@ -346,10 +346,10 @@ export class PropItem {
     if (actionId && actionId.startsWith("throw_") && this.mode === "physics") return;
 
     const settled =
-      (actionId?.startsWith("pickup_") && this.state_ === "held") ||
-      (actionId === "wear_basin" && this.state_ === "worn") ||
-      (actionId === "unwear_basin" && this.state_ === "held") ||
-      (actionId?.startsWith("throw_") && this.state_ === "flying");
+      (actionId?.startsWith("pickup_") && this.state === "held") ||
+      (actionId === "wear_basin" && this.state === "worn") ||
+      (actionId === "unwear_basin" && this.state === "held") ||
+      (actionId?.startsWith("throw_") && this.state === "flying");
 
     if (completed && settled) {
       if (actionId === "wear_basin") this.setMorph(1);
@@ -358,7 +358,7 @@ export class PropItem {
     }
 
     this.bump();
-    this.state_ = this.actionsBefore;
+    this.state = this.actionsBefore;
     if (this.actionsBefore === "worn") { this.mode = "head"; this.setMorph(1); }
     else if (this.actionsBefore === "held") { this.mode = "hand"; this.setMorph(0); }
     else { this.mode = "world"; this.applyPose(this.restorePose); this.setMorph(0); }
@@ -366,7 +366,7 @@ export class PropItem {
 
   /** 扶正：只对静止物品开放，位移超过 maxMove 直接拒绝 */
   startUpright(seconds = 0.45, maxMove = 0.35) {
-    if (this.state_ !== "resting") { this.uprightResult = { ok: false, moved: 0, rotatedDeg: 0 }; return this.uprightResult; }
+    if (this.state !== "resting") { this.uprightResult = { ok: false, moved: 0, rotatedDeg: 0 }; return this.uprightResult; }
     const target = PropItem.toWorld(this.charRoot, this.def.pickupReference.position, this.def.pickupReference.quaternion);
     this.uprightFrom = { position: this.object.position.clone(), quaternion: this.object.quaternion.clone() };
     this.uprightTo = target;
@@ -386,7 +386,7 @@ export class PropItem {
     this.physics.stop();
     this.actionId = null;
     const target = PropItem.toWorld(this.charRoot, this.def.pickupReference.position, this.def.pickupReference.quaternion);
-    this.state_ = "resting";
+    this.state = "resting";
     this.mode = "world";
     this.applyPose(target);
     this.setMorph(0);
@@ -401,7 +401,7 @@ export class PropItem {
       position: new THREE.Vector3(0, this.def.pickupReference.position[1], 0),
       quaternion: new THREE.Quaternion(...(this.def.pickupReference.quaternion as [number, number, number, number])),
     };
-    this.state_ = "resting";
+    this.state = "resting";
     this.mode = "world";
     this.applyPose(pose);
     this.setMorph(0);
@@ -420,7 +420,7 @@ export class PropItem {
     this.previewing = false;
     this.object.visible = true;
     if (state === "held") {
-      this.state_ = "held";
+      this.state = "held";
       this.mode = "hand";
       this.setMorph(0);
       this.followBone(this.bone, this.attach);
@@ -428,7 +428,7 @@ export class PropItem {
       return true;
     }
     if (state === "worn" && this.headBone) {
-      this.state_ = "worn";
+      this.state = "worn";
       this.mode = "head";
       this.setMorph(1);
       this.followBone(this.headBone, this.headAttach ?? this.attach);
@@ -440,7 +440,7 @@ export class PropItem {
       : new THREE.Quaternion(...(this.def.pickupReference.quaternion as [number, number, number, number]));
     this.applyPose({ position: new THREE.Vector3(position[0], position[1], position[2]), quaternion });
     this.setMorph(0);
-    this.state_ = "resting";
+    this.state = "resting";
     this.mode = "world";
     this.bump();
     return true;
@@ -480,7 +480,7 @@ export class PropItem {
       type: this.id === "basin" ? "basin" : "scoop",
       revision: this.revision,
       holder: this.mode === "hand" ? this.slot : this.mode === "head" ? "head" : null,
-      state: this.state_,
+      state: this.state,
       position: [
         Math.round(this.object.position.x * 1000) / 1000,
         Math.round(this.object.position.y * 1000) / 1000,
@@ -494,9 +494,9 @@ export class PropItem {
       ],
       upright: this.upright,
       stationary: this.stationary,
-      available: this.state_ === "resting",
+      available: this.state === "resting",
       ...(this.variant ? { variant: this.variant } : {}),
-      ...(this.state_ === "flying" ? { speed: this.lastSpeed, spin: this.lastSpin } : {}),
+      ...(this.state === "flying" ? { speed: this.lastSpeed, spin: this.lastSpin } : {}),
     };
   }
 }

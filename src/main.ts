@@ -12,14 +12,16 @@ import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
-import { BasinProp } from "./prop/BasinProp";
+import { PropItem } from "./prop/PropItem";
 import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
 import type { BasinBridge } from "./behavior/protocol.ts";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
-const MODEL = "/models/basin-v2/character_basin_actions.glb";
-const BASIN_MODEL = "/models/basin-v2/steel_basin_v2.glb";
+const MODEL = "/models/minesweeper-v1/character_minesweeper.glb";
+const BASIN_ASSET_DIR = "/models/minesweeper-v1";
+const BASIN_MODEL = "/models/minesweeper-v1/steel_basin_v2.glb";
+const SCOOP_MODEL = "/models/minesweeper-v1/rice_scoop_straight_v3.glb";
 const AREA_HALF = 3.7;
 const DEBUG = new URLSearchParams(location.search).has("debug");
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -63,7 +65,7 @@ async function boot() {
   // ---- 钢盆互动资产（v2：4 段互动 + 持盆循环）----
   note.textContent = "正在准备钢盆…";
   const [basinAssets, basinGltf] = await Promise.all([
-    loadBasinAssets(),
+    loadBasinAssets(BASIN_ASSET_DIR),
     new GLTFLoader().loadAsync(BASIN_MODEL),
   ]);
   const basinCatalog = basinAssets.catalog;
@@ -83,7 +85,9 @@ async function boot() {
   gltf.scene.traverse((o) => {
     if ((o as THREE.Bone).isBone) boneMap.set(o.name.replace(/[^A-Za-z0-9_]/g, ""), o as THREE.Bone);
   });
-  const basin = await BasinProp.create({
+  const scoopGltf = await new GLTFLoader().loadAsync(SCOOP_MODEL);
+  const basin = await PropItem.create({
+    id: "basin",
     catalog: basinCatalog,
     propMotion: basinAssets.propMotion,
     charRoot: root,
@@ -92,10 +96,25 @@ async function boot() {
     setMorph: setTuck,
     parent: stage.scene,
   });
+  const scoop = await PropItem.create({
+    id: "rice_scoop",
+    catalog: basinCatalog,
+    propMotion: basinAssets.propMotion,
+    charRoot: root,
+    scene: scoopGltf.scene,
+    bones: boneMap,
+    parent: stage.scene,
+  });
   root.updateMatrixWorld(true);
-  basin.placeAt(BasinProp.toWorld(root, basinCatalog.pickupReference.position, basinCatalog.pickupReference.quaternion));
-  const holdClip = gltf.animations.find((c) => c.name === "hold_basin") ?? null;
-  if (holdClip) player.setHoldClip(holdClip);
+  basin.resetToReference();
+  scoop.resetToReference();
+  const holdBasinClip = gltf.animations.find((c) => c.name === "hold_basin") ?? null;
+  const holdScoopClip = gltf.animations.find((c) => c.name === "hold_scoop") ?? null;
+  if (holdBasinClip) player.setHold("left_hand", holdBasinClip);
+  if (holdScoopClip) player.setHold("right_hand", holdScoopClip);
+
+  /** catalog 里盆的拾取参考（旧代码直接读顶层 pickupReference） */
+  const basinReference = basinCatalog.props!.basin.pickupReference;
 
   // ---- 状态 ----
   let phase: Phase = "idle";
@@ -152,9 +171,13 @@ async function boot() {
     base: player.state.base,
     walking: player.state.walking,
     chatOpen: chat.open,
-    heldObjectId: basin.state === "held" ? "basin" : null,
+    heldObjectId: basin.state === "held" ? "basin" : scoop.state === "held" ? "rice_scoop" : null,
     headObjectId: basin.state === "worn" ? "basin" : null,
-    objects: [{ ...basin.snapshot(), approachCandidates: basin.state === "resting" ? approachHint() : null }],
+    slots: { left_hand: basin.state === "held" ? "basin" : null, right_hand: scoop.state === "held" ? "rice_scoop" : null, head: basin.state === "worn" ? "basin" : null },
+    objects: [
+      { ...basin.snapshot(), ...(basin.state === "resting" ? { approachCandidates: approachHint() } : {}) },
+      scoop.snapshot(),
+    ],
   });
 
   chat.onSend = (text) => {
@@ -325,7 +348,7 @@ async function boot() {
   };
   const degYaw = () => (root.rotation.y * 180) / Math.PI;
   const alignInfo = () => {
-    const ref = basinCatalog.pickupReference.position;
+    const ref = basinReference.position;
     const reach = Math.hypot(ref[0], ref[2]);
     const dx = basin.position.x - root.position.x;
     const dz = basin.position.z - root.position.z;
@@ -347,7 +370,7 @@ async function boot() {
       character: { x: root.position.x, z: root.position.z },
       basin: { x: basin.position.x, z: basin.position.z },
       yawDeg: degYaw(),
-      reference: { x: basinCatalog.pickupReference.position[0], z: basinCatalog.pickupReference.position[2] },
+      reference: { x: basinReference.position[0], z: basinReference.position[2] },
       half: AREA_HALF,
       margin: 0.3,
     });
@@ -386,7 +409,7 @@ async function boot() {
     canStart: (id) => basin.canStart(id),
     cancel: () => { player.cancelPerformance(); },
     align: async () => {
-      const reference = { x: basinCatalog.pickupReference.position[0], z: basinCatalog.pickupReference.position[2] };
+      const reference = { x: basinReference.position[0], z: basinReference.position[2] };
       // 距离远时先按最大支持距离走近，再求精确站位；最多 10 段，避免无限循环
       for (let leg = 0; leg < 10; leg++) {
         const plan = planApproach({
@@ -427,8 +450,9 @@ async function boot() {
     },
     perform: async (actionId, spec) => {
       if (!basin.begin(actionId, spec)) return false;
-      const events = (basinCatalog.actions.find((a) => a.id === actionId)?.events ?? []).map((e) => ({ time: e.time, type: e.type }));
-      const ok = await player.perform(actionId, events, (type) => basin.handleEvent(type));
+      const meta = basinCatalog.actions.find((a) => a.id === actionId);
+      const events = (meta?.events ?? []).map((e) => ({ time: e.time, type: e.type }));
+      const ok = await player.perform(actionId, events, (type) => basin.handleEvent(type), meta?.layer ?? "full_body");
       basin.finish(ok);
       return ok;
     },
@@ -549,6 +573,10 @@ async function boot() {
       basinApplied = true;
       root.updateMatrixWorld(true);
       const ok = basin.restore(record);
+      const scoopRecord = Array.isArray((record as { objects?: unknown[] }).objects)
+        ? ((record as { objects?: Array<Record<string, unknown>> }).objects ?? []).find((o) => o.object_id === "rice_scoop")
+        : null;
+      if (scoopRecord) scoop.restore(scoopRecord);
       console.info("[basin] restored", ok ? record.state : "failed", record.position);
     },
     onConnection: (ok) => {
@@ -710,8 +738,10 @@ async function boot() {
 
     root.updateMatrixWorld(true);
     basin.update(dt, player.performanceTime);
+    scoop.update(dt, player.performanceTime);
     // 拾取/取下片段收尾时立刻接管持盆姿势，避免 0.15s 淡出把手臂拉回 idle
-    player.setHoldEnabled(basin.mode === "hand" && (!player.performing || player.performanceEnding));
+    player.setHoldEnabled("left_hand", basin.mode === "hand" && (!player.performing || player.performanceEnding));
+    player.setHoldEnabled("right_hand", scoop.mode === "hand");
 
     stage.update();
   });
@@ -725,7 +755,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, basinBridge, alignInfo,
+    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo,
     get executor() { return currentExecutor; },
     getMotionOwner: () => motionOwner,
     resetBasin: () => basinBridge.reset(),

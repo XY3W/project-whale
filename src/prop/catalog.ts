@@ -8,6 +8,10 @@ export interface BasinEvent {
 export interface BasinAction {
   id: string;
   duration: number;
+  /** base / upper / tail / left_arm / right_arm / full_except_left_arm / full_except_right_arm */
+  layer?: string;
+  loop?: boolean;
+  clips?: string[];
   events?: BasinEvent[];
 }
 
