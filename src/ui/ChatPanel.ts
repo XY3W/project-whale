@@ -99,6 +99,7 @@ export class ChatPanel {
     }
     this.open = true;
     this.root.classList.add("open");
+    document.body.classList.add("chat-open");
     this.onOpen?.();
     this.input.value = this.draft;
     this.deadline = performance.now() + IDLE_MS;
@@ -110,6 +111,7 @@ export class ChatPanel {
     if (!this.open) return;
     this.open = false;
     this.root.classList.remove("open");
+    document.body.classList.remove("chat-open");
     this.draft = this.input.value;
     this.setState(reason === "timeout" ? "已超时关闭" : "已关闭");
     this.input.blur();
@@ -154,7 +156,7 @@ export class ChatPanel {
 const CSS = `
 .chat-panel{position:fixed;right:16px;top:16px;bottom:16px;width:min(440px,92vw);display:none;flex-direction:column;
   background:rgba(12,18,30,.92);border:1px solid rgba(120,160,230,.25);border-radius:12px;
-  color:#dbe7ff;font:15px/1.6 system-ui,sans-serif;backdrop-filter:blur(8px);z-index:20;overflow:hidden}
+  color:#dbe7ff;font:15px/1.6 system-ui,sans-serif;backdrop-filter:blur(8px);z-index:25;overflow:hidden}
 .chat-panel.open{display:flex}
 .chat-head{display:flex;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(120,160,230,.18);
   font-size:13px;letter-spacing:.08em;color:#8fa8cc}

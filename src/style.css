@@ -286,3 +286,7 @@ canvas { display: block; }
 
 .world-controls{position:fixed;right:18px;top:16px;display:flex;gap:8px;align-items:center;z-index:20;flex-wrap:wrap;max-width:calc(100vw - 170px)}
 .world-controls button,.memory-dialog button{border:1px solid #b9c8d9;border-radius:9px;background:#fff;padding:8px 12px;color:#263c54;cursor:pointer}.world-controls input{width:65px}.memory-dialog{border:1px solid #d1dce7;border-radius:16px;padding:24px;max-width:680px;max-height:80vh;overflow:auto}.memory-dialog::backdrop{background:#122b4566}.memory-row{display:flex;gap:8px;align-items:center;margin:14px 0;flex-wrap:wrap}.memory-row span{font-size:12px;width:100%}.memory-row input{padding:8px;border:1px solid #ccd6e0;border-radius:6px}
+
+/* Keep scene controls accessible beside chat on wide screens and out of its way on phones. */
+@media (min-width: 820px) { body.chat-open .world-controls { right: 472px; max-width: calc(100vw - 490px); } }
+@media (max-width: 819px) { body.chat-open .world-controls { display: none; } }
