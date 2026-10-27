@@ -10,6 +10,7 @@ export class ChatPanel {
   busy = false;
 
   onSend: ((text: string) => void) | null = null;
+  onShowReasoning: ((show: boolean) => void) | null = null;
 
   constructor() {
     injectStyles();
@@ -18,6 +19,7 @@ export class ChatPanel {
     this.root.innerHTML = `
       <div class="chat-head">
         <span>和鲸鱼娘说话</span>
+        <label class="chat-reasoning-toggle"><input type="checkbox" data-reasoning>显示思考</label>
         <span class="chat-state" data-state>未连接</span>
       </div>
       <div class="chat-list" data-list></div>
@@ -33,6 +35,12 @@ export class ChatPanel {
     this.input = this.root.querySelector("[data-input]")!;
     this.status = this.root.querySelector("[data-status]")!;
 
+    const toggle = this.root.querySelector<HTMLInputElement>("[data-reasoning]")!;
+    try { toggle.checked = localStorage.getItem("whale-show-reasoning") === "1"; } catch {}
+    toggle.addEventListener("change", () => {
+      try { localStorage.setItem("whale-show-reasoning", toggle.checked ? "1" : "0"); } catch {}
+      this.onShowReasoning?.(toggle.checked);
+    });
     const form = this.root.querySelector("form")!;
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -54,6 +62,8 @@ export class ChatPanel {
       }
     }).catch(()=>{});
   }
+
+  get showReasoning() { return this.root.querySelector<HTMLInputElement>("[data-reasoning]")!.checked; }
 
   private submit() {
     const text = this.input.value.trim();
@@ -92,6 +102,7 @@ const CSS = `
 .chat-panel{position:fixed;right:16px;top:68px;bottom:16px;width:min(420px,calc(100vw - 32px));display:flex;flex-direction:column;
   background:transparent;border:0;color:#e7efff;font:17px/1.55 system-ui,sans-serif;z-index:25;pointer-events:none}
 .chat-head{display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:16px;color:#b6c7e5;text-shadow:0 1px 4px #05070b}
+.chat-reasoning-toggle{pointer-events:auto;display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:14px;cursor:pointer}
 .chat-state{color:#a8bad6;margin-left:auto;font-size:14px}
 .chat-list{flex:1;min-height:0;overflow-y:auto;padding:10px 4px;display:flex;flex-direction:column;gap:12px;pointer-events:none;overscroll-behavior:contain}
 .chat-msg{max-width:90%;padding:12px 16px;border-radius:20px;font-size:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word;pointer-events:auto}

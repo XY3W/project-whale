@@ -21,6 +21,8 @@ export interface ReplyMessage {
 }
 
 type Handlers = {
+  onReasoningStart?: (taskId: string) => void;
+  onReasoningDelta?: (taskId: string, text: string) => void;
   onPlan?: (msg: PlanMessage) => void;
   onReply?: (msg: ReplyMessage) => void;
   onTaskState?: (phase: string, taskId?:string) => void;
@@ -83,6 +85,12 @@ export class BrainClient {
         return;
       }
       switch (msg.type) {
+        case "reasoning_start":
+          this.handlers.onReasoningStart?.(String(msg.taskId));
+          break;
+        case "reasoning_delta":
+          if (typeof msg.text === "string") this.handlers.onReasoningDelta?.(String(msg.taskId), msg.text);
+          break;
         case "execute_plan":
           this.handlers.onPlan?.(msg as unknown as PlanMessage);
           break;

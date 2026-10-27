@@ -11,7 +11,7 @@ test('实际协议：最终第4次执行也review；消息先落盘；确认记�
  let modelPort,serverPort;const calls=[];
  const stub=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const ctx=context(JSON.parse(raw));calls.push(ctx);
  const source=ctx.userMessageId;const out=ctx.userMessage==='用户轻拍了你一下' ? {type:'finish_task',outcome:'completed',speech:'嗯？'} : ctx.userMessage==='我喜欢什么？' ? {type:'finish_task',outcome:'completed',speech:'你喜欢鲸鱼。'} : ctx.userMessage==='我喜欢鲸鱼' ? {type:'finish_task',outcome:'completed',speech:'知道了。',memory_proposals:[{key:'ordinary_interest',value:'鲸鱼',sourceMessageId:source,sourceQuote:'我喜欢鲸鱼'}]} : calls.length<5?{type:'execute_plan',speech:'',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'记住了。',memory_proposals:[{key:'preferred_name',value:'测试员',sourceMessageId:source,sourceQuote:'以后叫我测试员'}]};
- res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(out)}}]}));});
+ res.setHeader('Content-Type','text/event-stream');res.end('data: '+JSON.stringify({choices:[{delta:{content:JSON.stringify(out)},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n');});
  await new Promise(r=>stub.listen(0,'127.0.0.1',r));modelPort=stub.address().port;
  const portProbe=http.createServer();await new Promise(r=>portProbe.listen(0,'127.0.0.1',r));serverPort=portProbe.address().port;await new Promise(r=>portProbe.close(r));
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-v2-'));

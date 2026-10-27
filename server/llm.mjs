@@ -71,61 +71,69 @@ export function reviewMessages(ctx) {
   return render("review.txt", { ...ctx, phase: "review" });
 }
 
-export async function callModel(messages, signal) {
+export async function callModel(messages, signal, onReasoning) {
   if (!hasKey()) throw new ModelError("NO_KEY", "服务端未配置 DEEPSEEK_API_KEY", 0);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   const abort=()=>ctl.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)ctl.abort();
-  let res;
+  let content = "", finishReason = null, usage = null, completed = false;
   try {
-    res = await fetch(API, {
+    const res = await fetch(API, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}` },
       body: JSON.stringify({
-        model: MODEL,
-        messages,
-        response_format: { type: "json_object" },
-        // 思考模式下 temperature 不生效，部分模型还会报参数冲突，就不传了
-        ...(THINKING
-          ? {
-              thinking: { type: THINKING_TYPE },
-              ...(REASONING_EFFORT ? { reasoning_effort: REASONING_EFFORT } : {}),
-            }
-          : { temperature: 0.6 }),
+        model: MODEL, messages, response_format: { type: "json_object" },
+        stream: true, stream_options: { include_usage: true },
+        ...(THINKING ? { thinking: { type: THINKING_TYPE }, ...(REASONING_EFFORT ? { reasoning_effort: REASONING_EFFORT } : {}) } : { temperature: 0.6 }),
       }),
       signal: ctl.signal,
     });
+    if (!res.ok) {
+      const data = await res.json();
+      if (res.status === 401 || res.status === 403) throw new ModelError("AUTH", "API Key 无效或没有权限", res.status);
+      if (res.status === 429) throw new ModelError("RATE_LIMIT", "模型限流，请稍后再试", res.status);
+      throw new ModelError("API_ERROR", `模型返回 ${res.status}：${JSON.stringify(data).slice(0, 120)}`, res.status);
+    }
+    if (!res.body) throw new ModelError("EMPTY", "模型未返回数据流", 0);
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const handleEvent = (event) => {
+      const data = event.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
+      if (!data) return;
+      if (data.trim() === "[DONE]") { completed = true; return; }
+      let chunk;
+      try { chunk = JSON.parse(data); } catch { throw new ModelError("INVALID_STREAM", "模型数据流格式错误", 0); }
+      if (chunk.error) throw new ModelError("API_ERROR", "模型数据流返回错误", 0);
+      if (chunk.usage) usage = chunk.usage;
+      const choice = chunk.choices?.[0];
+      if (!choice) return;
+      if (typeof choice.delta?.reasoning_content === "string" && choice.delta.reasoning_content) onReasoning?.(choice.delta.reasoning_content);
+      if (typeof choice.delta?.content === "string") content += choice.delta.content;
+      if (choice.finish_reason) finishReason = choice.finish_reason;
+    };
+    for await (const bytes of res.body) {
+      buffer += decoder.decode(bytes, { stream: true });
+      let match;
+      while ((match = /\r?\n\r?\n/.exec(buffer))) {
+        handleEvent(buffer.slice(0, match.index));
+        buffer = buffer.slice(match.index + match[0].length);
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) handleEvent(buffer);
+    if (!completed || !finishReason) throw new ModelError("INCOMPLETE_STREAM", "模型数据流中断，请重试", 0);
   } catch (err) {
-    clearTimeout(timer);
-    if (err.name === "AbortError") throw new ModelError("TIMEOUT", "模型请求超时", 0);
+    if (err instanceof ModelError) throw err;
+    if (err.name === "AbortError") throw new ModelError(signal?.aborted ? "CANCELLED" : "TIMEOUT", signal?.aborted ? "模型请求已取消" : "模型请求超时", 0);
     throw new ModelError("NETWORK", `模型连接失败：${err.message}`, 0);
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener("abort", abort);
   }
-  // Keep the timeout active while reading the response body.
-  let data;
-  try { data=await res.json(); } finally {clearTimeout(timer);signal?.removeEventListener("abort",abort);}
-  if (!res.ok) {
-    const text = JSON.stringify(data);
-    if (res.status === 401 || res.status === 403) throw new ModelError("AUTH", "API Key 无效或没有权限", res.status);
-    if (res.status === 429) throw new ModelError("RATE_LIMIT", "模型限流，请稍后再试", res.status);
-    throw new ModelError("API_ERROR", `模型返回 ${res.status}：${text.slice(0, 120)}`, res.status);
-  }
-
-  if(Number.isFinite(data?.usage?.prompt_tokens)) {
-    console.log(`[llm] prompt_tokens=${data.usage.prompt_tokens} completion_tokens=${data.usage.completion_tokens ?? 'unknown'}`);
-  }
-  const choice = data?.choices?.[0];
-  const content = choice?.message?.content;
-  if (THINKING) {
-
-    const reasoningTokens = data?.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
-    console.log(
-      `[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${reasoningTokens}`,
-    );
-  }
-  if (choice?.finish_reason === "length") {
-    throw new ModelError("TRUNCATED", "模型输出被接口截断（思考与 JSON 共用输出预算）", 0);
-  }
-  if (typeof content !== "string") throw new ModelError("EMPTY", "模型返回空内容", 0);
+  if (Number.isFinite(usage?.prompt_tokens)) console.log(`[llm] prompt_tokens=${usage.prompt_tokens} completion_tokens=${usage.completion_tokens ?? 'unknown'}`);
+  if (THINKING) console.log(`[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${usage?.completion_tokens_details?.reasoning_tokens ?? 0}`);
+  if (finishReason === "length") throw new ModelError("TRUNCATED", "模型输出被接口截断（思考与 JSON 共用输出预算）", 0);
+  if (!content) throw new ModelError("EMPTY", "模型返回空内容", 0);
   let parsed;
   try {
     parsed = JSON.parse(content);

@@ -690,7 +690,8 @@ async function runPlanning(task, ws) {
 
     noteLlmActivity();
     if(task.origin!=="user"&&!claimAutoCall()){endTask("autonomous call budget");return;}
-    const out = await callModel(planningMessages(ctx),task.abort?.signal);
+    send(ws, "reasoning_start", { taskId: task.id });
+    const out = await callModel(planningMessages(ctx),task.abort?.signal, text => { if (session.task === task && !task.abort?.signal.aborted) send(ws, "reasoning_delta", { taskId: task.id, text }); });
     applyOutput(ws, task, out);
   } catch (err) {
     fail(ws, task, err);
@@ -1104,7 +1105,8 @@ wss.on("connection", (ws, req) => {
 
             noteLlmActivity();
             if(task.origin!=="user"&&!claimAutoCall()){endTask("autonomous call budget");return;}
-            const out = await callModel(reviewMessages(ctx),task.abort?.signal);
+            send(ws, "reasoning_start", { taskId: task.id });
+            const out = await callModel(reviewMessages(ctx),task.abort?.signal, text => { if (session.task === task && !task.abort?.signal.aborted) send(ws, "reasoning_delta", { taskId: task.id, text }); });
             applyOutput(ws, task, out);
           } catch (err) {
             fail(ws, task, err);

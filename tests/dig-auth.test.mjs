@@ -66,8 +66,8 @@ const stub = http.createServer((req, res) => {
             memory_proposals: [],
           }
         : { type: "finish_task", outcome: "completed", speech: "", memory_proposals: [] };
-    res.writeHead(200, { "content-type": "application/json" }).end(
-      JSON.stringify({ choices: [{ message: { content: JSON.stringify(out) } }], usage: {} }),
+    res.writeHead(200, { "content-type": "text/event-stream" }).end(
+      "data: " + JSON.stringify({ choices: [{ delta: { content: JSON.stringify(out) }, finish_reason: "stop" }] }) + "\n\ndata: [DONE]\n\n",
     );
   });
 });

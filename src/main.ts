@@ -197,6 +197,18 @@ async function boot() {
   thinkBadge.className = "thinking-badge";
   thinkBadge.innerHTML = "<i></i><i></i><i></i>";
   document.body.appendChild(thinkBadge);
+  const thinkText = document.createElement("div");
+  thinkText.className = "thinking-stream";
+  thinkBadge.appendChild(thinkText);
+  let reasoningTask = "";
+  let reasoningText = "";
+  const updateReasoning = () => {
+    thinkBadge.classList.toggle("with-reasoning", chat.showReasoning);
+    thinkText.textContent = reasoningText || "正在思考…";
+    thinkText.scrollTop = thinkText.scrollHeight;
+  };
+  chat.onShowReasoning = updateReasoning;
+  updateReasoning();
   let llmThinking = false;
   const setLlmThinking = (on: boolean) => {
     llmThinking = on;
@@ -895,6 +907,8 @@ async function boot() {
         activePlan = null;
       });
     },
+    onReasoningStart: taskId => { reasoningTask = taskId; reasoningText = ""; updateReasoning(); },
+    onReasoningDelta: (taskId, text) => { if (taskId !== reasoningTask) return; reasoningText = (reasoningText + text).slice(-12000); updateReasoning(); },
     onReply: (msg) => {
       errorActive = false;
       setError(false);
