@@ -1,0 +1,144 @@
+{
+  "version": "basin-audio-v3",
+  "status": "user selected source A; source-order event roles confirmed",
+  "runtimeFormat": "WAV PCM16 mono 48kHz",
+  "source": {
+    "id": "443876",
+    "author": "toddcircle",
+    "page": "https://freesound.org/people/toddcircle/sounds/443876/",
+    "download": "https://cdn.freesound.org/previews/443/443876_9133009-hq.mp3",
+    "licenseURL": "http://creativecommons.org/publicdomain/zero/1.0/",
+    "title": "hit large metal bowl.wav",
+    "license": "CC0-1.0",
+    "downloadFormat": "public HQ MP3 preview decoded to WAV",
+    "sha256": "cd12be82ff372527c8e0db1f96ab169b4c87e597277d97c3367a120a900f3327"
+  },
+  "files": [
+    {
+      "file": "basin_collision_01.wav",
+      "category": "basin_collision",
+      "sourceTake": 1,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bits": 16,
+      "durationSeconds": 3.53,
+      "peakDbFS": -6.000000000000001,
+      "rmsDbFS": -34.88909830309696,
+      "clippedSamples": 0,
+      "attackCount": 1,
+      "onsetSeconds": 0.005,
+      "sourceRangeSeconds": [
+        0.23,
+        3.76
+      ],
+      "gainLinear": 0.6924621641825229,
+      "fadeInSeconds": 0.0005,
+      "fadeOutSeconds": 0.06,
+      "processing": "isolate one original strike, remove tail DC offset, peak normalize to -6 dBFS, short edge fades; preserve source pitch, speed and room decay",
+      "sha256": "0ddd1360d69732bc7303af1e3838f78cdf08f8181c27bb85d12a4353bcf5f70d"
+    },
+    {
+      "file": "basin_collision_02.wav",
+      "category": "basin_collision",
+      "sourceTake": 2,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bits": 16,
+      "durationSeconds": 3.505,
+      "peakDbFS": -6.000000000000001,
+      "rmsDbFS": -32.18757331032739,
+      "clippedSamples": 0,
+      "attackCount": 1,
+      "onsetSeconds": 0.005,
+      "sourceRangeSeconds": [
+        3.77,
+        7.275
+      ],
+      "gainLinear": 0.5793771246407284,
+      "fadeInSeconds": 0.0005,
+      "fadeOutSeconds": 0.06,
+      "processing": "isolate one original strike, remove tail DC offset, peak normalize to -6 dBFS, short edge fades; preserve source pitch, speed and room decay",
+      "sha256": "437331dcdb5403f6bce5dc7dd30a0aa7e76f57b05fafdd44687d9fc8e23910ef"
+    },
+    {
+      "file": "metal_knock_01.wav",
+      "category": "metal_knock",
+      "sourceTake": 3,
+      "sampleRate": 48000,
+      "channels": 1,
+      "bits": 16,
+      "durationSeconds": 4.281166666666667,
+      "peakDbFS": -6.000000000000001,
+      "rmsDbFS": -34.33482091597453,
+      "clippedSamples": 0,
+      "attackCount": 1,
+      "onsetSeconds": 0.005,
+      "sourceRangeSeconds": [
+        7.285,
+        11.566166666666666
+      ],
+      "gainLinear": 0.6407135946221743,
+      "fadeInSeconds": 0.0005,
+      "fadeOutSeconds": 0.06,
+      "processing": "isolate one original strike, remove tail DC offset, peak normalize to -6 dBFS, short edge fades; preserve source pitch, speed and room decay",
+      "sha256": "b464601907518c1255a9f2f8d4f42c173ee35fc5cefdcd2e7364902d3fbf69da"
+    }
+  ],
+  "eventGroups": {
+    "basin_floor": {
+      "files": [
+        "basin_collision_01.wav",
+        "basin_collision_02.wav"
+      ],
+      "selection": "uniform random per accepted physical contact event",
+      "weights": [
+        0.5,
+        0.5
+      ]
+    },
+    "basin_edge": {
+      "files": [
+        "basin_collision_01.wav",
+        "basin_collision_02.wav"
+      ],
+      "selection": "uniform random per accepted physical contact event",
+      "weights": [
+        0.5,
+        0.5
+      ]
+    },
+    "metal_knock": {
+      "files": [
+        "metal_knock_01.wav"
+      ],
+      "selection": "fixed; only original third strike"
+    }
+  },
+  "runtimePolicy": {
+    "randomPitchRange": [
+      1,
+      1
+    ],
+    "timeScale": 1,
+    "collisionGain": "derive from pre-impact normal closing speed using existing validated runtime curve",
+    "knockTrigger": "knock_contact at 0.24 seconds within knock_basin_hit",
+    "dedupe": "actionInstanceId + hitIndex for deliberate knock; collision pair/event ID for physical contacts",
+    "deliberateKnockSuppressesDuplicateCollisionSound": true,
+    "noHistoricalEventReplay": true,
+    "maxConcurrentVoices": 6,
+    "suggestedMaxVoiceGain": 0.7,
+    "preserveTailAfterVisualActionEnd": true
+  },
+  "integration": {
+    "compatibleActionPackage": "playful-interaction-v2",
+    "replaceAudioCatalog": true,
+    "loadFilesFromEventGroups": true,
+    "doNotAssumeFourVariantsPerCategory": true,
+    "doNotKeepRejectedV2SoundsInActivePools": true,
+    "serverDeployed": false
+  },
+  "sourceLimitations": [
+    "Source is a large metal bowl recording; author does not identify the striking implement. It is the user-approved basin foley, not a verified recording of the exact in-game basin and metal ladle.",
+    "The three variants are three distinct strikes in one recording; collision takes 1 and 2, deliberate spoon knock take 3."
+  ]
+}

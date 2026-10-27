@@ -56,3 +56,10 @@ test("结束按钮：没有对局时返回 NO_GAME", () => {
   assert.equal(result.ok, false);
   assert.equal(result.reason, "NO_GAME");
 });
+
+ test("提交幂等跨重启：同一授权不会再挖一次",()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-dig-ledger-'));const file=path.join(dir,'game.json');
+ try{const games=new GameService(file),board=games.start('idempotent');const first=games.commit({actionInstanceId:'dig-unique',gameId:board.gameId,row:3,col:3,expectedRevision:0});
+ const reloaded=new GameService(file);const retry=reloaded.commit({actionInstanceId:'dig-unique',gameId:board.gameId,row:3,col:3,expectedRevision:0});assert.equal(retry.revision,first.revision);assert.equal(reloaded.public().revision,first.revision);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+ });

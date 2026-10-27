@@ -36,12 +36,44 @@ export interface StepResult {
   flightTime: number;
 }
 
+export interface Impact {id:string;pair:string[];normalSpeed:number;point:{x:number;y:number;z:number}|null;}
+type Shared={world:RAPIER.World;queue:RAPIER.EventQueue;ids:Map<number,string>;accumulator:number;sequence:number;last:Map<string,number>;time:number;};
+let shared:Shared|null=null;
+let impactListener:((event:Impact)=>void)|null=null;
+export function onPropImpact(fn:(event:Impact)=>void){impactListener=fn;}
+/** One world step per rendered frame, never once per item. Measure incident point velocities before solving. */
+export function stepPropWorld(dt:number){
+  if(!shared)return;const s=shared;s.accumulator+=Math.min(Math.max(dt,0),MAX_FRAME);
+  while(s.accumulator>=STEP){
+    const before=new Map<number,{v:THREE.Vector3;w:THREE.Vector3;p:THREE.Vector3}>();
+    s.world.bodies.forEach(b=>{const v=b.linvel(),w=b.angvel(),p=b.translation();before.set(b.handle,{v:new THREE.Vector3(v.x,v.y,v.z),w:new THREE.Vector3(w.x,w.y,w.z),p:new THREE.Vector3(p.x,p.y,p.z)});});
+    s.world.step(s.queue);s.time+=STEP;s.accumulator-=STEP;
+    s.queue.drainCollisionEvents((a,b,started)=>{
+      if(!started)return;const pair=[s.ids.get(a)??'environment',s.ids.get(b)??'environment'];if(!pair.includes('basin'))return;
+      const ca=s.world.getCollider(a),cb=s.world.getCollider(b);if(!ca||!cb)return;
+      let speed=0,point:Impact['point']=null;
+      s.world.contactPair(ca,cb,(m,flipped)=>{
+        const n=m.normal();const normal=new THREE.Vector3(n.x,n.y,n.z).multiplyScalar(flipped?-1:1);
+        const hit=m.numSolverContacts()>0?m.solverContactPoint(0):null;
+        if(hit)point={x:hit.x,y:hit.y,z:hit.z};
+        const velocity=(c:RAPIER.Collider)=>{const body=c.parent();const info=body?before.get(body.handle):null;if(!info)return new THREE.Vector3();const v=info.v.clone();if(hit)v.add(info.w.clone().cross(new THREE.Vector3(hit.x,hit.y,hit.z).sub(info.p)));return v;};
+        speed=Math.max(speed,velocity(ca).sub(velocity(cb)).dot(normal));
+      });
+      const key=[a,b].sort().join(':');if(speed<.18||s.time-(s.last.get(key)??-Infinity)<.075)return;
+      s.last.set(key,s.time);impactListener?.({id:`impact-${++s.sequence}`,pair,normalSpeed:speed,point});
+    });
+  }
+}
+
 /**
  * 投掷飞行用的刚体世界：一个静态地面 + 一个盆的凸包碰撞体。
  * 只负责“脱手之后”的权威状态，动画期间盆由挂接/曲线驱动。
  */
 export class BasinPhysics {
   private world: RAPIER.World;
+  private sharedId?:string;
+  private staticBody:RAPIER.RigidBody|null=null;
+  private staticKey="";
   private body: RAPIER.RigidBody | null = null;
   private accumulator = 0;
   private calmFor = 0;
@@ -52,12 +84,15 @@ export class BasinPhysics {
   private readonly lastQuaternion = new THREE.Quaternion();
   private readonly shape: "cylinder" | "box";
 
-  private constructor(hull: Float32Array, half: number, shape: "cylinder" | "box" = "cylinder") {
+  private constructor(hull: Float32Array, half: number, shape: "cylinder" | "box" = "cylinder", sharedId?:string) {
     this.hull = hull;
     this.shape = shape;
+    this.sharedId=sharedId;
+    if(sharedId&&shared){this.world=shared.world;return;}
     const gravity = { x: 0, y: -9.81, z: 0 };
     this.world = new RAPIER.World(gravity);
     this.world.timestep = STEP;
+    if(sharedId)shared={world:this.world,queue:new RAPIER.EventQueue(true),ids:new Map(),accumulator:0,sequence:0,last:new Map(),time:0};
     const ground = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, FLOOR_Y - 0.1, 0));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(half + 1, 0.1, half + 1).setFriction(0.9), ground);
     // 空气墙：四面固定挡板，把盆关在场地里（角色边界是 half，墙再往外半米）
@@ -81,9 +116,9 @@ export class BasinPhysics {
   }
 
   /** 碰撞体形状：盆用外接圆柱，饭勺这类细长物品用外接长方体 */
-  static async create(hull: Float32Array, half = ARENA_HALF, shape: "cylinder" | "box" = "cylinder"): Promise<BasinPhysics> {
+  static async create(hull: Float32Array, half = ARENA_HALF, shape: "cylinder" | "box" = "cylinder", sharedId?:string): Promise<BasinPhysics> {
     await RAPIER.init();
-    const physics = new BasinPhysics(hull, half, shape);
+    const physics = new BasinPhysics(hull, half, shape,sharedId);
     physics.initialised = true;
     return physics;
   }
@@ -98,6 +133,7 @@ export class BasinPhysics {
 
   launch(init: FlightInit): void {
     this.stop();
+    this.syncStatic(null);
     const body = this.world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
         .setTranslation(init.position.x, init.position.y, init.position.z)
@@ -109,7 +145,8 @@ export class BasinPhysics {
         .setCanSleep(true),
     );
     body.enableCcd(true);
-    this.world.createCollider(this.colliderDesc().setRestitution(0.15).setFriction(0.9).setDensity(180), body);
+    const collider=this.world.createCollider(this.colliderDesc().setRestitution(0.15).setFriction(0.9).setDensity(this.sharedId==='rice_scoop'?400:180).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
+    if(this.sharedId&&shared)shared.ids.set(collider.handle,this.sharedId);
     this.body = body;
     this.accumulator = 0;
     this.calmFor = 0;
@@ -138,7 +175,7 @@ export class BasinPhysics {
   step(dt: number): StepResult | null {
     const body = this.body;
     if (!body) return null;
-    this.accumulator += Math.min(dt, MAX_FRAME);
+    if(!this.sharedId)this.accumulator += Math.min(dt, MAX_FRAME);
     while (this.accumulator >= STEP) {
       this.world.step();
       this.accumulator -= STEP;
@@ -175,8 +212,19 @@ export class BasinPhysics {
     };
   }
 
+  syncStatic(pose:Pose|null){
+    if(!this.sharedId)return;
+    if(!pose){if(this.staticBody){for(let i=0;i<this.staticBody.numColliders();i++)shared?.ids.delete(this.staticBody.collider(i).handle);this.world.removeRigidBody(this.staticBody);this.staticBody=null;}this.staticKey='';return;}
+    const key=[...pose.position.toArray(),...pose.quaternion.toArray()].map(n=>n.toFixed(4)).join(',');
+    if(key===this.staticKey)return;this.syncStatic(null);this.staticKey=key;
+    const b=this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(pose.position.x,pose.position.y,pose.position.z).setRotation(pose.quaternion));
+    const c=this.world.createCollider(this.colliderDesc().setRestitution(.15).setFriction(.9).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),b);
+    this.staticBody=b;shared?.ids.set(c.handle,this.sharedId);
+  }
+
   stop(): void {
     if (!this.body) return;
+    for(let i=0;i<this.body.numColliders();i++)shared?.ids.delete(this.body.collider(i).handle);
     this.world.removeRigidBody(this.body);
     this.body = null;
   }

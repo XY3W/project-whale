@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import "./style.css";
+import { digAim } from "../shared/dig-aim.mjs";
+import { PropAudio } from "./audio/PropAudio";
+import { mountControls } from "./ui/Controls";
+import { stepPropWorld, onPropImpact } from "./prop/basinPhysics";
 import { Stage } from "./core/Stage";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
@@ -19,10 +23,10 @@ import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView } from "./
 import { MinesweeperBoard } from "./game/MinesweeperBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
-const MODEL = "/models/minesweeper-v1/character_minesweeper.glb";
-const BASIN_ASSET_DIR = "/models/minesweeper-v1";
-const BASIN_MODEL = "/models/minesweeper-v1/steel_basin_v2.glb";
-const SCOOP_MODEL = "/models/minesweeper-v1/rice_scoop_straight_v3.glb";
+const MODEL = "/models/playful-v2/character_playful.glb";
+const BASIN_ASSET_DIR = "/models/playful-v2";
+const BASIN_MODEL = "/models/playful-v2/steel_basin_v2.glb";
+const SCOOP_MODEL = "/models/playful-v2/rice_scoop_straight_v3.glb";
 const AREA_HALF = 3.7;
 const DEBUG = new URLSearchParams(location.search).has("debug");
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -267,7 +271,9 @@ async function boot() {
     }
   };
 
+  let turnTravel=0;
   const startTurn = (toYaw: number, then: (() => void) | null) => {
+    turnTravel=0;
     turn.from = root.rotation.y;
     turn.to = toYaw;
     turn.t = 0;
@@ -418,18 +424,20 @@ async function boot() {
         () => Math.abs(root.rotation.y - from),
         { idleMs: 15000, maxMs: 120000 },
       );
+      return turnTravel*180/Math.PI;
     },
     play: async (id) => {
       player.gesture(id);
       await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
     },
     tail: async (style, dur) => {
+      const epoch=bridgeEpoch;
       player.setTail(style === "tail_swish");
       await new Promise((r) => setTimeout(r, dur * 1000));
-      player.setTail(false);
+      if(epoch===bridgeEpoch)player.setTail(false);
     },
     sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-    isMoving: () => player.state.walking || phase !== "idle",
+    isMoving: () => player.moving || phase !== "idle" || player.performing!==null,
   };
   const degYaw = () => (root.rotation.y * 180) / Math.PI;
   const items = new Map<string, PropItem>([["basin", basin], ["rice_scoop", scoop]]);
@@ -517,11 +525,25 @@ async function boot() {
     };
   };
 
+  const audio=new PropAudio();
+  const controls=mountControls(client,audio);
+  onPropImpact(event=>audio.play('collision',event.id,Math.min(1,event.normalSpeed*.32)));
+  let bridgeEpoch=0;
+  let currentHoldGrip='inward';
+  const updateBasinHold=()=>{
+    if(currentHoldGrip===basin.grip)return;currentHoldGrip=basin.grip;
+    player.setHold('left_hand',gltf.animations.find(c=>c.name===(basin.grip==='outward'?'hold_basin_outward':'hold_basin'))??null);
+  };
+  const stopMotion=()=>{
+    bridgeEpoch++;destination=null;postTurn=null;phase='idle';player.haltMovement();player.clearGesture();player.setTail(false);player.cancelPerformance();basin.cancel();scoop.cancel();
+  };
+
   const basinBridge: BasinBridge = {
     items: () => [...items.values()].map((item) => item.snapshot() as unknown as BasinView),
     snapshot: (objectId) => (itemOf(objectId)?.snapshot() as unknown as BasinView) ?? null,
     alignment: (objectId) => alignInfo(objectId),
     upright: async (objectId) => {
+      const epoch=bridgeEpoch;
       const item = itemOf(objectId);
       if (!item) return { ok: false, moved: 0, rotatedDeg: 0 };
       const started = item.startUpright(0.45);
@@ -531,7 +553,7 @@ async function boot() {
       while (item.uprighting && performance.now() - t0 < 20000) {
         await new Promise((r) => setTimeout(r, 50));
       }
-      return { ...item.lastUpright, ok: !item.uprighting && item.upright };
+      return { ...item.lastUpright, ok: epoch===bridgeEpoch&&!item.uprighting && item.upright };
     },
     reset: (objectId) => {
       player.clearGesture();
@@ -550,6 +572,8 @@ async function boot() {
     canStart: (objectId, actionId) => itemOf(objectId)?.canStart(actionId) ?? false,
     cancel: () => { player.cancelPerformance(); },
     align: async (objectId) => {
+      const epoch=bridgeEpoch;
+      const checked=async(p:Promise<void|number>)=>{await p;if(epoch!==bridgeEpoch)throw Error('CANCELLED');};
       const item = itemOf(objectId);
       if (!item) return { ok: false, plan: null, error: "OBJECT_NOT_FOUND" };
       const reference = referenceOf(objectId);
@@ -560,20 +584,20 @@ async function boot() {
         const finalYaw = computed.yawDeg;
         const stand = { x: computed.x, z: computed.z };
         const bearing = (Math.atan2(stand.x - root.position.x, stand.z - root.position.z) * 180) / Math.PI;
-        await loco.turn(signedDeltaDeg(degYaw(), bearing));
+        await checked(loco.turn!(signedDeltaDeg(degYaw(), bearing)));
         // 用 walk + walk_adjust 把点落到 1cm 以内
         for (let step = 0; step < 16; step++) {
           const remaining = Math.hypot(stand.x - root.position.x, stand.z - root.position.z);
           if (remaining <= 0.01) break;
           const walkDistances = [1.89, 1.71, 1.53, 1.35, 1.17, 0.99, 0.81, 0.63, 0.45, 0.27, 0.09];
           const walk = walkDistances.find((d) => d <= remaining + 1e-6);
-          if (walk !== undefined) { await loco.walk(walk); continue; }
+          if (walk !== undefined) { await checked(loco.walk!(walk)); continue; }
           const adjusts = [0.08, 0.06, 0.04, 0.02];
           const adjust = adjusts.find((d) => d <= remaining + 1e-6);
           if (adjust === undefined || !loco.adjust) break;
-          await loco.adjust(adjust);
+          await checked(loco.adjust!(adjust));
         }
-        await loco.turn(signedDeltaDeg(degYaw(), finalYaw));
+        await checked(loco.turn!(signedDeltaDeg(degYaw(), finalYaw)));
         await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
         const check = alignInfo(objectId);
         return {
@@ -596,9 +620,9 @@ async function boot() {
           // 走近一次后可能还差一点（残差、恢复位置的时序），再按新位姿小修一到两次
           let check = alignInfo(objectId);
           for (let attempt = 0; attempt < 3 && !check.ok; attempt++) {
-            if (Math.abs(plan.turn1Deg) > 0.01) await loco.turn(plan.turn1Deg);
-            if (plan.distanceM > 0) await loco.walk(plan.distanceM);
-            if (Math.abs(plan.turn2Deg) > 0.01) await loco.turn(plan.turn2Deg);
+            if (Math.abs(plan.turn1Deg) > 0.01) await checked(loco.turn!(plan.turn1Deg));
+            if (plan.distanceM > 0) await checked(loco.walk!(plan.distanceM));
+            if (Math.abs(plan.turn2Deg) > 0.01) await checked(loco.turn!(plan.turn2Deg));
             // 等一帧再读，避免收步/转身归一化还没落到读数上
             await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
             check = alignInfo(objectId);
@@ -629,23 +653,43 @@ async function boot() {
         }
         if (plan.error === "NO_SUPPORTED_DISTANCE" && plan.direct > plan.reach + 1.89 + 0.2) {
           const bearing = (Math.atan2(item.position.x - root.position.x, item.position.z - root.position.z) * 180) / Math.PI;
-          await loco.turn(signedDeltaDeg(degYaw(), bearing));
-          await loco.walk(1.89);
+          await checked(loco.turn!(signedDeltaDeg(degYaw(), bearing)));
+          await checked(loco.walk!(1.89));
           continue;
         }
         return { ok: false, plan: null, error: plan.error };
       }
       return { ok: false, plan: null, error: "TOO_FAR" };
     },
+    setGrip: async(grip)=>{
+      if(basin.state!=='held'||phase!=='idle'||player.moving||player.performing)return false;
+      if(basin.grip===grip)return true;
+      const epoch=bridgeEpoch;
+      const id=grip==='outward'?'basin_grip_outward':'basin_grip_inward';
+      const events=basinAssets.catalog.actions.find(a=>a.id===id)?.events??[];
+      const ok=await player.perform(id,events,type=>{if(epoch===bridgeEpoch&&type==='grip_commit'){basin.setGrip(grip);updateBasinHold();}},'left_arm');
+      updateBasinHold();return ok&&epoch===bridgeEpoch&&basin.grip===grip;
+    },
+    knock: async(count,stepId)=>{
+      const result={requestedCount:count,committedCount:0,stopReason:'PRECONDITION_FAILED'};
+      if(basin.state!=='held'||basin.grip!=='outward'||scoop.state!=='held'||phase!=='idle'||player.moving||player.performing)return result;
+      const epoch=bridgeEpoch,id=`${activePlan?.planId??crypto.randomUUID()}:${stepId}`;
+      const ok=await player.performKnocks(count,index=>{
+        if(epoch!==bridgeEpoch||basin.state!=='held'||basin.grip!=='outward'||scoop.state!=='held')return;
+        result.committedCount=index;audio.play('knock',`${id}:${index}`);
+      });
+      result.stopReason=ok&&epoch===bridgeEpoch?'completed':'cancelled';return result;
+    },
     perform: async (objectId, actionId, spec) => {
-      const item = itemOf(objectId);
-      if (!item) return false;
-      if (!item.begin(actionId, spec)) return false;
-      const meta = basinCatalog.actions.find((a) => a.id === actionId);
-      const events = (meta?.events ?? []).map((e) => ({ time: e.time, type: e.type }));
-      const ok = await player.perform(actionId, events, (type) => item.handleEvent(type), meta?.layer ?? "full_body");
-      item.finish(ok);
-      return ok;
+      const epoch=bridgeEpoch;
+      const item=items.get(objectId);if(!item||player.moving||phase!=='idle')return false;
+      if(objectId==='basin'&&['wear_basin','throw_basin'].includes(actionId)&&basin.grip!=='inward')return false;
+      if(!item.begin(actionId,spec))return false;
+      const meta=basinAssets.catalog.actions.find(a=>a.id===actionId);
+      const ok=await player.perform(actionId,meta?.events??[],type=>{
+        if(epoch!==bridgeEpoch)return;root.updateMatrixWorld(true);item.update(0,player.performanceTime);item.handleEvent(type);
+      },meta?.layer??'full_body');
+      if(epoch===bridgeEpoch)item.finish(ok);updateBasinHold();return ok&&epoch===bridgeEpoch;
     },
   };
   loco.basin = basinBridge;
@@ -658,7 +702,7 @@ async function boot() {
   };
 
   /** 当前正在执行的计划：dig 提交要带上任务/计划/授权，服务端据此校验 */
-  let activePlan: { taskId: string; generation?: number; planId?: string; digAuthId: string | null } | null = null;
+  let activePlan: { taskId: string; generation?: number; planId?: string; leaseEpoch?:number; digAuthId: string | null } | null = null;
 
   const digBridge: DigBridge = {
     current: () => gameBoard,
@@ -692,17 +736,28 @@ async function boot() {
           detail: { error: "NOT_IN_CELL", distance_m: +distance.toFixed(3), targetCellCenter: center, position: { x: +root.position.x.toFixed(3), z: +root.position.z.toFixed(3) } },
         };
       }
+      const cellSize=board.cellSize??.5;
+      const aim=digAim({x:root.position.x,z:root.position.z,yawDeg:degYaw()});
+      if(Math.abs(aim.tip.x-center.x)>cellSize/2-.001||Math.abs(aim.tip.z-center.z)>cellSize/2-.001)return {ok:false,reason:"PRECONDITION_FAILED",detail:{error:"TOOL_NOT_IN_CELL",projectedTip:aim.tip,suggestedRoot:{x:center.x+aim.standOffset.x,z:center.z+aim.standOffset.z},keepYawDeg:degYaw()}};
       if (phase !== "idle" || player.state.walking || player.performing !== null) {
         return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NOT_STILL" } };
       }
       return { ok: true };
     },
     perform: async (step, stepId) => {
+      const epoch=bridgeEpoch;
       const meta = basinCatalog.actions.find((a) => a.id === "dig");
       let pending: Promise<Record<string, unknown>> | null = null;
       await player.perform("dig", (meta?.events ?? []).map((e) => ({ time: e.time, type: e.type })), (type) => {
-        if (type !== "dig_contact") return;
+        if (type !== "dig_contact" || epoch!==bridgeEpoch || scoop.state!=="held" || phase!=="idle" || player.moving) return;
+        root.updateMatrixWorld(true);scoop.update(0,player.performanceTime);scoop.object.updateMatrixWorld(true);
+        const proxy=basinCatalog.props?.rice_scoop.collisionProxies?.at(-1)?.center??[0,.048384532,-.228484109];
+        const tip=scoop.object.localToWorld(new THREE.Vector3(proxy[0],proxy[1],proxy[2]));
+        const size=gameBoard?.cellSize??.5,half=gameBoard?.boardHalf??4;
+        if(Math.floor((tip.x+half)/size)!==step.col||Math.floor((tip.z+half)/size)!==step.row)return;
+        client.sendStateSnapshot(snapshot());
         pending = client.commitDig({
+          toolPoint:{x:tip.x,z:tip.z},
           gameId: step.game_id,
           row: step.row,
           col: step.col,
@@ -710,6 +765,7 @@ async function boot() {
           x: root.position.x,
           z: root.position.z,
           digAuthId: activePlan?.digAuthId ?? null,
+          leaseEpoch:activePlan?.leaseEpoch,
           taskId: activePlan?.taskId ?? null,
           generation: activePlan?.generation ?? null,
           planId: activePlan?.planId ?? null,
@@ -764,16 +820,14 @@ async function boot() {
   let currentExecutor: ActionExecutor | null = null;
   const makeExecutor = () => {
     const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
-    ex.onCancel(() => {
-      player.clearGesture();
-      player.setWalking(false);
-      basinBridge.cancel();
-    });
+    ex.onCancel(stopMotion);
     currentExecutor = ex;
     return ex;
   };
   let roamBusy = false;
   let planChain: Promise<void> = Promise.resolve();
+  const seenPlans=new Set<string>();
+  const cancelledTasks=new Set<string>();
   let errorActive = false;
 
   // ---- 单一动作调度入口（P0-A）----
@@ -816,6 +870,8 @@ async function boot() {
 
   client.on({
     onPlan: (msg) => {
+      if(msg.planId&&seenPlans.has(msg.planId))return;
+      if(msg.planId){seenPlans.add(msg.planId);if(seenPlans.size>200)seenPlans.delete(seenPlans.values().next().value!);}
       chat.setError(null);
       if (msg.speech) {
         chat.addMessage("whale", msg.speech);
@@ -823,16 +879,18 @@ async function boot() {
       }
       // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
       planChain = planChain.then(async () => {
+        if(cancelledTasks.has(msg.taskId)||readOnly||msg.leaseEpoch!==client.leaseEpoch)return;
         // 这次挖掘提交要带上的任务/计划/授权；runOwned 结束时清空
         activePlan = {
           taskId: msg.taskId,
           generation: msg.generation,
           planId: msg.planId,
           digAuthId: msg.digAuthId ?? null,
+          leaseEpoch:msg.leaseEpoch,
         };
         const result = await runOwned("plan", msg.plan as unknown as Plan);
         if (result) {
-          client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId }, snapshot());
+          client.sendPlanResult(msg.taskId, result, { generation: msg.generation, planId: msg.planId, leaseEpoch:msg.leaseEpoch }, snapshot());
         } else {
           // 接管失败（身体停不下来）也必须回报，否则服务端会一直等 plan_result 到预算耗尽
           client.sendPlanResult(
@@ -854,7 +912,7 @@ async function boot() {
                 },
               ],
             },
-            { generation: msg.generation, planId: msg.planId },
+            { generation: msg.generation, planId: msg.planId, leaseEpoch:msg.leaseEpoch },
             snapshot(),
           );
         }
@@ -865,11 +923,17 @@ async function boot() {
     onReply: (msg) => {
       errorActive = false;
       setError(false);
-      chat.addMessage("whale", msg.speech);
-      speak(msg.speech);
+      if(msg.speech){chat.addMessage("whale", msg.speech);speak(msg.speech);}
     },
-    onTaskState: (phase) => {
-      taskActive = phase === "thinking" || phase === "executing" || phase === "checking";
+    onMode:value=>controls.updateMode(value),
+    onTaskState: (phase,taskId) => {
+      if((phase==='thinking'||phase==='checking')&&motionOwner==='roaming'){currentExecutor?.cancel();}
+      if(phase==='thinking'&&taskId){void waitBodySettled().then(ok=>{if(ok)client.ready(taskId,snapshot());});}
+      if(phase==='stopping'){
+        currentExecutor?.cancel();stopMotion();
+        void waitBodySettled().then(ok=>{if(ok&&taskId)client.acknowledgeStop(taskId,snapshot());});
+      }
+      taskActive = phase === "thinking" || phase === "executing" || phase === "checking" || phase === "stopping" || phase === "unknown";
       chat.setThinking(taskActive);
       // 只有“等模型”的阶段才亮头顶图标；executing 是她在动，不是在想
       setLlmThinking(phase === "thinking" || phase === "checking");
@@ -881,15 +945,17 @@ async function boot() {
       chat.setThinking(false);
       if (code !== "BUSY") setError(true);
     },
-    onCancel: () => {
+    onCancel: (taskId) => {
+      cancelledTasks.add(taskId);
       currentExecutor?.cancel();
       chat.setThinking(false);
     },
     onReadOnly: (ro) => {
-      readOnly = ro;
+      readOnly = ro;controls.readOnly(ro);
+      if(ro){currentExecutor?.cancel();stopMotion();}
       chat.setError(ro ? "另一个页面正在执行角色，这里只读" : null);
     },
-    onReconcile: () => client.sendReconciled(snapshot()),
+    onReconcile: () => {currentExecutor?.cancel();stopMotion();void waitBodySettled().then(ok=>{if(ok)client.sendReconciled(snapshot());});},
     onSnapshot: (s) => {
       if (stateApplied) return;
       stateApplied = true;
@@ -977,7 +1043,8 @@ async function boot() {
         turn.t += dt;
         const u = Math.min(1, turn.t / turn.dur);
         const e = u * u * (3 - 2 * u);
-        root.rotation.y = turn.from + (turn.to - turn.from) * e;
+        turnTravel=(turn.to-turn.from)*e;
+        root.rotation.y = turn.from + turnTravel;
         if (u >= 1) {
           // 朝向归一化到 (-π, π]：累计多次转向后避免出现 400° 之类的数值
           root.rotation.y = Math.atan2(Math.sin(root.rotation.y), Math.cos(root.rotation.y));
@@ -1086,10 +1153,12 @@ async function boot() {
 
     root.updateMatrixWorld(true);
     board.tick();
+    stepPropWorld(dt);
     basin.update(dt, player.performanceTime);
     scoop.update(dt, player.performanceTime);
     // 持仓层只看“这只手现在有没有东西”；哪只手要被动作接管由动作的 layer 决定，
     // 不能用“是否正在表演”一刀切——挖掘不含左臂，盆的姿势必须保留。
+    updateBasinHold();
     player.setHoldEnabled("left_hand", basin.mode === "hand");
     player.setHoldEnabled("right_hand", scoop.mode === "hand");
 
@@ -1101,11 +1170,20 @@ async function boot() {
     if (document.visibilityState === "hidden" && !readOnly) client.sendStateSnapshot(snapshot());
   });
 
+  if(DEBUG){
+    const tools=document.createElement('div');tools.style.cssText='position:fixed;left:18px;bottom:16px;z-index:100;display:flex;gap:6px;align-items:center;background:white;padding:10px;border-radius:8px';
+    const output=document.createElement('span');output.textContent='动作验收';
+    const setup=document.createElement('button');setup.textContent='验收双持准备';setup.onclick=()=>{currentExecutor?.cancel();stopMotion();basin.restore({state:'held',position:[0,1,0],grip:'outward'});scoop.restore({state:'held',position:[0,1,0]});updateBasinHold();output.textContent='双持就绪';};
+    tools.append(setup);
+    for(const count of [1,10,32]){const b=document.createElement('button');b.textContent=`验收敲${count}下`;b.onclick=()=>{output.textContent='执行中';void runOwned('plan',{steps:[{action:'knock_basin',object_id:'basin',tool_id:'rice_scoop',count,tempo:'normal'}]}).then(r=>{output.textContent=JSON.stringify(r?.steps[0]?.actual??r);});};tools.append(b);}
+    const cancel=document.createElement('button');cancel.textContent='停止验收';cancel.onclick=()=>currentExecutor?.cancel();tools.append(cancel,output);document.body.append(tools);
+  }
+
   loading.classList.add("done");
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board, THREE,
+    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE,
     getGame: () => gameBoard,
     /** 探针用：当前客户端快照（与服务端同步的同一份） */
     snapshot,

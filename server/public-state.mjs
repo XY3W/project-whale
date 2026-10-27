@@ -5,11 +5,12 @@
  * - 不含雷表、种子、未揭示格的 value；
  * - 不含 API Key、服务端私有路径或内部执行器字段。
  */
+import {digAim} from "../shared/dig-aim.mjs";
 import { OBJECTS } from "./capabilities.mjs";
 import { DIG_TOLERANCE_M, SIZE, cellAt, cellCenter } from "./minesweeper.mjs";
 
 /** 只有这三种状态会落盘：飞行和转移中要么回到稳定态，要么按 unknown 处理 */
-export const PERSISTED_PROP_STATES = new Set(["resting", "held", "worn"]);
+export const PERSISTED_PROP_STATES = new Set(["resting", "held", "worn", "flying", "transferring", "reserved", "unknown"]);
 
 const DEFAULT_SLOT = { basin: "left_hand", rice_scoop: "right_hand" };
 
@@ -32,18 +33,13 @@ export function sanitizeProp(raw, previous = null) {
     ? raw.quaternion.map(Number)
     : null;
   let state = typeof raw.state === "string" ? raw.state : "resting";
-  // 旧存档：transferring/flying 不在稳定态集合里，退回上一份稳定快照，没有就按落地处理
-  if (!PERSISTED_PROP_STATES.has(state)) {
-    if (previous && PERSISTED_PROP_STATES.has(previous.state)) {
-      return { ...previous, updatedAt: Date.now() };
-    }
-    state = "resting";
-  }
+  const checkpoint=["resting","held","worn"].includes(previous?.state)?previous:previous?.checkpoint??null;
+  if(!PERSISTED_PROP_STATES.has(state))state="unknown";
   // 饭勺不能戴在头上：旧数据写错了就降级成手持
   if (state === "worn" && !def.wear) state = "held";
   let holder = raw.holder ?? raw.slot ?? null;
   if (holder === "hand") holder = DEFAULT_SLOT[objectId] ?? def.slots[0];
-  if (state === "resting") holder = null;
+  if (!["held","worn"].includes(state)) holder = null;
   else if (state === "worn") holder = "head";
   else if (!def.slots.includes(holder)) holder = DEFAULT_SLOT[objectId] ?? def.slots[0];
   const stand = raw.pickupStand && typeof raw.pickupStand === "object"
@@ -54,6 +50,8 @@ export function sanitizeProp(raw, previous = null) {
     object_id: objectId,
     type: def.type,
     state,
+    checkpoint,
+    grip:objectId==="basin"&&state==="held"?(raw.grip==="outward"?"outward":"inward"):null,
     position: pos,
     quaternion: quat,
     upright: raw.upright === true,
@@ -84,14 +82,23 @@ export function propsContext(props, slots = slotsOf(props)) {
       type: prop.type,
       state: prop.state,
       holder: prop.holder,
+      grip:prop.grip??null,
       position: [round3(prop.position[0]), round3(prop.position[2])],
       upright: prop.upright,
       ...(prop.pickupStand ? { pickupStand: prop.pickupStand } : {}),
       ...(prop.variant ? { pickupVariant: prop.variant } : {}),
+      availability:{
+        pickup:{enabled:prop.state==='resting',reason:prop.state==='resting'?'requires_nearby_alignment':'not_on_ground'},
+        throw:{enabled:prop.state==='held'&&(prop.object_id!=='basin'||prop.grip!=='outward'),reason:prop.state!=='held'?'not_held':prop.grip==='outward'?'requires_explicit_inward_grip':null},
+        ...(prop.object_id==='basin'?{
+          set_basin_grip:{enabled:prop.state==='held',reason:prop.state==='held'?null:'requires_left_hand'},
+          knock_basin:{enabled:prop.state==='held'&&prop.grip==='outward'&&slots.right_hand==='rice_scoop',reason:'requires_stationary_left_basin_outward_and_right_scoop'},
+        }:{}),
+      },
       actions: [
         ...(OBJECTS[prop.object_id]?.pickup ? ["pickup"] : []),
         ...(OBJECTS[prop.object_id]?.throw ? ["throw"] : []),
-        ...(OBJECTS[prop.object_id]?.wear ? ["wear", "unwear"] : []),
+        ...(OBJECTS[prop.object_id]?.wear ? ["wear", "unwear", "set_basin_grip", "knock_basin"] : []),
       ],
     })),
   };
@@ -153,6 +160,7 @@ export function characterContext(character) {
     yawDeg: round3(character?.yawDeg ?? 0),
     forward: { x: round4(Math.sin(yawRad)), z: round4(Math.cos(yawRad)) },
     currentCell: cell,
+    digAim:digAim({x:character?.x??0,z:character?.z??0,yawDeg:character?.yawDeg??0}),
   };
 }
 

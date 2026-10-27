@@ -19,6 +19,7 @@ export interface PropSnapshot {
   revision: number;
   holder: PropSlot | null;
   state: PropState;
+  grip?: "inward"|"outward"|null;
   position: [number, number, number];
   quaternion: [number, number, number, number];
   upright: boolean;
@@ -70,6 +71,8 @@ export class PropItem {
   state: PropState = "resting";
   mode: Mode = "world";
   variant: string | null = null;
+  grip:"inward"|"outward"="inward";
+  private committed=false;
 
   readonly catalog: BasinCatalog;
   private readonly def: PropDef;
@@ -139,7 +142,7 @@ export class PropItem {
 
   static async create(opts: PropItemOptions): Promise<PropItem> {
     const hull = hullPoints(opts.scene);
-    const physics = await BasinPhysics.create(hull, 4, opts.id === "basin" ? "cylinder" : "box");
+    const physics = await BasinPhysics.create(hull, 4, opts.id === "basin" ? "cylinder" : "box",opts.id);
     return new PropItem(opts, physics);
   }
 
@@ -232,6 +235,7 @@ export class PropItem {
   begin(actionId: string, spec?: ThrowSpec): boolean {
     if (this.actionId) return false;
     if (!this.canStart(actionId)) return false;
+    this.committed=false;
     this.actionId = actionId;
     this.actionsBefore = this.state;
     this.restorePose = { position: this.object.position.clone(), quaternion: this.object.quaternion.clone() };
@@ -251,10 +255,12 @@ export class PropItem {
 
   handleEvent(type: string) {
     this.bump();
+    this.committed=true;
     switch (type) {
       case "grasp":
       case "hand_catch":
         this.state = "held";
+        this.grip="inward";
         this.mode = "hand";
         this.setMorph(0);
         break;
@@ -275,6 +281,13 @@ export class PropItem {
       default:
         console.warn(`[prop:${this.id}] 未知事件 ${type}`);
     }
+  }
+
+  setGrip(grip:"inward"|"outward"){this.grip=grip;this.bump();}
+
+  cancel(){
+    if(this.actionId)this.finish(false);
+    if(this.mode==="uprighting"){this.mode="world";this.state="resting";this.bump();}
   }
 
   private launch() {
@@ -318,6 +331,7 @@ export class PropItem {
 
   update(dt: number, actionTime: number) {
     if (this.previewing) return;
+    this.physics.syncStatic(this.state==="resting"?{position:this.object.position,quaternion:this.object.quaternion}:null);
     if (this.mode === "hand") { this.followBone(this.bone, this.attach); return; }
     if (this.mode === "head") { this.followBone(this.headBone, this.headAttach ?? this.attach); return; }
     if (this.mode === "curve") {
@@ -365,12 +379,16 @@ export class PropItem {
       (actionId === "unwear_basin" && this.state === "held") ||
       (actionId?.startsWith("throw_") && this.state === "flying");
 
-    if (completed && settled) {
+    if ((completed || this.committed) && settled) {
       if (actionId === "wear_basin") this.setMorph(1);
       else this.setMorph(0);
       return;
     }
 
+    if(this.committed&&this.mode==='curve'){
+      this.physics.launch({position:this.object.position.clone(),quaternion:this.object.quaternion.clone(),velocity:new THREE.Vector3(),angularVelocity:new THREE.Vector3()});
+      this.mode='physics';this.state='flying';this.bump();return;
+    }
     this.bump();
     this.state = this.actionsBefore;
     if (this.actionsBefore === "worn") { this.mode = "head"; this.setMorph(1); }
@@ -425,7 +443,7 @@ export class PropItem {
   }
 
   /** 刷新恢复：只接受 resting / held / worn；其它按落地处理 */
-  restore(record: { state?: string; position?: number[]; quaternion?: number[] | null }): boolean {
+  restore(record: { state?: string; position?: number[]; quaternion?: number[] | null; grip?:string }): boolean {
     const raw = record.state ?? "resting";
     const state: PropState = raw === "held" || raw === "worn" ? (raw as PropState) : "resting";
     const position = Array.isArray(record.position) && record.position.length === 3 ? record.position : null;
@@ -436,6 +454,7 @@ export class PropItem {
     this.object.visible = true;
     if (state === "held") {
       this.state = "held";
+      this.grip=record.grip==="outward"?"outward":"inward";
       this.mode = "hand";
       this.setMorph(0);
       this.followBone(this.bone, this.attach);
@@ -454,6 +473,11 @@ export class PropItem {
       ? new THREE.Quaternion(record.quaternion[0], record.quaternion[1], record.quaternion[2], record.quaternion[3])
       : new THREE.Quaternion(...(this.def.pickupReference.quaternion as [number, number, number, number]));
     this.applyPose({ position: new THREE.Vector3(position[0], position[1], position[2]), quaternion });
+    if(['flying','transferring','reserved','unknown'].includes(raw)){
+      // Interrupted transfer is unknown: settle from the last measured pose, never resurrect in a hand.
+      this.physics.launch({position:this.object.position.clone(),quaternion:this.object.quaternion.clone(),velocity:new THREE.Vector3(),angularVelocity:new THREE.Vector3()});
+      this.state='flying';this.mode='physics';this.bump();return true;
+    }
     this.setMorph(0);
     this.state = "resting";
     this.mode = "world";
@@ -496,6 +520,7 @@ export class PropItem {
       revision: this.revision,
       holder: this.mode === "hand" ? this.slot : this.mode === "head" ? "head" : null,
       state: this.state,
+      grip: this.state==="held"&&this.id==="basin"?this.grip:null,
       position: [
         Math.round(this.object.position.x * 1000) / 1000,
         Math.round(this.object.position.y * 1000) / 1000,

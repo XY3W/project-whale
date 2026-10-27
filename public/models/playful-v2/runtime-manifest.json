@@ -1,0 +1,11 @@
+{
+  "version": "playful-v2-count32",
+  "files": {
+    "catalog.json": "a61ad3b811d841f942513c8d33008bb4b788d4292902ce210f427ebcfce60ef4",
+    "character_playful.glb": "6d2e12549bfa1056216482631203c5f7cc3aa5569f8226e02824b776cfc4c640",
+    "prop_motion.json": "1263f4eea895f90879e27e922474878bdb7af8b4e52023cf8d0088cf5b7668e8",
+    "rice_scoop_straight_v3.glb": "59a49b02f5302ca6be3b2e9156909909be94219dbebb59d57306e70950358655",
+    "steel_basin_v2.glb": "da1afeab98ef8ed79e757df192089eab87a2aced071e225ac6c4370f3b91bff3",
+    "tracks.json": "8274e3f75ef39287e1462aeb052452851597f99bd5d4f0425e41acfef2b6ee65"
+  }
+}

@@ -186,6 +186,8 @@ test("挖掘提交必须绑定服务端授权，并且右手有勺", async (t) =
   assert.ok(typeof authId === "string" && authId.length > 0, "计划必须带 digAuthId");
 
   const center = { x: -4 + (3 + 0.5) * 0.5, z: -4 + (3 + 0.5) * 0.5 };
+  const stance={x:center.x,z:center.z-.08};
+  const toolPoint={x:stance.x-.23349058477014467,z:stance.z+.30985648067934773};
   // 1) 不带授权：拒绝
   send("dig_commit", {
     actionInstanceId: "x1",
@@ -205,6 +207,7 @@ test("挖掘提交必须绑定服务端授权，并且右手有勺", async (t) =
   send("dig_commit", {
     actionInstanceId: "x2",
     digAuthId: authId,
+    taskId:plan.taskId,generation:plan.generation,planId:plan.planId,
     gameId: game.board.gameId,
     row: 3,
     col: 3,
@@ -218,11 +221,12 @@ test("挖掘提交必须绑定服务端授权，并且右手有勺", async (t) =
   assert.equal(noScoop.reason, "NO_SCOOP");
 
   // 3) 站位不在格心：拒绝
-  send("state_snapshot", { leaseEpoch: epoch, snapshot: heldSnapshot() });
+  send("state_snapshot", { leaseEpoch: epoch, snapshot: heldSnapshot({x:stance.x,z:stance.z}) });
   await sleep(150);
   send("dig_commit", {
     actionInstanceId: "x3",
     digAuthId: authId,
+    taskId:plan.taskId,generation:plan.generation,planId:plan.planId,
     gameId: game.board.gameId,
     row: 3,
     col: 3,
@@ -239,12 +243,14 @@ test("挖掘提交必须绑定服务端授权，并且右手有勺", async (t) =
   send("dig_commit", {
     actionInstanceId: "x4",
     digAuthId: authId,
+    taskId:plan.taskId,generation:plan.generation,planId:plan.planId,
     gameId: game.board.gameId,
     row: 3,
     col: 3,
     expectedRevision: 0,
-    x: center.x,
-    z: center.z,
+    x: stance.x,
+    z: stance.z,
+    toolPoint,
     leaseEpoch: epoch,
   });
   const ok = await waitFor(inbox, (m) => m.type === "dig_result" && m.actionInstanceId === "x4");
@@ -255,12 +261,14 @@ test("挖掘提交必须绑定服务端授权，并且右手有勺", async (t) =
   send("dig_commit", {
     actionInstanceId: "x5",
     digAuthId: authId,
+    taskId:plan.taskId,generation:plan.generation,planId:plan.planId,
     gameId: game.board.gameId,
     row: 3,
     col: 3,
     expectedRevision: 0,
-    x: center.x,
-    z: center.z,
+    x: stance.x,
+    z: stance.z,
+    toolPoint,
     leaseEpoch: epoch,
   });
   const replay = await waitFor(inbox, (m) => m.type === "dig_result" && m.actionInstanceId === "x5");

@@ -15,9 +15,9 @@ export class GameService {
 
   load() {
     try {
-      return restoreGame(JSON.parse(fs.readFileSync(this.file, "utf8")));
+      const raw=JSON.parse(fs.readFileSync(this.file,"utf8"));this.decisions=raw?.digDecisions??{};return restoreGame(raw);
     } catch {
-      return null;
+      this.decisions={};return null;
     }
   }
 
@@ -25,7 +25,7 @@ export class GameService {
     if (!this.game) return;
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file, JSON.stringify(serializeGame(this.game)));
+      const tmp=this.file+".tmp";fs.writeFileSync(tmp,JSON.stringify({...serializeGame(this.game),digDecisions:this.decisions??{}}));fs.renameSync(tmp,this.file);
     } catch (err) {
       console.error("minesweeper save failed", err.message);
     }
@@ -42,6 +42,8 @@ export class GameService {
     return this.public();
   }
 
+  lookup(actionInstanceId){return this.decisions?.[actionInstanceId]??null;}
+
   public() {
     return this.game ? publicBoard(this.game) : null;
   }
@@ -51,14 +53,16 @@ export class GameService {
   }
 
   /** 挖掘提交：校验 gameId / revision / 坐标，再由规则核心原子结算 */
-  commit({ gameId, row, col, expectedRevision } = {}) {
+  commit({ actionInstanceId, gameId, row, col, expectedRevision } = {}) {
+    if(actionInstanceId&&this.decisions?.[actionInstanceId])return {...this.decisions[actionInstanceId],board:this.public()};
     if (!this.game) return { ok: false, reason: "NO_GAME" };
     if (gameId !== this.game.gameId) return { ok: false, reason: "STALE_GAME" };
     if (expectedRevision !== undefined && expectedRevision !== this.game.revision) {
       return { ok: false, reason: "STALE_REVISION", revision: this.game.revision };
     }
     const result = dig(this.game, row, col);
-    if (result.ok) this.save();
+    if(actionInstanceId){this.decisions??={};this.decisions[actionInstanceId]=result;this.decisions=Object.fromEntries(Object.entries(this.decisions).slice(-100));}
+    if (result.ok || actionInstanceId) this.save();
     return { ...result, board: this.public() };
   }
 
@@ -71,7 +75,7 @@ export class GameService {
     if (!this.game) return { ok: false, reason: "NO_GAME" };
     if (this.game.status === "playing") {
       const result = endGame(this.game);
-      if (result.ok) this.save();
+      if(result.ok)this.save();
       return { ...result, board: this.public() };
     }
     this.clear();

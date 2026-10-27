@@ -8,6 +8,10 @@
  * - 重复 plan_result 只忽略，不重复回复、不重复执行
  * - 执行端断开后任务标记 unknown，重连先对账，不盲重播
  */
+import {digAim} from "../shared/dig-aim.mjs";
+import { randomUUID } from "node:crypto";
+import { modeView, changeMode } from "./behavior-mode.mjs";
+import { ownerIdentity, recordMessage, propose, editMemory, memoryView, relevantMemory, acceptSummary } from "./preferences.mjs";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,10 +20,10 @@ import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest } from "./context.mjs";
-import { addCandidates, confirmedMemories, validateProposals } from "./memory.mjs";
+
 import { createGameEventQueue } from "./events.mjs";
 import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
-import { CAPABILITY_VERSION, ModelError, SYSTEM_PROMPT, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
+import { CAPABILITY_VERSION, ModelError, PROMPT_VERSION, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 import { validatePlan } from "./capabilities.mjs";
 
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
@@ -65,6 +69,7 @@ const TYPES = {
   ".glb": "model/gltf-binary",
   ".png": "image/png",
   ".svg": "image/svg+xml",
+  ".wav": "audio/wav",
 };
 
 function serveStatic(req, res) {
@@ -75,14 +80,26 @@ function serveStatic(req, res) {
   }
   const rel = decodeURIComponent((req.url || "/").split("?")[0]).replace(/^\/+/, "");
   let file = path.resolve(ROOT, rel || "index.html");
-  if (!file.startsWith(ROOT)) { res.writeHead(403).end(); return; }
+  if (file !== ROOT && !file.startsWith(ROOT + path.sep)) { res.writeHead(403).end(); return; }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(ROOT, "index.html");
   const ext = path.extname(file);
   res.writeHead(200, { "content-type": TYPES[ext] ?? "application/octet-stream" });
   fs.createReadStream(file).pipe(res);
 }
 
-const server = http.createServer(serveStatic);
+const server = http.createServer(async (req,res)=>{
+  const owner=ownerIdentity(req,res,path.join(process.cwd(),"data"));
+  if(req.url?.startsWith('/api/memory')){
+    res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');
+    if(req.method==='GET'){res.end(JSON.stringify({memories:memoryView(store.state,owner)}));return;}
+    if(req.method!=='POST'||req.headers['content-type']?.split(';')[0]!=='application/json'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)){res.writeHead(403).end('{}');return;}
+    try{let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>8192)throw Error('请求过长');}
+      store.update(st=>editMemory(st,owner,JSON.parse(raw)));store.flush();
+      res.end(JSON.stringify({memories:memoryView(store.state,owner)}));
+    }catch(err){res.writeHead(400).end(JSON.stringify({error:err.message}));}return;
+  }
+  serveStatic(req,res);
+});
 const wss = new WebSocketServer({ server, path: "/ws" });
 
 let nextTask = 100;
@@ -142,10 +159,11 @@ function saveState(force = false) {
   try {
     fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
     const list = [...props.values()];
+    const tmp=STATE_FILE+".tmp";
     fs.writeFileSync(
-      STATE_FILE,
+      tmp,
       JSON.stringify({ ...character, props: list, basin: props.get("basin") ?? null, updatedAt: Date.now() }),
-    );
+    );fs.renameSync(tmp,STATE_FILE);
   } catch (err) {
     console.error("state save failed", err.message);
   }
@@ -164,7 +182,7 @@ function propPayload() {
 }
 
 const session = {
-  id: `s${Date.now()}`,
+  id: `s${randomUUID()}`,
   lease: null,          // 当前执行端 ws
   leaseEpoch: 0,        // 逐次授予递增，用于 fencing
   generation: 0,        // 任务代际
@@ -202,11 +220,12 @@ if (storeSeed.session?.phase === "unknown") {
 function persist() {
   store.update((st) => {
     st.memories = st.memories ?? [];
-    st.history = session.history.slice(-12);
-    st.ledger = Object.fromEntries(session.ledger);
+    st.history = []; // Legacy global chat is never injected across owners.
+    st.ledger = Object.fromEntries([...session.ledger].slice(-200));
+    st.autoplay={calls:autoplay.calls,manualPaused:autoplay.manualPauseUntil===Infinity,manualPauseUntil:Number.isFinite(autoplay.manualPauseUntil)?autoplay.manualPauseUntil:0,nextAt:Number.isFinite(autoplay.nextAt)?autoplay.nextAt:0};
     st.session = { id: session.id, phase: session.phase, taskId: session.task?.id ?? null, generation: session.generation };
     st.task = session.task
-      ? { id: session.task.id, generation: session.task.generation, text: session.task.text, rounds: session.task.rounds, planId: session.task.planId ?? null }
+      ? { id: session.task.id, generation: session.task.generation, text: session.task.text, originalText:session.task.originalText, ownerScope:session.task.ownerScope, messageId:session.task.messageId, origin:session.task.origin, rounds: session.task.rounds, planId: session.task.planId ?? null }
       : null;
   });
 }
@@ -223,6 +242,7 @@ const isLeaseAlive = () =>
   !!session.lease && session.lease.readyState === 1 && Date.now() - session.leaseAt < HEARTBEAT_MS;
 
 function grantLease(ws) {
+  if(session.lease&&session.lease!==ws&&session.task){cancelCurrentPlan('lease_expired');session.task.unknown=true;session.phase='unknown';persist();}
   session.chatOpen = false; // 聊天状态绑定执行端，换人即失效
   session.lease = ws;
   session.leaseEpoch += 1;
@@ -240,6 +260,7 @@ function statePayload(ws) {
     taskId: session.task?.id ?? null,
     generation: session.generation,
     leaseEpoch: session.leaseEpoch,
+    behaviorMode:modeView(store.state),
     ...propPayload(),
     game: games.public(),
     readOnly: ws !== session.lease,
@@ -258,9 +279,9 @@ const autoplay = {
   /** 没有进展时的退避倍数 */
   backoff: 1,
   /** 最近一小时自主体回合的模型调用时间戳 */
-  calls: [],
+  calls: store.state.autoplay?.calls??[],
   /** 用户手动「扫雷结束」后的硬暂停：普通退避不许缩短它 */
-  manualPauseUntil: 0,
+  manualPauseUntil: store.state.autoplay?.manualPaused?Infinity:store.state.autoplay?.manualPauseUntil??0,
 };
 
 /** 最近一次模型调用的时间：看门狗用它判断“是不是真的没动静了” */
@@ -280,7 +301,7 @@ function tickAutoPlay() {
   if (!AUTO_PLAY || !hasKey()) return;
   const now = Date.now();
   if (Date.now() < autoplay.manualPauseUntil) return;
-  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown") {
+  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown" || session.phase === "stopping") {
     if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
     return;
   }
@@ -330,7 +351,7 @@ function tickStillPlaying() {
   if (!AUTO_PLAY || !hasKey()) return;
   const board = games.public();
   if (!board || board.status !== "playing") return;
-  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown") return;
+  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown" || session.phase === "stopping") return;
   if (Date.now() < autoplay.manualPauseUntil) return;
   const idleMs = Date.now() - lastLlmAt;
   if (idleMs < AUTO_STILL_PLAYING_MS) return;
@@ -384,11 +405,13 @@ function noteGameEvent(type, board, extra = {}) {
  * 有任务时不动：事件留给该任务下一次 planning/review 合并，不打断用户指令。
  */
 function scheduleEventTurn() {
+  if(!autonomousAllowed())return;
   if (session.task || eventTurnTimer || !gameEvents.size()) return;
   if (!isLeaseAlive()) return;
   eventTurnTimer = setTimeout(() => {
     eventTurnTimer = null;
     if (session.task || !gameEvents.size()) return;
+    if(!autonomousAllowed())return;
     startEventTask();
   }, EVENT_COALESCE_MS);
 }
@@ -408,15 +431,23 @@ function broadcastState() {
  */
 function cancelCurrentPlan(reason) {
   const task = session.task;
+  task?.abort?.abort();
   if (!task?.planId) return;
   const entry = session.ledger.get(task.planId);
-  if (entry && entry.state === "dispatched") session.ledger.set(task.planId, { state: "cancelled", reason });
+  if (entry && entry.state === "dispatched") session.ledger.set(task.planId, { ...entry, state: "cancel_requested", reason });
   send(session.lease, "cancel_plan", { taskId: task.id, generation: task.generation, planId: task.planId, reason });
   console.log(`[plan] cancel ${task.planId} (${reason})`);
 }
 
 function endTask(reason, opts = {}) {
   const finished = session.task;
+  if(finished?.origin==="active"){
+    const results=[...session.ledger].filter(([id])=>id.startsWith(finished.id+'-')).map(([,e])=>e.result).filter(Boolean);
+    const progress=results.some(r=>r.steps?.some(s=>s.status==='succeeded'&&s.action!=='wait'));
+    activeNoProgress=progress?0:activeNoProgress+1;
+    store.update(st=>{st.recentAutonomy=[...(st.recentAutonomy??[]),{taskId:finished.id,at:Date.now(),progress,actions:results.flatMap(r=>r.steps?.map(s=>({action:s.action,status:s.status}))??[])}].slice(-4);});
+  }
+  finished?.abort?.abort();
   if (session.budgetTimer) { clearTimeout(session.budgetTimer); session.budgetTimer = null; }
   session.task = null;
   session.phase = "idle";
@@ -467,7 +498,7 @@ let snapshotSeq = 0;
  * 游戏事件不能私建一条不受聊天/预算控制的循环。
  */
 function beginTask({ text, messageId, origin = "user", events = [], snapshot = null, ws }) {
-  const taskId = `t${nextTask++}`;
+  const taskId = `t${nextTask++}-${randomUUID().slice(0,8)}`;
   const generation = ++session.generation;
   if (session.budgetTimer) clearTimeout(session.budgetTimer);
   session.budgetTimer = setTimeout(() => {
@@ -476,11 +507,18 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     if (origin !== "event") send(ws, "public_reply", { taskId, speech: "这个任务超过时间预算了，先停在这里。" });
     // 预算到期必须先让执行端停下，不能只把任务置 idle
     cancelCurrentPlan("budget");
-    endTask("budget timer", { retryMs: null });
+    if(session.task?.planId){session.task.stopping=true;session.phase="stopping";persist();broadcastState();setTimeout(()=>{if(session.task?.id===taskId&&session.task.stopping){session.phase="unknown";session.task.unknown=true;persist();broadcastState();}},5000).unref();}else endTask("budget timer", { retryMs: null });
   }, BUDGET_MS);
   session.task = {
     id: taskId,
     generation,
+    abort:new AbortController(),
+    ownerScope:ws?.ownerScope??null,
+    ready:!ws?.stopReadyProtocol,
+    promptVersion:PROMPT_VERSION,capabilityVersion:CAPABILITY_VERSION,
+    memoryRevision:store.state.memoryRevision?.[ws?.ownerScope]??0,
+    modeEpoch:modeView(store.state).modeEpoch,
+    autonomyDeadline:origin==="active"?modeView(store.state).expiresAt:null,
     text,
     messageId,
     origin,
@@ -495,9 +533,8 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     snapshot,
     gameRevision: games.public()?.revision ?? null,
   };
-  if (text) {
-    session.history.push({ role: "user", content: text });
-    if (session.history.length > 12) session.history = session.history.slice(-12);
+  if(text&&origin==='user'){
+    store.update(st=>{const m=recordMessage(st,session.task.ownerScope,session.id,'user',text);session.task.messageId=m.messageId;});store.flush();
   }
   persist();
   session.phase = "thinking";
@@ -516,7 +553,9 @@ function modelContext(task, phase, extra = {}) {
   const board = games.public();
   // 自主回合没有用户指令：显式写清楚，并且不带历史对话，
   // 否则模型会把 history 里上一句旧指令（比如“把勺扔出去”）当成这一轮的目标。
-  const selfPlay = task.origin === "event";
+  const selfPlay = task.origin !== "user";
+  const messages=(store.state.messages??[]).filter(m=>m.ownerScope===task.ownerScope);
+  const recent=messages.slice(-24);task.contextSourceIds=recent.map(m=>m.messageId);
   return {
     phase,
     snapshotId: `snap${++snapshotSeq}`,
@@ -525,11 +564,18 @@ function modelContext(task, phase, extra = {}) {
     goal: selfPlay
       ? {
           originalText: null,
-          origin: "event",
-          note: eventNote(extra.attentionEvents),
+          origin: task.origin,
+          note: task.origin==="active"?"活跃机会：自行选择一个短而有趣的行为，可沉默，无需重复旧任务。":eventNote(extra.attentionEvents),
         }
       : { originalText: task.originalText, origin: task.origin },
     userMessage: task.text || null,
+    userMessageId:task.messageId,
+    versions:{prompt:task.promptVersion??PROMPT_VERSION,capability:task.capabilityVersion??CAPABILITY_VERSION,schema:2},
+    behaviorMode:{...modeView(store.state),drainTaskId:task.origin==="active"&&!modeView(store.state).acceptingNewAutonomy?task.id:null},
+    recentAutonomy:store.state.recentAutonomy??[],
+    finishOnly:(task.origin!=="user"&&AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR-1)||task.rounds>=MAX_ROUNDS||(task.origin==="active"&&(!modeView(store.state).acceptingNewAutonomy||task.modeEpoch!==modeView(store.state).modeEpoch||Date.now()>=task.autonomyDeadline)),
+    taskEvidence:[...session.ledger].filter(([id])=>id.startsWith(task.id+"-")).map(([planId,e])=>({planId,state:e.state,result:e.result??null})),
+    conversationSummary:selfPlay?null:store.state.summaries?.[task.ownerScope]??null,
     leaseAndBudget: {
       leaseEpoch: session.leaseEpoch,
       hasExecutor: isLeaseAlive(),
@@ -538,8 +584,8 @@ function modelContext(task, phase, extra = {}) {
       budgetMs: BUDGET_MS,
       remainingMs: Math.max(0, BUDGET_MS - (Date.now() - task.startedAt)),
     },
-    capabilities: describeCapabilities(),
-    disabledCapabilities: describeDisabled(),
+    capabilities: describeCapabilities().filter(cap=>task.originWs?.runtimeVersion==="playful-v2-count32"||!["set_basin_grip","knock_basin"].includes(cap.id)).map(cap=>cap.id==='play'&&[...props.values()].some(p=>p.state==='held')?{...cap,params:{action_id:{enum:['nod','look_left','look_right'],note:'持物时禁用未适配双臂的greet/notice/think'}}}:cap),
+    disabledCapabilities: [...describeDisabled(),...(task.originWs?.runtimeVersion==="playful-v2-count32"?[]:[{id:"set_basin_grip",reason:"执行页面需刷新到playful-v2-count32"},{id:"knock_basin",reason:"执行页面需刷新到playful-v2-count32"}])],
     capabilityVersion: CAPABILITY_VERSION,
     world: {
       walkableHalf: 3.7,
@@ -549,8 +595,8 @@ function modelContext(task, phase, extra = {}) {
     characterState: characterContext(character),
     props: propsContext(props),
     board: boardContext(board, character),
-    ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: session.history })),
-    memory: confirmedMemories(store.state.memories),
+    ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: recent })),
+    memory: selfPlay?[]:relevantMemory(store.state,task.ownerScope),
     ...extra,
   };
 }
@@ -563,12 +609,10 @@ function eventNote(events) {
 }
 
 function checkBudget(ctx) {
-  const budget = estimateRequest({
-    system: SYSTEM_PROMPT,
-    capabilities: ctx.capabilities,
-    context: ctx,
-    maxInputTokens: MAX_INPUT_TOKENS,
-  });
+  const messages=ctx.phase==='review'?reviewMessages(ctx):planningMessages(ctx);
+  const budget=estimateRequest({messages,maxInputTokens:MAX_INPUT_TOKENS});
+  // Trim only optional conversation facts. Goal, snapshot and cumulative commit evidence remain protected.
+  while(!budget.ok&&ctx.history?.length){ctx.history.shift();while(ctx.history[0]?.role==='assistant')ctx.history.shift();Object.assign(budget,estimateRequest({messages:ctx.phase==='review'?reviewMessages(ctx):planningMessages(ctx),maxInputTokens:MAX_INPUT_TOKENS}));}
   if (ctx.executionReport && JSON.stringify(ctx.executionReport).length > 5000) {
     const rep = ctx.executionReport;
     console.log("[ctx] report breakdown", JSON.stringify((rep.steps ?? []).map((st) => ({
@@ -626,6 +670,10 @@ async function runPlanning(task, ws) {
     return;
   }
   try {
+    const deadline=Date.now()+30000;
+    while(!task.ready&&session.task===task&&!task.abort?.signal.aborted&&Date.now()<deadline)await new Promise(r=>setTimeout(r,25));
+    if(session.task!==task||task.abort?.signal.aborted)return;
+    if(!task.ready)throw new ModelError('EXECUTOR_NOT_READY','角色尚未停稳，停止规划',0);
     const ctx = modelContext(task, "planning", {
       attentionEvents: takeTaskEvents(task),
       executionReport: null,
@@ -641,9 +689,10 @@ async function runPlanning(task, ws) {
       return;
     }
     console.log(`[ctx] planning ${ctx.snapshotId} ~${budget.total} tokens · events=${ctx.attentionEvents.length}`);
-    if (task.origin === "event") autoplay.calls.push(Date.now());
+
     noteLlmActivity();
-    const out = await callModel(planningMessages(ctx));
+    if(task.origin!=="user"&&!claimAutoCall()){endTask("autonomous call budget");return;}
+    const out = await callModel(planningMessages(ctx),task.abort?.signal);
     applyOutput(ws, task, out);
   } catch (err) {
     fail(ws, task, err);
@@ -660,35 +709,35 @@ function startEventTask() {
   runPlanning(task, ws);
 }
 
-function absorbMemory(task, out) {
-  const { accepted, rejected } = validateProposals(out.memoryProposals ?? [], task.messageId);
-  if (accepted.length) {
-    store.update((st) => { st.memories = addCandidates(st.memories, accepted); });
-    persist();
-  }
-  if (rejected.length) console.warn("[memory] rejected", JSON.stringify(rejected));
+function absorbMemory(task,out){
+  if(task.origin!=="user"||!task.ownerScope||(store.state.memoryRevision?.[task.ownerScope]??0)!==task.memoryRevision)return;
+  store.update(st=>{propose(st,task.ownerScope,out.memoryProposals??[],task.contextSourceIds??[task.messageId]);acceptSummary(st,task.ownerScope,out.summaryProposal,task.contextSourceIds??[]);});store.flush();
 }
 
 function applyOutput(ws, task, out) {
   if (!session.task || session.task.id !== task.id) return;
   absorbMemory(task, out);
+  if(task.planId&&session.ledger.get(task.planId)?.state==="processing")session.ledger.set(task.planId,{...session.ledger.get(task.planId),state:"done"});
   if (out.type === "finish_task") {
     // 自主回合允许完全沉默：没有值得说的就不发 public_reply
-    const speech = out.speech || (task.origin === "event" ? "" : out.outcome === "completed" ? "好了。" : "这个我还做不到。");
+    const speech = out.speech || "";
     if (speech) {
       send(ws, "public_reply", { taskId: task.id, speech });
-      session.history.push({ role: "assistant", content: speech });
-      if (task.planId) session.ledger.set(task.planId, { state: "done", reply: speech });
+      if(task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",speech));
+      if (task.planId) session.ledger.set(task.planId, { ...session.ledger.get(task.planId), state: "done", reply: speech });
     }
     persist();
     endTask();
     return;
   }
-  if (task.rounds >= MAX_ROUNDS) {
+  if ((task.origin!=="user"&&AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR) || task.rounds >= MAX_ROUNDS || (task.origin==="active"&&(!modeView(store.state).acceptingNewAutonomy||task.modeEpoch!==modeView(store.state).modeEpoch||Date.now()>=task.autonomyDeadline))) {
     session.phase = "blocked";
     if (task.origin !== "event") send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
     endTask("round budget");
     return;
+  }
+  if(out.plan.steps.some(s=>['knock_basin','set_basin_grip'].includes(s.action))&&ws.runtimeVersion!=='playful-v2-count32'){
+    send(ws,'error',{code:'RELOAD_REQUIRED',message:'请刷新页面后使用新动作'});endTask('old runtime');return;
   }
   task.plan = out.plan;
   task.rounds += 1;
@@ -701,7 +750,7 @@ function applyOutput(ws, task, out) {
   // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
   // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
   const digAuthId = issueDigAuth(task, out.plan);
-  if (out.speech) session.history.push({ role: "assistant", content: out.speech });
+  if(out.speech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",out.speech));
   send(ws, "execute_plan", {
     taskId: task.id,
     generation: task.generation,
@@ -721,7 +770,7 @@ function applyOutput(ws, task, out) {
 function issueDigAuth(task, plan) {
   const digStep = (plan.steps ?? []).find((step) => step.action === "dig");
   if (!digStep) return null;
-  const authId = `dig${++session.digSeq}-g${task.generation}`;
+  const authId = `dig-${task.id}-${++session.digSeq}-g${task.generation}`;
   session.digAuth.set(authId, {
     authId,
     taskId: task.id,
@@ -763,6 +812,7 @@ function fail(ws, task, err) {
 
 let connSeq = 0;
 wss.on("connection", (ws, req) => {
+  ws.ownerScope=ownerIdentity(req,{setHeader(){}},path.join(process.cwd(),"data"));
   ws._seq = 0;
   ws._connId = `c${++connSeq}`;
   console.log(`[lease] connect ${ws._connId} from ${req?.socket?.remoteAddress ?? "?"}`);
@@ -780,13 +830,22 @@ wss.on("connection", (ws, req) => {
     }
 
     switch (msg.type) {
+      case "executor_ready":
+        if(isLease(ws)&&epochOk(msg)&&session.task?.id===msg.taskId){applyClientSnapshot(msg.snapshot);session.task.ready=true;}break;
+      case "mode_set":
+        if(!isLease(ws)||!epochOk(msg))break;
+        changeMode(store.state,msg.mode);persist();store.flush();broadcastState();break;
+      case "stop_ack":
+        if(isLease(ws)&&epochOk(msg)&&session.task?.id===msg.taskId&&session.task?.stopping){applyClientSnapshot(msg.snapshot);endTask("stopped and reconciled");}break;
       case "hello":
+        if(msg.stopReadyProtocol===1)ws.stopReadyProtocol=true;
+        if(typeof msg.runtimeVersion==="string")ws.runtimeVersion=msg.runtimeVersion;
         if (!isLeaseAlive()) grantLease(ws);
         send(ws, "session_state", statePayload(ws));
         break;
 
       case "heartbeat":
-        if (isLease(ws)) session.leaseAt = Date.now();
+        if (isLease(ws)&&isLeaseAlive()) session.leaseAt = Date.now();
         else send(ws, "session_state", statePayload(ws));
         break;
 
@@ -801,7 +860,7 @@ wss.on("connection", (ws, req) => {
         send(ws, "game_state", { board });
         broadcastState();
         // 用户主动点开局：解除“手动结束”的暂停
-        autoplay.manualPauseUntil = 0;
+        autoplay.manualPauseUntil = 0;persist();
         autoplay.nextAt = 0;
         // 只有真的换了局（而不是幂等重发）才算新局事件
         if (board && board.gameId !== previous) {
@@ -824,7 +883,7 @@ wss.on("connection", (ws, req) => {
           // 用户主动收摊：硬暂停，普通退避和任务收尾都不许把它缩短
           autoplay.manualPauseUntil = Date.now() + AUTO_AFTER_MANUAL_END_MS;
           autoplay.backoff = 1;
-          noteAutoPlayDelay(0);
+          noteAutoPlayDelay(0);persist();store.flush();
           console.log(result.cleared ? `[game] 用户收起了 ${before}` : `[game] 用户结束了 ${result.board?.gameId}`);
           // 只有“进行中→结束”才需要告诉模型；收摊已经被用户拿走了
           if (!result.cleared) noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
@@ -857,6 +916,11 @@ wss.on("connection", (ws, req) => {
         break;
       }
 
+      case "dig_query": {
+        if(!isLease(ws)||!epochOk(msg))break;
+        const result=games.lookup(String(msg.digAuthId??''));
+        send(ws,'dig_result',{actionInstanceId:msg.actionInstanceId,...(result??{ok:false,reason:'UNKNOWN_COMMIT'})});break;
+      }
       case "dig_commit": {
         // 每一条回包都带回客户端给的 actionInstanceId，避免客户端只能等 6 秒超时
         const reply = (body) => send(ws, "dig_result", { actionInstanceId: msg.actionInstanceId, ...body });
@@ -868,7 +932,7 @@ wss.on("connection", (ws, req) => {
         const auth = session.digAuth.get(String(msg.digAuthId ?? ""));
         if (!auth) return reply({ ok: false, reason: "NO_AUTH" });
         // 脱离当前任务/代际的迟到提交一律拒绝
-        if (!task || task.id !== auth.taskId || task.generation !== auth.generation) {
+        if (!task || task.id !== auth.taskId || task.generation !== auth.generation || msg.taskId!==auth.taskId || msg.generation!==auth.generation) {
           return reply({ ok: false, reason: "STALE_TASK", taskId: auth.taskId });
         }
         // 同一个实例重发：原样回放第一次的结算，不重复改棋盘
@@ -888,6 +952,7 @@ wss.on("connection", (ws, req) => {
           return reply({ ok: false, reason: "NO_SCOOP", scoop: scoop ?? null });
         }
         // 接触点复检：客户端上报的坑位坐标必须落在授权格子里，且离格心足够近
+        if(msg.row!==auth.row||msg.col!==auth.col)return reply({ok:false,reason:'STALE_CELL'});
         const center = cellCenter(auth.row, auth.col);
         const dx = Number(msg.x) - center.x;
         const dz = Number(msg.z) - center.z;
@@ -895,7 +960,10 @@ wss.on("connection", (ws, req) => {
         if (!Number.isFinite(distance) || distance > DIG_TOLERANCE_M) {
           return reply({ ok: false, reason: "NOT_IN_CELL", distance_m: Math.round(distance * 1000) / 1000, targetCellCenter: center });
         }
-        const result = games.commit({ gameId: auth.gameId, row: auth.row, col: auth.col, expectedRevision: auth.expectedRevision });
+        if(Math.hypot(character.x-center.x,character.z-center.z)>DIG_TOLERANCE_M||Math.hypot(Number(msg.x)-character.x,Number(msg.z)-character.z)>.025)return reply({ok:false,reason:'NOT_IN_CELL'});
+        const aim=digAim(character),point=msg.toolPoint;
+        if(!point||!Number.isFinite(point.x)||!Number.isFinite(point.z)||Math.hypot(point.x-aim.tip.x,point.z-aim.tip.z)>.03||Math.abs(point.x-center.x)>.25||Math.abs(point.z-center.z)>.25)return reply({ok:false,reason:'TOOL_NOT_IN_CELL'});
+        const result = games.commit({ actionInstanceId:auth.authId, gameId: auth.gameId, row: auth.row, col: auth.col, expectedRevision: auth.expectedRevision });
         const response = { ...result, authId: auth.authId };
         auth.used = true;
         auth.response = response;
@@ -959,7 +1027,7 @@ wss.on("connection", (ws, req) => {
           snapshot: msg.snapshot ?? null,
           ws,
         });
-        task.messageId = `msg-${task.id}`;
+
 
         setTimeout(() => runPlanning(task, ws), 300);
         break;
@@ -993,6 +1061,7 @@ wss.on("connection", (ws, req) => {
         msg.result = trimExecutionReport(msg.result);
         if (msg.planId) session.ledger.set(msg.planId, { state: "processing", result: msg.result });
 
+        if(task.stopping){endTask("cancelled plan settled");return;}
         if (Date.now() - task.startedAt > BUDGET_MS) {
           session.phase = "blocked";
           send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，需要新的指示。" });
@@ -1009,11 +1078,6 @@ wss.on("connection", (ws, req) => {
             send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，需要新的指示。" });
             cancelCurrentPlan("budget");
             endTask("budget exceeded");
-            return;
-          }
-          if (task.rounds >= MAX_ROUNDS) {
-            if (task.origin !== "event") send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
-            endTask("round budget");
             return;
           }
           if (!hasKey()) {
@@ -1039,9 +1103,10 @@ wss.on("connection", (ws, req) => {
               return;
             }
             console.log(`[ctx] review ${ctx.snapshotId} ~${budget.total} tokens · events=${ctx.attentionEvents.length}`);
-            if (task.origin === "event") autoplay.calls.push(Date.now());
+
             noteLlmActivity();
-            const out = await callModel(reviewMessages(ctx));
+            if(task.origin!=="user"&&!claimAutoCall()){endTask("autonomous call budget");return;}
+            const out = await callModel(reviewMessages(ctx),task.abort?.signal);
             applyOutput(ws, task, out);
           } catch (err) {
             fail(ws, task, err);
@@ -1077,13 +1142,41 @@ wss.on("connection", (ws, req) => {
       session.leaseAt = 0;
       session.leaseEpoch += 1; // 旧 epoch 立即失效
       // 执行端断开：任务状态未知，等待重连对账，不自动续跑
-      if (session.task) session.phase = "unknown";
+      if(session.task){session.task.abort?.abort();session.phase="unknown";session.task.unknown=true;persist();}
       broadcastState();
     }
   });
 });
 
+
+function autonomousAllowed(ignoreGamePause=false){
+  autoplay.calls=autoplay.calls.filter(t=>Date.now()-t<3600000);
+  return !session.chatOpen && session.phase!=="unknown" && session.phase!=="stopping" && isLeaseAlive() && (ignoreGamePause||Date.now()>=autoplay.manualPauseUntil) && (AUTO_MAX_CALLS_PER_HOUR<=0||autoplay.calls.length<AUTO_MAX_CALLS_PER_HOUR);
+}
+function claimAutoCall(){
+  autoplay.calls=autoplay.calls.filter(t=>Date.now()-t<3600000);
+  if(AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR)return false;
+  autoplay.calls.push(Date.now());persist();return true;
+}
+let nextActiveAt=Date.now()+45000;
+let activeNoProgress=0;
+function tickActive(){
+  const before=store.state.behaviorMode?.mode;
+  const mode=modeView(store.state);if(before!==mode.mode){persist();broadcastState();}
+  if(session.lease&&!isLeaseAlive()){
+    const old=session.lease;cancelCurrentPlan('heartbeat_expired');session.lease=null;session.leaseEpoch++;session.chatOpen=false;
+    if(session.task){session.phase='unknown';session.task.unknown=true;persist();}
+    send(old,'session_state',statePayload(old));broadcastState();
+  }
+  scheduleEventTurn();
+  if(!mode.acceptingNewAutonomy||session.task||!hasKey()||!autonomousAllowed(true)||games.public()?.status==='playing'||gameEvents.size()||Date.now()<nextActiveAt)return;
+  nextActiveAt=Date.now()+30000+Math.random()*30000;
+  if(activeNoProgress>=2){nextActiveAt=Date.now()+120000;activeNoProgress=0;return;}
+  const task=beginTask({text:'',messageId:null,origin:'active',ws:session.lease});
+  runPlanning(task,session.lease);
+}
 const TICK_MS = Number(process.env.AUTO_TICK_MS ?? 5000);
+setInterval(tickActive, 1000).unref();
 setInterval(tickAutoPlay, TICK_MS).unref();
 setInterval(tickStillPlaying, TICK_MS).unref();
 server.listen(PORT, "0.0.0.0", () => {

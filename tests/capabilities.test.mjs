@@ -12,7 +12,7 @@ test("注册表：enabled 清单与 disabled 落盘一致", () => {
   assert.ok(ids.includes("run"));
   assert.ok(ids.includes("dig"));
   assert.ok(!ids.includes("sit"));
-  assert.equal(CAPABILITY_VERSION, "cap-v1");
+  assert.equal(CAPABILITY_VERSION, "cap-playful-v2-count32");
 });
 
 test("距离：0.45 通过，0.5/0.449/字符串拒绝", () => {

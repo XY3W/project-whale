@@ -41,7 +41,7 @@ export class Hud {
 
     const hint = document.createElement("div");
     hint.className = "hint";
-    hint.textContent = "拖动旋转视角　·　滚轮缩放　·　点击地面移动　·　点击角色互动";
+    hint.textContent = "拖动旋转视角　·　滚轮缩放　·　点击角色互动";
     document.body.appendChild(hint);
   }
 

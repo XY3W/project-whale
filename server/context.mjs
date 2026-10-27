@@ -4,14 +4,13 @@ export function estimateTokens(text) {
 }
 
 export function buildHistory(history, budgetTokens = 1200) {
-  const out = [];
-  let used = 0;
-  for (let i = history.length - 1; i >= 0; i--) {
-    const item = history[i];
-    const cost = estimateTokens(item.content);
-    if (used + cost > budgetTokens) break;
-    out.unshift(item);
-    used += cost;
+  const turns=[];
+  for(const item of history){if(item.role==='user')turns.push([]);if(turns.length)turns.at(-1).push(item);}
+  const out=[];let used=0;
+  for(const turn of turns.slice(-12).reverse()){
+    const cost=turn.reduce((n,m)=>n+estimateTokens(m.content),0);
+    if(used+cost>budgetTokens)break;
+    out.unshift(...turn);used+=cost;
   }
   return { messages: out, tokens: used, dropped: history.length - out.length };
 }
@@ -27,7 +26,8 @@ export function contextBudget({ history, budgetTokens = 1200 } = {}) {
 }
 
 /** 整轮请求预算：system + 能力 + 上下文（含历史）一起估算，超限拒绝执行 */
-export function estimateRequest({ system = "", capabilities = [], context = {}, maxInputTokens = 8000 } = {}) {
+export function estimateRequest({ messages, system = "", capabilities = [], context = {}, maxInputTokens = 8000 } = {}) {
+  if(messages){const total=Math.ceil(estimateTokens(JSON.stringify(messages))*1.15)+64;return {total,parts:{messages:total},maxInputTokens,ok:total<=maxInputTokens,estimator:"chars*0.6 +15% margin"};}
   const parts = {
     system: estimateTokens(system),
     capabilities: estimateTokens(JSON.stringify(capabilities)),

@@ -1,9 +1,10 @@
+import { parallelConflict } from "../../shared/resources.mjs";
 import type { BasinView, Locomotion, Plan, PlanResult, ReasonCode, Step, StepResult } from "./protocol.ts";
 import { cyclesFor, nearestSupported, round, supportedDistances } from "./distances.ts";
 
 const PLAYABLE = new Set(["greet", "notice", "nod", "look_left", "look_right", "think"]);
 const TAIL_STYLES = new Set(["tail_idle", "tail_swish"]);
-const BASIN_ACTIONS = new Set(["walk_to_basin", "pickup", "wear", "unwear", "throw"]);
+
 
 /** LLM 工具 ID → 资产动作 ID（盆与饭勺共用 pickup / throw 工具） */
 function propAction(tool: string, objectId: string): string | null {
@@ -113,6 +114,7 @@ export class ActionExecutor {
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
+        this.cancel();
         resolve({ ok: false });
       }, ms);
       p.then((value) => {
@@ -123,6 +125,7 @@ export class ActionExecutor {
       }).catch(() => {
         if (settled) return;
         settled = true;
+        this.cancel();
         clearTimeout(timer);
         resolve({ ok: false });
       });
@@ -203,6 +206,24 @@ export class ActionExecutor {
     });
 
     switch (step.action) {
+      case "set_basin_grip": {
+        const bridge=this.loco.basin,view=bridge?.snapshot("basin");
+        if(!bridge?.setGrip)return done("unsupported",null,"CAPABILITY_DISABLED");
+        if(view?.state!=="held"||this.loco.isMoving?.())return done("failed",null,"PRECONDITION_FAILED");
+        if(view.grip===step.grip)return done("succeeded",{grip:step.grip},"OK");
+        const r=await this.withTimeout(bridge.setGrip(step.grip),15000);
+        if(this.cancelled)return done("cancelled",{basin:bridge.snapshot("basin")},"CANCELLED");
+        return done(r.ok&&r.value?"succeeded":"failed",{basin:bridge.snapshot("basin")},r.ok&&r.value?"OK":"PRECONDITION_FAILED");
+      }
+      case "knock_basin": {
+        const bridge=this.loco.basin;
+        if(!bridge?.knock)return done("unsupported",null,"CAPABILITY_DISABLED");
+        if(!Number.isInteger(step.count)||step.count<1||step.count>32||step.tempo!=="normal"||step.tool_id!=="rice_scoop"||step.object_id!=="basin")return done("failed",null,"PRECONDITION_FAILED");
+        const r=await this.withTimeout(bridge.knock(step.count,stepId),45000);
+        const actual=r.ok?r.value:{requestedCount:step.count,committedCount:0,stopReason:"TIMEOUT"};
+        if(this.cancelled)return done("cancelled",actual,"CANCELLED");
+        return done(actual.committedCount===step.count?"succeeded":"failed",actual,actual.committedCount===step.count?"OK":"PRECONDITION_FAILED");
+      }
       case "turn": {
         const deg = step.angle_deg;
         if (typeof deg !== "number" || !Number.isFinite(deg) || Math.abs(deg) > 180) {
@@ -212,7 +233,7 @@ export class ActionExecutor {
         // 转向按帧推进，低帧率下墙钟会被拉长；卡死由 locomotion 的进度看门狗负责
         const raced = await this.withTimeout(this.loco.turn(deg), 60000);
         const after = this.state().yawDeg;
-        const actual = round(signedDeltaDeg(before, after));
+        const actual = round(raced.ok&&typeof raced.value==="number"?raced.value:signedDeltaDeg(before, after));
         if (!raced.ok) {
           return done("timeout", { angle_deg: actual, partial: true }, "TIMEOUT");
         }
@@ -221,7 +242,7 @@ export class ActionExecutor {
         }
         // 转向只看“最终朝向对不对”：+180° 和 -180° 是同一个朝向，
         // 直接比较数值会把正确的结果判成 ANGLE_MISMATCH（线上就是这么卡住的）。
-        if (Math.abs(signedDeltaDeg(deg, actual)) > 0.5) {
+        if (Math.abs(typeof (raced.ok?raced.value:undefined)==="number"?deg-actual:signedDeltaDeg(deg,actual)) > 0.5) {
           return done("failed", { requested_deg: deg, angle_deg: actual }, "ANGLE_MISMATCH");
         }
         return done("succeeded", { angle_deg: actual }, "OK");
@@ -259,7 +280,7 @@ export class ActionExecutor {
         if (this.cancelled) {
           return done("cancelled", { ...actual, partial: moved > 0 }, "CANCELLED");
         }
-        if (Math.abs(moved - meters) > 0.001) {
+        if (Math.abs(moved - meters) > 0.001 || Math.hypot(after.x-target.x,after.z-target.z)>.001) {
           // 目标在界内却走不满：几乎只可能是被主循环的边界 clamp 截断
           const atWall = Math.abs(after.x) > limit - 0.002 || Math.abs(after.z) > limit - 0.002;
           if (atWall) return done("failed", { ...this.blocked(after, yaw, meters), distance_m: round(moved) }, "BLOCKED");
@@ -269,6 +290,7 @@ export class ActionExecutor {
       }
 
       case "play": {
+        if(["greet","notice","think"].includes(step.action_id)&&this.loco.basin?.items().some(item=>item.state==="held"))return done("failed",{error:"HELD_ARM_CONFLICT"},"PRECONDITION_FAILED");
         if (!PLAYABLE.has(step.action_id)) {
           return done("unsupported", { supported: [...PLAYABLE] }, "CAPABILITY_DISABLED");
         }
@@ -288,6 +310,7 @@ export class ActionExecutor {
         const dur = step.duration_s;
         const raced = await this.withTimeout(this.loco.tail(step.style, dur), dur * 1000 + 1500);
         if (!raced.ok) return done("timeout", { style: step.style, duration_s: dur }, "TIMEOUT");
+        if(this.cancelled)return done("cancelled",{style:step.style,duration_s:dur},"CANCELLED");
         return done("succeeded", { style: step.style, duration_s: dur }, "OK");
       }
 
@@ -298,10 +321,12 @@ export class ActionExecutor {
         const dur = step.duration_s;
         const raced = await this.withTimeout(this.loco.sleep(dur * 1000), dur * 1000 + 800);
         if (!raced.ok) return done("timeout", { duration_s: dur }, "TIMEOUT");
+        if(this.cancelled)return done("cancelled",{duration_s:dur},"CANCELLED");
         return done("succeeded", { duration_s: dur }, "OK");
       }
 
       case "run": {
+        if(!Array.from({length:11},(_,i)=>Math.round((.144+.32*(i+1))*1000)/1000).includes(step.distance_m))return done("failed",null,"UNSUPPORTED_DISTANCE");
         const meters = step.distance_m;
         if (typeof meters !== "number" || !Number.isFinite(meters)) {
           return done("failed", null, "PRECONDITION_FAILED");
@@ -324,7 +349,7 @@ export class ActionExecutor {
         const actual = { distance_m: round(moved) };
         if (!raced.ok) return done("unknown", { ...actual, partial: true }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { ...actual, partial: moved > 0 }, "CANCELLED");
-        if (Math.abs(moved - meters) > 0.004) return done("failed", { requested_m: meters, ...actual }, "DISPLACEMENT_MISMATCH");
+        if (Math.abs(moved - meters) > 0.004 || Math.hypot(after.x-target.x,after.z-target.z)>.004) return done("failed", { requested_m: meters, ...actual }, "DISPLACEMENT_MISMATCH");
         return done("succeeded", actual, "OK");
       }
 
@@ -335,6 +360,7 @@ export class ActionExecutor {
         }
         const before = { ...this.loco.position() };
         const yaw = this.loco.yaw();
+        const target={x:before.x+Math.sin(yaw)*meters,z:before.z+Math.cos(yaw)*meters};
         if (meters > this.forwardRoom(before, yaw) + 1e-9) {
           return done("failed", this.blocked(before, yaw, meters), "BLOCKED");
         }
@@ -343,7 +369,7 @@ export class ActionExecutor {
         const moved = Math.hypot(after.x - before.x, after.z - before.z);
         if (!raced.ok) return done("unknown", { distance_m: round(moved), partial: true }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { distance_m: round(moved) }, "CANCELLED");
-        if (Math.abs(moved - meters) > 0.004) {
+        if (Math.abs(moved - meters) > 0.004 || Math.hypot(after.x-target.x,after.z-target.z)>.004) {
           const limit = this.half - this.margin;
           const atWall = Math.abs(after.x) > limit - 0.002 || Math.abs(after.z) > limit - 0.002;
           if (atWall) return done("failed", { ...this.blocked(after, yaw, meters), distance_m: round(moved) }, "BLOCKED");
@@ -375,6 +401,7 @@ export class ActionExecutor {
         const raced = await this.withTimeout(bridge.perform(step, stepId), 90000);
         if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
         const outcome = raced.value;
+        if(this.cancelled)return done("cancelled",outcome as unknown as Record<string,unknown>,"CANCELLED");
         if (!outcome.ok) return done("failed", outcome as unknown as Record<string, unknown>, "PRECONDITION_FAILED");
         return done(outcome.status === "lost" ? "failed" : "succeeded", outcome as unknown as Record<string, unknown>, outcome.status === "lost" ? "PRECONDITION_FAILED" : "OK");
       }
@@ -418,12 +445,14 @@ export class ActionExecutor {
             return done("failed", { upright, object: bridge.snapshot(objectId) }, "NOT_ALIGNED");
           }
         }
+        if(this.cancelled)return done("cancelled",{object:bridge.snapshot(objectId)},"CANCELLED");
         // 落地姿态不支持（饭勺平躺以外的姿态）时明确拒绝，不悄悄扶正
         if (bridge.canStart && !bridge.canStart(objectId, actionId)) {
           return done("failed", { object: view, error: "POSE_UNSUPPORTED" }, "OBJECT_POSE_UNSUPPORTED");
         }
         const raced = await this.withTimeout(bridge.perform(objectId, actionId), 60000);
         const after = bridge.snapshot(objectId) as BasinView;
+        if(this.cancelled)return done("cancelled",{basin:after},"CANCELLED");
         if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
         if (!raced.value || after.state !== "held") {
@@ -440,9 +469,10 @@ export class ActionExecutor {
         if (!actionId) return done("unsupported", { object_id: step.object_id }, "OBJECT_NOT_FOUND");
         const view = bridge.snapshot(objectId);
         if (!view) return done("failed", { object_id: objectId }, "OBJECT_NOT_FOUND");
-        if (view.state !== "held") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        if (view.state !== "held" || (objectId === "basin" && view.grip === "outward")) return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
         const raced = await this.withTimeout(bridge.perform(objectId, actionId), 60000);
         const after = bridge.snapshot(objectId) as BasinView;
+        if(this.cancelled)return done("cancelled",{basin:after},"CANCELLED");
         if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
         if (!raced.value || after.state !== "worn") return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
@@ -460,6 +490,7 @@ export class ActionExecutor {
         if (view.state !== "worn") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
         const raced = await this.withTimeout(bridge.perform(objectId, actionId), 60000);
         const after = bridge.snapshot(objectId) as BasinView;
+        if(this.cancelled)return done("cancelled",{basin:after},"CANCELLED");
         if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
         if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
         if (!raced.value || after.state !== "held") return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
@@ -486,9 +517,10 @@ export class ActionExecutor {
         }
         const view = bridge.snapshot(objectId);
         if (!view) return done("failed", { object_id: objectId }, "OBJECT_NOT_FOUND");
-        if (view.state !== "held") return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
+        if (view.state !== "held" || (objectId === "basin" && view.grip === "outward")) return done("failed", { basin: view }, "BASIN_STATE_MISMATCH");
         const raced = await this.withTimeout(bridge.perform(objectId, actionId, { directionDeg: direction, speed, spin: 180, elevationDeg: elevation }), 60000);
         const after = bridge.snapshot(objectId) as BasinView;
+        if(this.cancelled)return done("cancelled",{basin:after},"CANCELLED");
         if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
         if (!raced.value || (after.state !== "flying" && after.state !== "resting")) {
           return done("failed", { basin: after }, "BASIN_STATE_MISMATCH");
@@ -501,15 +533,8 @@ export class ActionExecutor {
         if (items.length > MAX_PARALLEL || items.some((i) => i.action === "parallel")) {
           return done("failed", null, "PRECONDITION_FAILED");
         }
-        const channels = items.map((i) => i.action);
-        const hasMove = channels.filter((c) => c === "turn" || c === "walk").length > 1;
-        const hasPlay = channels.filter((c) => c === "play").length > 1;
-        const hasTail = channels.filter((c) => c === "tail").length > 1;
-        const hasBasin = channels.some((c) => BASIN_ACTIONS.has(c));
-        if (hasMove || hasPlay || hasTail || hasBasin) {
-          return done("failed", null, "PRECONDITION_FAILED");
-        }
-        const results = await Promise.all(items.map((item, idx) => this.runStep(`${stepId}.${idx + 1}`, item)));
+        if (parallelConflict(items) || items.some(i=>i.action==="dig")) return done("failed",null,"PRECONDITION_FAILED");
+        const results = await Promise.all(items.map(async (item, idx) => {const r=await this.runStep(`${stepId}.${idx+1}`,item);if(r.status!=="succeeded")this.cancel();return r;}));
         const ok = results.every((r) => r.status === "succeeded");
         return done(ok ? "succeeded" : "failed", { items: results }, ok ? "OK" : "PRECONDITION_FAILED");
       }

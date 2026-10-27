@@ -1,7 +1,8 @@
 /** 能力注册表：模型说明、Schema 与执行校验的唯一来源（D 批）。 */
+import { parallelConflict } from "../shared/resources.mjs";
 import { SIZE } from "./minesweeper.mjs";
 
-export const CAPABILITY_VERSION = "cap-v1";
+export const CAPABILITY_VERSION = "cap-playful-v2-count32";
 
 const DISTANCES = [0.09, 0.27, 0.45, 0.63, 0.81, 0.99, 1.17, 1.35, 1.53, 1.71, 1.89];
 const PLAYS = ["greet", "notice", "nod", "look_left", "look_right", "think"];
@@ -61,6 +62,8 @@ export const CAPABILITIES = [
       speed_mps: { type: "number", min: 1, max: 6 },
     },
   },
+  { id:"set_basin_grip", enabled:true, channels:["body_locomotion","left_arm","item:basin"], params:{object_id:{enum:["basin"]},grip:{enum:["inward","outward"]}} },
+  { id:"knock_basin", enabled:true, channels:["body_locomotion","left_arm","right_arm","item:basin","item:rice_scoop"], params:{object_id:{enum:["basin"]},tool_id:{enum:["rice_scoop"]},count:{type:"integer",min:1,max:32},tempo:{enum:["normal"]}} },
   { id: "sit", enabled: false, disabledReason: "没有坐下片段" },
 ];
 
@@ -92,6 +95,7 @@ export function validatePlan(plan) {
       outcome: plan.outcome,
       speech: String(plan.speech ?? "").slice(0, 200),
       memoryProposals: Array.isArray(plan.memory_proposals) ? plan.memory_proposals : [],
+      summaryProposal: plan.summary_proposal ?? null,
     };
   }
   if (plan.type !== "execute_plan") throw new ModelError("INVALID_SCHEMA", "type 必须是 execute_plan 或 finish_task", 0);
@@ -103,6 +107,7 @@ export function validatePlan(plan) {
     speech: String(plan.speech ?? "").slice(0, 200),
     plan: { steps: steps.map((s, i) => validateStep(s, `s${i + 1}`)) },
     memoryProposals: Array.isArray(plan.memory_proposals) ? plan.memory_proposals : [],
+    summaryProposal: plan.summary_proposal ?? null,
   };
 }
 
@@ -135,6 +140,12 @@ export function validateStep(step, id = "step") {
   if (!cap.enabled) throw new ModelError("CAPABILITY_DISABLED", `${id} ${cap.id} 未启用：${cap.disabledReason}`, 0);
 
   switch (cap.id) {
+    case "set_basin_grip":
+      if(step.object_id!=="basin"||!["inward","outward"].includes(step.grip))throw new ModelError("INVALID_SCHEMA",`${id} 持盆参数非法`,0);
+      return {action:cap.id,object_id:"basin",grip:step.grip};
+    case "knock_basin":
+      if(step.object_id!=="basin"||step.tool_id!=="rice_scoop"||!Number.isInteger(step.count)||step.count<1||step.count>32||step.tempo!=="normal")throw new ModelError("INVALID_SCHEMA",`${id} count 必须整数1..32，tempo=normal，左盆右勺`,0);
+      return {action:cap.id,object_id:"basin",tool_id:"rice_scoop",count:step.count,tempo:"normal"};
     case "turn": {
       if (typeof step.angle_deg !== "number" || !Number.isFinite(step.angle_deg) || Math.abs(step.angle_deg) > 180) {
         throw new ModelError("INVALID_SCHEMA", `${id} angle_deg 必须是 [-180,180] 的数字`, 0);
@@ -227,6 +238,7 @@ export function validateStep(step, id = "step") {
       if (!items.length || items.length > 3) throw new ModelError("INVALID_SCHEMA", `${id} items 数量必须是 1..3`, 0);
       if (items.some((it) => it && it.action === "parallel")) throw new ModelError("INVALID_SCHEMA", `${id} 不允许嵌套 parallel`, 0);
       if (items.some((it) => it && it.action === "dig")) throw new ModelError("DIG_IN_PARALLEL", `${id} dig 不能放进 parallel`, 0);
+      if(parallelConflict(items))throw new ModelError("CHANNEL_CONFLICT",`${id} 并行动作资源冲突`,0);
       return { action: "parallel", items: items.map((it, j) => validateStep(it, `${id}.${j + 1}`)) };
     }
   }
@@ -239,8 +251,8 @@ export function outputContract() {
     .map((c) => {
       const props = Object.entries(c.params).map(([name, spec]) => {
         if (spec.enum) return `${name}:${JSON.stringify(spec.enum)}`;
-        if (spec.type === "number") {
-          if (spec.min !== undefined && spec.max !== undefined) return `${name}:number [${spec.min},${spec.max}]`;
+        if (spec.type === "number" || spec.type === "integer") {
+          if (spec.min !== undefined && spec.max !== undefined) return `${name}:${spec.type} [${spec.min},${spec.max}]`;
           if (spec.min !== undefined) return `${name}:number >=${spec.min}`;
           return `${name}:number`;
         }
@@ -250,11 +262,11 @@ export function outputContract() {
     })
     .join("\n");
   return [
-    'execute_plan: {"type":"execute_plan","speech":"string","steps":[Step 1..6],"memory_proposals":[{"key","value","source_quote"}] 可选}',
+    'execute_plan: {"type":"execute_plan","speech":"string","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
     'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
     "Step 只能取以下之一：",
     steps,
     '  {"action":"parallel","items":[Step 1..3]}（不嵌套，通道不冲突）',
-    "只输出一个 JSON 对象。",
+    "两种输出均可附memory_proposals最多2条、summary_proposal:{text,sourceMessageIds}；没有真实来源不提案。只输出一个 JSON 对象。",
   ].join("\n");
 }

@@ -1,0 +1,1174 @@
+{
+  "assetVersion": "playful-interaction-v2",
+  "rigVersion": "v9-anatomical-baked-1",
+  "character": "character_playful.glb",
+  "fps": 30,
+  "units": "meters",
+  "coordinateSystem": "glTF +Y up, +Z forward",
+  "bindings": {
+    "leftHand": {
+      "bone": "hand.l",
+      "matrixColumnMajor": [
+        0.6179642081260681,
+        0.784887969493866,
+        -0.04551510885357857,
+        0.0,
+        0.7505470514297485,
+        -0.606182873249054,
+        -0.26310062408447266,
+        0.0,
+        -0.23409442603588104,
+        0.1284254938364029,
+        -0.9636935591697693,
+        0.0,
+        0.12296584248542786,
+        0.402251273393631,
+        0.02373526617884636,
+        1.0
+      ]
+    },
+    "rightHand": {
+      "bone": "hand.r",
+      "matrixColumnMajor": [
+        0.6572391390800476,
+        0.7095180749893188,
+        0.25420594215393066,
+        0.0,
+        -0.7482162117958069,
+        0.5736925005912781,
+        0.3332397937774658,
+        0.0,
+        0.09060437977313995,
+        -0.40921932458877563,
+        0.9079257845878601,
+        0.0,
+        -0.0026285150088369846,
+        0.029666448011994362,
+        0.00331498053856194,
+        1.0
+      ]
+    },
+    "head": {
+      "bone": "head.x",
+      "matrixColumnMajor": [
+        1.0000001192092896,
+        3.821390412087197e-15,
+        -1.6703829269822217e-22,
+        0.0,
+        3.821376859560041e-15,
+        -1.0000001192092896,
+        8.742277657347586e-08,
+        0.0,
+        3.340753989496429e-22,
+        -8.742277657347586e-08,
+        -1.0000001192092896,
+        0.0,
+        -0.0020000003278255463,
+        0.34478265047073364,
+        -0.0006382715655490756,
+        1.0
+      ]
+    }
+  },
+  "wearMorph": "Basin_v2_Wear_Crown_Tuck",
+  "runtimeIntegrationVerified": false,
+  "actions": [
+    {
+      "id": "walk_start",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "clips": [
+        "walk_start.lower",
+        "walk_start.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": false,
+      "cooldown": 2,
+      "allowedStates": [
+        "moving"
+      ],
+      "interruptWindows": [],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ],
+      "internal": true,
+      "rootDistanceM": 0.045
+    },
+    {
+      "id": "walk_stop",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "clips": [
+        "walk_stop.lower",
+        "walk_stop.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": false,
+      "cooldown": 2,
+      "allowedStates": [
+        "moving"
+      ],
+      "interruptWindows": [],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ],
+      "internal": true,
+      "rootDistanceM": 0.045
+    },
+    {
+      "id": "idle_stand",
+      "duration": 4,
+      "layer": "base",
+      "loop": true,
+      "clips": [
+        "idle_stand.lower",
+        "idle_stand.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          4
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "walk",
+      "duration": 1.6,
+      "layer": "base",
+      "loop": true,
+      "clips": [
+        "walk.lower",
+        "walk.upperBase"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          1.6
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ],
+      "speedMps": 0.1125,
+      "strideM": 0.18,
+      "stepM": 0.09,
+      "candidateSpeedRange": [
+        0.75,
+        1.25
+      ],
+      "validatedSpeedRange": [
+        0.75,
+        1.25
+      ],
+      "supportPhase": {
+        "left": [
+          0,
+          0.5
+        ],
+        "right": [
+          0.5,
+          1
+        ]
+      },
+      "turnPolicy": "stop_then_face_then_walk",
+      "startAction": "walk_start",
+      "stopAction": "walk_stop",
+      "stopPolicy": "finish current stride to left-foot landing, then walk_stop",
+      "maxStopLatencySecondsAt1x": 2.4
+    },
+    {
+      "id": "greet",
+      "duration": 3,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "greet"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          3
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "notice",
+      "duration": 1.5,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "notice"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          1.5
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "nod",
+      "duration": 1.5,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "nod"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          1.5
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "look_left",
+      "duration": 2,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "look_left"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          2
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "look_right",
+      "duration": 2,
+      "layer": "upper",
+      "loop": false,
+      "clips": [
+        "look_right"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 2,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          2
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "think",
+      "duration": 3,
+      "layer": "upper",
+      "loop": true,
+      "clips": [
+        "think"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          3
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "tail_idle",
+      "duration": 3,
+      "layer": "tail",
+      "loop": true,
+      "clips": [
+        "tail_idle"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          3
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "tail_swish",
+      "duration": 2,
+      "layer": "tail",
+      "loop": true,
+      "clips": [
+        "tail_swish"
+      ],
+      "blendIn": 0.25,
+      "blendOut": 0.25,
+      "interruptible": true,
+      "cooldown": 0,
+      "allowedStates": [
+        "idle",
+        "moving"
+      ],
+      "interruptWindows": [
+        [
+          0,
+          2
+        ]
+      ],
+      "compatibleLayers": [
+        "base",
+        "upper",
+        "tail"
+      ]
+    },
+    {
+      "id": "pickup_basin",
+      "duration": 3.1,
+      "layer": "full_except_right_arm",
+      "events": [
+        {
+          "time": 1.05,
+          "type": "grasp",
+          "from": "resting",
+          "to": "held"
+        }
+      ],
+      "clips": [
+        "pickup_basin"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "hold_basin",
+      "duration": 2.0,
+      "layer": "left_arm",
+      "loop": true,
+      "events": [],
+      "clips": [
+        "hold_basin"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "throw_basin",
+      "duration": 2.3,
+      "layer": "full_except_right_arm",
+      "events": [
+        {
+          "time": 0.88,
+          "type": "release",
+          "from": "held",
+          "to": "flying"
+        }
+      ],
+      "clips": [
+        "throw_basin"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15,
+      "completionStatePolicy": "preserve latest physics state; never force flying",
+      "relativeYawRangeDeg": [
+        -45,
+        45
+      ]
+    },
+    {
+      "id": "wear_basin",
+      "duration": 3.0,
+      "layer": "full_except_right_arm",
+      "events": [
+        {
+          "time": 0.7,
+          "type": "hand_release_to_transfer",
+          "from": "held",
+          "to": "transferring"
+        },
+        {
+          "time": 1.95,
+          "type": "head_attach",
+          "from": "transferring",
+          "to": "worn"
+        }
+      ],
+      "clips": [
+        "wear_basin"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "unwear_basin",
+      "duration": 3.0,
+      "layer": "full_except_right_arm",
+      "events": [
+        {
+          "time": 0.65,
+          "type": "head_release_to_transfer",
+          "from": "worn",
+          "to": "transferring"
+        },
+        {
+          "time": 2.0,
+          "type": "hand_catch",
+          "from": "transferring",
+          "to": "held"
+        }
+      ],
+      "clips": [
+        "unwear_basin"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "hold_scoop",
+      "duration": 2.0,
+      "layer": "right_arm",
+      "loop": true,
+      "events": [],
+      "clips": [
+        "hold_scoop"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "dig",
+      "duration": 1.7,
+      "layer": "full_except_left_arm",
+      "events": [
+        {
+          "time": 0.72,
+          "type": "dig_contact"
+        }
+      ],
+      "clips": [
+        "dig"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15,
+      "effect": "project scoop blade onto occupied cell at dig_contact; no physical ground contact required",
+      "preconditions": [
+        "stationary in target cell",
+        "right_hand holds scoop",
+        "game/revision valid"
+      ]
+    },
+    {
+      "id": "pickup_scoop",
+      "duration": 2.0,
+      "layer": "full_except_left_arm",
+      "events": [
+        {
+          "time": 0.48,
+          "type": "toe_lift",
+          "from": "resting",
+          "to": "transferring"
+        },
+        {
+          "time": 1.18,
+          "type": "hand_catch",
+          "from": "transferring",
+          "to": "held"
+        }
+      ],
+      "clips": [
+        "pickup_scoop"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15,
+      "style": "user-approved toe-flick and right-hand catch",
+      "supportedGroundPose": "flat face-up OR face-down, static, level floor; align body yaw to utensil long axis"
+    },
+    {
+      "id": "throw_scoop",
+      "duration": 2.0,
+      "layer": "full_except_left_arm",
+      "events": [
+        {
+          "time": 0.68,
+          "type": "release",
+          "from": "held",
+          "to": "flying"
+        }
+      ],
+      "clips": [
+        "throw_scoop"
+      ],
+      "rootMotion": "in-place",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15,
+      "completionStatePolicy": "preserve latest physics state; never force flying",
+      "relativeYawRangeDeg": [
+        -45,
+        45
+      ]
+    },
+    {
+      "id": "run_start",
+      "duration": 0.4,
+      "layer": "base",
+      "loop": false,
+      "distanceM": 0.08,
+      "clips": [
+        "run_start.lower",
+        "run_start.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "run",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": true,
+      "strideM": 0.32,
+      "speedMps": 0.39999999999999997,
+      "stepM": 0.16,
+      "clips": [
+        "run.lower",
+        "run.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "run_stop",
+      "duration": 0.4,
+      "layer": "base",
+      "loop": false,
+      "distanceM": 0.064,
+      "clips": [
+        "run_stop.lower",
+        "run_stop.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "walk_adjust_02",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "distanceM": 0.02,
+      "internal": true,
+      "clips": [
+        "walk_adjust_02.lower",
+        "walk_adjust_02.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "walk_adjust_04",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "distanceM": 0.04,
+      "internal": true,
+      "clips": [
+        "walk_adjust_04.lower",
+        "walk_adjust_04.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "walk_adjust_06",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "distanceM": 0.06,
+      "internal": true,
+      "clips": [
+        "walk_adjust_06.lower",
+        "walk_adjust_06.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "walk_adjust_08",
+      "duration": 0.8,
+      "layer": "base",
+      "loop": false,
+      "distanceM": 0.08,
+      "internal": true,
+      "clips": [
+        "walk_adjust_08.lower",
+        "walk_adjust_08.upperBase"
+      ],
+      "rootMotion": "external matched displacement curve",
+      "inactiveHandPolicy": "preserve other occupied hand hold; override only active arm",
+      "blendInSeconds": 0.12,
+      "blendOutSeconds": 0.15
+    },
+    {
+      "id": "hold_basin_outward",
+      "duration": 2.0,
+      "layer": "left_arm",
+      "loop": true,
+      "clips": [
+        "hold_basin_outward"
+      ],
+      "rootMotion": "in-place",
+      "events": [],
+      "blendInSeconds": 0,
+      "blendOutSeconds": 0,
+      "inactiveHandPolicy": "preserve right occupied hold for grip actions; knock segments own both arms",
+      "transitionPolicy": "use exact endpoints; do not crossfade through contact event or let hold overwrite active arms"
+    },
+    {
+      "id": "basin_grip_outward",
+      "duration": 1.6,
+      "layer": "left_arm",
+      "loop": false,
+      "events": [
+        {
+          "time": 1.45,
+          "type": "grip_commit",
+          "grip": "outward"
+        }
+      ],
+      "clips": [
+        "basin_grip_outward"
+      ],
+      "rootMotion": "in-place",
+      "blendInSeconds": 0,
+      "blendOutSeconds": 0,
+      "inactiveHandPolicy": "preserve right occupied hold for grip actions; knock segments own both arms",
+      "transitionPolicy": "use exact endpoints; do not crossfade through contact event or let hold overwrite active arms"
+    },
+    {
+      "id": "basin_grip_inward",
+      "duration": 1.6,
+      "layer": "left_arm",
+      "loop": false,
+      "events": [
+        {
+          "time": 1.45,
+          "type": "grip_commit",
+          "grip": "inward"
+        }
+      ],
+      "clips": [
+        "basin_grip_inward"
+      ],
+      "rootMotion": "in-place",
+      "blendInSeconds": 0,
+      "blendOutSeconds": 0,
+      "inactiveHandPolicy": "preserve right occupied hold for grip actions; knock segments own both arms",
+      "transitionPolicy": "use exact endpoints; do not crossfade through contact event or let hold overwrite active arms"
+    },
+    {
+      "id": "knock_basin_prepare",
+      "duration": 0.7,
+      "layer": "both_arms",
+      "loop": false,
+      "clips": [
+        "knock_basin_prepare"
+      ],
+      "rootMotion": "in-place",
+      "events": [],
+      "blendInSeconds": 0,
+      "blendOutSeconds": 0,
+      "inactiveHandPolicy": "preserve right occupied hold for grip actions; knock segments own both arms",
+      "transitionPolicy": "use exact endpoints; do not crossfade through contact event or let hold overwrite active arms"
+    },
+    {
+      "id": "knock_basin_hit",
+      "duration": 0.6,
+      "layer": "both_arms",
+      "loop": true,
+      "events": [
+        {
+          "time": 0.24,
+          "type": "knock_contact"
+        }
+      ],
+      "clips": [
+        "knock_basin_hit"
+      ],
+      "rootMotion": "in-place",
+      "blendInSeconds": 0,
+      "blendOutSeconds": 0,
+      "inactiveHandPolicy": "preserve right occupied hold for grip actions; knock segments own both arms",
+      "transitionPolicy": "use exact endpoints; do not crossfade through contact event or let hold overwrite active arms"
+    },
+    {
+      "id": "knock_basin_finish",
+      "duration": 0.7,
+      "layer": "both_arms",
+      "loop": false,
+      "clips": [
+        "knock_basin_finish"
+      ],
+      "rootMotion": "in-place",
+      "events": [],
+      "blendInSeconds": 0,
+      "blendOutSeconds": 0,
+      "inactiveHandPolicy": "preserve right occupied hold for grip actions; knock segments own both arms",
+      "transitionPolicy": "use exact endpoints; do not crossfade through contact event or let hold overwrite active arms"
+    }
+  ],
+  "armMasks": {
+    "left_arm": [
+      "arm_stretch.l",
+      "arm_twist_2.l",
+      "c_arm_twist_offset.l",
+      "forearm_stretch.l",
+      "forearm_twist.l",
+      "forearm_twist_2.l",
+      "hand.l",
+      "shoulder.l"
+    ],
+    "right_arm": [
+      "arm_stretch.r",
+      "arm_twist_2.r",
+      "c_arm_twist_offset.r",
+      "forearm_stretch.r",
+      "forearm_twist.r",
+      "forearm_twist_2.r",
+      "hand.r",
+      "shoulder.r"
+    ]
+  },
+  "previousPackage": "minesweeper-assets-v1-straight-scoop-v3",
+  "breakingChange": "basin moves from right hand to left hand; replace character/catalog/motion/tracks atomically",
+  "rigSignature": "8bac3bb5402a873a74b8d7eef0a1b9c8d6ccfee56c62842a10315ec419d5102e",
+  "locomotion": {
+    "run": {
+      "speedMps": 0.4,
+      "strideM": 0.32,
+      "stepM": 0.16,
+      "cycleSeconds": 0.8,
+      "startDistanceM": 0.08,
+      "stopDistanceM": 0.064,
+      "startSeconds": 0.4,
+      "stopSeconds": 0.4,
+      "minimumDistanceM": 0.144,
+      "allowedDistanceM": ".144 + N*.32; N integer >= 0; recommend N>=1 for visibly running",
+      "timeScaleRange": [
+        0.85,
+        1.15
+      ],
+      "timeScaleValidation": "authoring timing scales; runtime must validate stop and collision at both ends",
+      "rootCurves": {
+        "run_start": "distance=.08*(time/.4)^2",
+        "run": "distance=.4*time",
+        "run_stop": "distance=.064*(2*u-u*u); u=time/.4"
+      },
+      "supportPhase": {
+        "left": [
+          0,
+          0.4
+        ],
+        "right": [
+          0.5,
+          0.9
+        ]
+      },
+      "turnPolicy": "stop then explicit turn",
+      "residualPolicy": "return remainder to LLM, use explicit walk; no silent extra distance"
+    },
+    "walk_adjust": {
+      "actionIds": [
+        "walk_adjust_02",
+        "walk_adjust_04",
+        "walk_adjust_06",
+        "walk_adjust_08"
+      ],
+      "distanceMeters": [
+        0.02,
+        0.04,
+        0.06,
+        0.08
+      ],
+      "durationSeconds": 0.8,
+      "rootCurve": "distance_m * smoothstep(0,1,time/.8)",
+      "timeScaleRange": [
+        1,
+        1
+      ],
+      "purpose": "explicit small forward walks; turn separately; return measured residual, never teleport",
+      "nominalMaximumQuantizationErrorM": 0.01
+    }
+  },
+  "effectPoints": {
+    "dig": {
+      "object": "rice_scoop",
+      "localPoint": [
+        0.0,
+        0.03374672681093216,
+        -0.2593194544315338
+      ],
+      "kind": "vertical projection onto current grid cell",
+      "contactTimeSeconds": 0.72
+    },
+    "knock": {
+      "object": "rice_scoop",
+      "localPoint": [
+        -0.006333500612527132,
+        0.024930700659751892,
+        -0.25582724809646606
+      ],
+      "targetObject": "basin",
+      "contactTimeInHitClipSeconds": 0.24,
+      "validation": "nearest metal surface and geometry clearance; replay dedupe by actionInstanceId/hitIndex"
+    }
+  },
+  "props": {
+    "basin": {
+      "file": "steel_basin_v2.glb",
+      "allowedHolders": [
+        "left_hand",
+        "head"
+      ],
+      "binding": "leftHand",
+      "headBinding": "head",
+      "pickupReference": {
+        "time": 0.0,
+        "position": [
+          0.5460312962532043,
+          0.13366031646728516,
+          0.21008826792240143
+        ],
+        "quaternion": [
+          -3.224288320780033e-07,
+          -0.2164393663406372,
+          7.297589377230906e-08,
+          0.976296067237854
+        ],
+        "wearMorph": 0
+      },
+      "handGrips": {
+        "inward": {
+          "holdClip": "hold_basin",
+          "binding": "leftHand"
+        },
+        "outward": {
+          "holdClip": "hold_basin_outward",
+          "binding": "leftHand"
+        }
+      },
+      "gripTransitions": {
+        "inwardToOutward": "basin_grip_outward",
+        "outwardToInward": "basin_grip_inward",
+        "commitTimeSeconds": 1.45,
+        "durationSeconds": 1.6,
+        "sameAttachmentThroughout": true
+      }
+    },
+    "rice_scoop": {
+      "file": "rice_scoop_straight_v3.glb",
+      "allowedHolders": [
+        "right_hand"
+      ],
+      "binding": "rightHand",
+      "pickupReference": {
+        "time": 0.0,
+        "position": [
+          -0.07000000029802322,
+          0.01590230129659176,
+          0.11500000208616257
+        ],
+        "quaternion": [
+          -1.3920706809500416e-09,
+          0.9994927644729614,
+          0.031846821308135986,
+          4.3689215800668535e-08
+        ],
+        "wearMorph": 0
+      },
+      "floorPose": "two supported tilted rest orientations in pickupVariants; do not assume shaft or bowl rim parallel to floor",
+      "massKgCandidate": 0.14,
+      "physicsStatus": "shape and damping candidates need engine validation",
+      "collisionProxies": [
+        {
+          "shape": "box",
+          "halfExtents": [
+            0.012,
+            0.012,
+            0.064
+          ],
+          "center": [
+            0,
+            0,
+            -0.014
+          ]
+        },
+        {
+          "shape": "box",
+          "halfExtents": [
+            0.0045,
+            0.0018,
+            0.065
+          ],
+          "center": [
+            0,
+            0,
+            -0.138
+          ]
+        },
+        {
+          "shape": "box",
+          "halfExtents": [
+            0.054099999368190765,
+            0.051384542137384415,
+            0.034484103322029114
+          ],
+          "center": [
+            0.0,
+            0.04838453233242035,
+            -0.228484109044075
+          ]
+        }
+      ],
+      "pickupVariants": {
+        "face_up": {
+          "bodyClip": "pickup_scoop",
+          "motionClip": "pickup_scoop",
+          "reference": {
+            "time": 0.0,
+            "position": [
+              -0.07000000029802322,
+              0.01590230129659176,
+              0.11500000208616257
+            ],
+            "quaternion": [
+              -1.3920706809500416e-09,
+              0.9994927644729614,
+              0.031846821308135986,
+              4.3689215800668535e-08
+            ],
+            "wearMorph": 0
+          }
+        },
+        "face_down": {
+          "bodyClip": "pickup_scoop",
+          "motionClip": "pickup_scoop_face_down",
+          "reference": {
+            "time": 0.0,
+            "position": [
+              -0.07000000029802322,
+              0.024130016565322876,
+              0.11500000208616257
+            ],
+            "quaternion": [
+              0.988228440284729,
+              -4.988404000982882e-08,
+              4.988404711525618e-08,
+              0.1529858410358429
+            ],
+            "wearMorph": 0
+          }
+        }
+      },
+      "visualRevision": "wooden grip and perfectly straight coaxial shaft; bowl alone tilted 70 degrees",
+      "bowlOpeningNormalLocal": [
+        0,
+        0.3420201433256688,
+        0.9396926207859083
+      ],
+      "shaftAxisLocal": [
+        0,
+        0,
+        -1
+      ],
+      "bowlPlaneToShaftDegrees": 70
+    }
+  },
+  "attachmentsApplyTo": "identity wrapper of full glTF scene, no extra scale/rotation",
+  "pickupScoopDesignDecision": "user approved toe-flick and right-hand catch on 2026-10-26",
+  "scopeOfRevision": "append six arm-only actions to unchanged 83-bone character; preserve all previous clips, meshes, weights, morphs and prop bindings",
+  "revisionNotes": {
+    "replaces": "playful-interaction-v1",
+    "revisedClips": [
+      "knock_basin_prepare",
+      "knock_basin_hit",
+      "knock_basin_finish"
+    ],
+    "unchangedPlayfulClips": [
+      "hold_basin_outward",
+      "basin_grip_outward",
+      "basin_grip_inward"
+    ],
+    "motionMethod": "Shoulder-driven FK; fixed elbow hinge and neutral wrist during hit; no hand-position IK",
+    "shoulderSwingDeg": 32,
+    "elbowFlexDeg": 35,
+    "runtimeBoneParametersExposed": false,
+    "audioRevision": "playful-audio-v2 recorded CC0 foley"
+  },
+  "knockSequence": {
+    "prepare": "knock_basin_prepare",
+    "hit": "knock_basin_hit",
+    "finish": "knock_basin_finish",
+    "countRange": [
+      1,
+      32
+    ],
+    "tempo": [
+      "normal"
+    ],
+    "timeScale": 1,
+    "durationSeconds": "0.7 + count*0.6 + 0.7",
+    "contactTimesSeconds": "0.7 + hitIndex*0.6 + 0.24 (hitIndex=0..count-1)",
+    "exitGrip": "outward",
+    "cancelPolicy": "stop further hit events, preserve committed count; use finish from ready boundary or safe blend from current pose, never teleport props",
+    "preconditions": [
+      "stationary",
+      "left_hand basin held with grip outward",
+      "right_hand rice_scoop held",
+      "no conflicting active body or arm action"
+    ]
+  },
+  "playfulIntegration": {
+    "audioVersion": "basin-audio-v3",
+    "countRange": [
+      1,
+      32
+    ],
+    "userDecision": "2026-10-27"
+  }
+}

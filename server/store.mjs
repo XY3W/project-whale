@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const EMPTY = () => ({ session: null, history: [], ledger: {}, character: null, savedAt: 0 });
+const EMPTY = () => ({ schemaVersion:2, revision:0, session: null, history: [], ledger: {}, character: null, savedAt: 0 });
 
 export function createStore(file, debounceMs = 300) {
   let state = load();
@@ -39,6 +39,7 @@ export function createStore(file, debounceMs = 300) {
     },
     update(mutate) {
       mutate(state);
+      state.schemaVersion=2;state.revision=(state.revision??0)+1;
       if (!timer) timer = setTimeout(flush, debounceMs);
     },
     flush,
@@ -52,7 +53,7 @@ export function createStore(file, debounceMs = 300) {
 /** 启动对账：上次仍在执行的任务不可当作完成 */
 export function reconcileOnLoad(stored) {
   const out = { ...EMPTY(), ...stored };
-  if (out.session && ["thinking", "executing", "checking"].includes(out.session.phase)) {
+  if (out.session && ["thinking", "executing", "checking", "stopping"].includes(out.session.phase)) {
     out.session = { ...out.session, phase: "unknown", reconciledAt: Date.now() };
   }
   return out;

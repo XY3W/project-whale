@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { PoseOverlay } from './PoseOverlay';
+import { PoseOverlay } from './PoseOverlay.ts';
 
 
 export interface PerformanceEvent {
@@ -62,6 +62,7 @@ export class LayeredMotionPlayer {
   private tailMix = 0;
   private rate = 1;
   private perf: Performance | null = null;
+  private perfBody: PoseOverlay | null = null;
   private holds = new Map<string, { overlay: PoseOverlay; enabled: boolean; time: number }>();
   private soloAction: THREE.AnimationAction | null = null;
   private soloName: string | null = null;
@@ -73,11 +74,13 @@ export class LayeredMotionPlayer {
   holdStats: { applied: string[]; skipped: string[]; layer: string | null } = { applied: [], skipped: [], layer: null };
   get speed() { return this.rate; }
   set speed(value: number) { this.rate = THREE.MathUtils.clamp(value, .75, 1.25); }
-  constructor(private readonly root: THREE.Object3D, clips: THREE.AnimationClip[]) {
+  private readonly root: THREE.Object3D;
+  constructor(root: THREE.Object3D, clips: THREE.AnimationClip[]) {
+    this.root=root;
     this.mixer = new THREE.AnimationMixer(root);
     for (const clip of clips) {
       const a = this.mixer.clipAction(clip); a.setEffectiveWeight(0); a.play();
-      if (['greet', 'notice', 'nod', 'look_left', 'look_right'].includes(clip.name) || clip.name.startsWith('walk_start.') || clip.name.startsWith('walk_stop.')) {
+      if (['greet', 'notice', 'nod', 'look_left', 'look_right','think'].includes(clip.name) || clip.name.startsWith('walk_start.') || clip.name.startsWith('walk_stop.')) {
         a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true;
       }
       this.actions.set(clip.name, a);
@@ -209,12 +212,45 @@ export class LayeredMotionPlayer {
     action.setEffectiveWeight(1);
     action.setEffectiveTimeScale(1);
     action.play();
+    this.perfBody=null;
+    if(['left_arm','right_arm','both_arms'].includes(layer)){
+      const owned=new Set(action.getClip().tracks.map(t=>t.name));
+      const tracks=['idle_stand.lower','idle_stand.upperBase'].flatMap(n=>this.get(n).getClip().tracks).filter(t=>!owned.has(t.name));
+      this.perfBody=new PoseOverlay(this.root,new THREE.AnimationClip('unowned_body',2,tracks));
+    }
     const sorted = [...events].sort((a, b) => a.time - b.time);
     return new Promise<boolean>((resolve) => {
       this.perf = { name, action, events: sorted, next: 0, onEvent, ending: false, cancelled: false, fade: 1, layer, resolve };
       this.weights();
       this.mixer.update(0);
     });
+  }
+
+  performKnocks(count:number,onContact:(index:number)=>void):Promise<boolean> {
+    if(!Number.isInteger(count)||count<1||count>32)return Promise.resolve(false);
+    const name=`knock_sequence_${count}`;
+    if(!this.actions.has(name)){
+      const segments=[{name:'knock_basin_prepare',duration:.7},...Array.from({length:count},()=>({name:'knock_basin_hit',duration:.6})),{name:'knock_basin_finish',duration:.7}];
+      const tracks=new Map<string,{track:THREE.KeyframeTrack;times:number[];values:number[]}>();
+      let offset=0;
+      for(const segment of segments){
+        for(const track of this.get(segment.name).getClip().tracks){
+          let target=tracks.get(track.name);if(!target){target={track,times:[],values:[]};tracks.set(track.name,target);}
+          const size=track.getValueSize();
+          for(let k=0;k<track.times.length;k++){
+            const time=offset+Math.min(segment.duration,track.times[k]);
+            if(target.times.length&&Math.abs(target.times.at(-1)!-time)<1e-6){target.times.pop();target.values.splice(-size);}
+            target.times.push(time);target.values.push(...track.values.slice(k*size,(k+1)*size));
+          }
+        }
+        offset+=segment.duration;
+      }
+      const merged=[...tracks.values()].map(t=>{const out=t.track.clone();out.times=new Float32Array(t.times);out.values=new Float32Array(t.values);return out;});
+      const clip=new THREE.AnimationClip(name,.7+.6*count+.7,merged);
+      this.actions.set(name,this.mixer.clipAction(clip));
+    }
+    const events=Array.from({length:count},(_,i)=>({time:.7+i*.6+.24,type:`knock_contact:${i+1}`}));
+    return this.perform(name,events,type=>onContact(Number(type.split(':')[1])),'both_arms');
   }
 
   /** 取消当前互动片段：淡出后按未完成收尾 */
@@ -349,7 +385,7 @@ export class LayeredMotionPlayer {
    */
   private perfOwnsArm(layer: string | null, slot: string): boolean {
     if (!layer) return false;
-    if (layer === 'full_body') return true;
+    if (layer === 'full_body' || layer === 'both_arms') return true;
     if (layer === 'left_arm') return slot === 'left_hand';
     if (layer === 'right_arm') return slot === 'right_hand';
     if (layer === 'full_except_left_arm') return slot === 'right_hand';
@@ -361,6 +397,7 @@ export class LayeredMotionPlayer {
   private applyHolds(dt: number) {
     const perf = this.perf;
     const layer = perf?.layer ?? null;
+    if(perf && this.perfBody)this.perfBody.apply(perf.action.time);
     this.holdStats = { applied: [], skipped: [], layer };
     for (const [slot, hold] of this.holds) {
       if (!hold.enabled) continue;
@@ -415,7 +452,7 @@ export class LayeredMotionPlayer {
     if (!perf.ending) {
       const duration = perf.action.getClip().duration;
       let guard = 0;
-      while (remaining > 1e-9 && guard++ < 32) {
+      while (remaining > 1e-9 && !perf.cancelled && guard++ < 128) {
         const event = perf.events[perf.next];
         const until = event ? Math.max(0, event.time - perf.action.time) : remaining;
         const step = Math.min(remaining, until);

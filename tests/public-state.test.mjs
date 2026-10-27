@@ -36,13 +36,14 @@ test("饭勺不能戴头：旧数据 worn 降级成右手持有", () => {
   assert.equal(rec.holder, "right_hand");
 });
 
-test("飞行/转移中不落盘：退回上一份稳定快照", () => {
+test("飞行/转移如实保留，checkpoint不能冒充当前位置状态", () => {
   const previous = sanitizeProp(basin({ state: "held", holder: "left_hand" }));
   const flying = sanitizeProp(basin({ state: "flying", holder: null }), previous);
-  assert.equal(flying.state, "held");
-  assert.equal(flying.holder, "left_hand");
+  assert.equal(flying.state, "flying");
+  assert.equal(flying.checkpoint.state,"held");
+  assert.equal(flying.holder, null);
   const orphan = sanitizeProp(scoop({ state: "transferring" }));
-  assert.equal(orphan.state, "resting");
+  assert.equal(orphan.state, "transferring");
   assert.equal(orphan.holder, null);
 });
 

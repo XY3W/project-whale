@@ -40,6 +40,8 @@ export interface PlanResult {
 }
 
 export type Step =
+  | { action:"set_basin_grip";object_id:"basin";grip:"inward"|"outward" }
+  | { action:"knock_basin";object_id:"basin";tool_id:"rice_scoop";count:number;tempo:"normal" }
   | { action: "turn"; angle_deg: number }
   | { action: "walk"; distance_m: number }
   | { action: "play"; action_id: string }
@@ -68,7 +70,7 @@ export interface Locomotion {
   adjust?(meters: number): Promise<void>;
   /** 跑动：0.144 + 0.32N 米 */
   run?(meters: number): Promise<void>;
-  turn(deg: number): Promise<void>;
+  turn(deg: number): Promise<void|number>;
   play(actionId: string): Promise<void>;
   tail(style: "tail_idle" | "tail_swish", durationS: number): Promise<void>;
   sleep(ms: number): Promise<void>;
@@ -85,6 +87,7 @@ export interface BasinView {
   object_id?: string;
   revision?: number;
   state: string;
+  grip?: "inward"|"outward"|null;
   position: [number, number, number];
   upright: boolean;
   stationary: boolean;
@@ -128,6 +131,8 @@ export interface BasinBridge {
   perform(objectId: string, actionId: string, spec?: ThrowRequest): Promise<boolean>;
   /** 当前状态能否开始该动作 */
   canStart(objectId: string, actionId: string): boolean;
+  setGrip?(grip:"inward"|"outward"):Promise<boolean>;
+  knock?(count:number,actionId:string):Promise<{requestedCount:number;committedCount:number;stopReason:string}>;
   cancel(): void;
 }
 

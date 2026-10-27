@@ -47,7 +47,8 @@ export const thinkingConfig = () => ({ type: THINKING_TYPE, effort: REASONING_EF
 
 export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
-export const SYSTEM_PROMPT = readPrompt("system.txt");
+export const SYSTEM_PROMPT = readPrompt("system.txt") + "\n\n" + readPrompt("persona.txt");
+export const PROMPT_VERSION="prompt-20261027-v2";
 
 const OUTPUT_CONTRACT = outputContract();
 
@@ -75,10 +76,11 @@ export function reviewMessages(ctx) {
   return render("review.txt", { ...ctx, phase: "review" });
 }
 
-export async function callModel(messages) {
+export async function callModel(messages, signal) {
   if (!hasKey()) throw new ModelError("NO_KEY", "服务端未配置 DEEPSEEK_API_KEY", 0);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
+  const abort=()=>ctl.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)ctl.abort();
   let res;
   try {
     res = await fetch(API, {
@@ -104,21 +106,23 @@ export async function callModel(messages) {
     if (err.name === "AbortError") throw new ModelError("TIMEOUT", "模型请求超时", 0);
     throw new ModelError("NETWORK", `模型连接失败：${err.message}`, 0);
   }
-  clearTimeout(timer);
+  // Keep the timeout active while reading the response body.
+  let data;
+  try { data=await res.json(); } finally {clearTimeout(timer);signal?.removeEventListener("abort",abort);}
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text = JSON.stringify(data);
     if (res.status === 401 || res.status === 403) throw new ModelError("AUTH", "API Key 无效或没有权限", res.status);
     if (res.status === 429) throw new ModelError("RATE_LIMIT", "模型限流，请稍后再试", res.status);
     throw new ModelError("API_ERROR", `模型返回 ${res.status}：${text.slice(0, 120)}`, res.status);
   }
-  const data = await res.json();
+
   const choice = data?.choices?.[0];
   const content = choice?.message?.content;
   if (THINKING) {
-    const reasoning = choice?.message?.reasoning_content;
+
     const reasoningTokens = data?.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
     console.log(
-      `[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${reasoningTokens} · ${String(reasoning ?? "").slice(0, 80).replace(/\s+/g, " ")}`,
+      `[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${reasoningTokens}`,
     );
   }
   if (choice?.finish_reason === "length") {

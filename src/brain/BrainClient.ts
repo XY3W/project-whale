@@ -23,7 +23,8 @@ export interface ReplyMessage {
 type Handlers = {
   onPlan?: (msg: PlanMessage) => void;
   onReply?: (msg: ReplyMessage) => void;
-  onTaskState?: (phase: string) => void;
+  onTaskState?: (phase: string, taskId?:string) => void;
+  onMode?:(mode:unknown)=>void;
   onCancel?: (taskId: string) => void;
   onReadOnly?: (readOnly: boolean) => void;
   onReconcile?: () => void;
@@ -60,7 +61,7 @@ export class BrainClient {
     this.ws.addEventListener("open", () => {
       this.retry = 0;
       this.handlers.onConnection?.(true);
-      this.send("hello", {});
+      this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count32"});
       this.startHeartbeat();
     });
     this.ws.addEventListener("close", () => {
@@ -69,7 +70,7 @@ export class BrainClient {
     });
     // 页面重新可见/聚焦时重新申请执行权（后台节流会导致心跳断档）
     const reclaim = () => {
-      if (document.visibilityState === "visible") this.send("hello", {});
+      if (document.visibilityState === "visible") this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count32"});
     };
     document.addEventListener("visibilitychange", reclaim);
     window.addEventListener("focus", () => this.send("hello", {}));
@@ -88,7 +89,7 @@ export class BrainClient {
           this.handlers.onReply?.(msg as unknown as ReplyMessage);
           break;
         case "task_state":
-          this.handlers.onTaskState?.(String(msg.phase));
+          this.handlers.onTaskState?.(String(msg.phase),String(msg.taskId??""));
           break;
         case "cancel_plan":
           this.handlers.onCancel?.(String(msg.taskId));
@@ -104,15 +105,17 @@ export class BrainClient {
             clearInterval(this.takeover);
             this.takeover = null;
           }
-          if (msg.needsReconcile) this.handlers.onReconcile?.();
+
           // session_state 也携带任务阶段：任务结束后必须清除“思考中”
-          if (typeof msg.phase === "string") this.handlers.onTaskState?.(msg.phase);
+          if (typeof msg.phase === "string") this.handlers.onTaskState?.(msg.phase,String(msg.taskId??""));
           const ch = msg.character as { x: number; z: number; yawDeg: number } | undefined;
           if (ch && Number.isFinite(ch.x) && Number.isFinite(ch.z) && Number.isFinite(ch.yawDeg)) {
             this.handlers.onSnapshot?.(ch);
           }
           if (msg.basin) this.handlers.onBasin?.(msg.basin as Record<string, unknown>);
-          if (msg.game) this.handlers.onGame?.(msg.game);
+          if ("game" in msg) this.handlers.onGame?.(msg.game);
+          if(msg.behaviorMode)this.handlers.onMode?.(msg.behaviorMode);
+          if (msg.needsReconcile) this.handlers.onReconcile?.();
           break;
         }
         case "game_state":
@@ -157,7 +160,7 @@ export class BrainClient {
   sendPlanResult(
     taskId: string,
     result: unknown,
-    meta: { generation?: number; planId?: string } = {},
+    meta: { generation?: number; planId?: string;leaseEpoch?:number } = {},
     snapshot?: Record<string, unknown>,
   ) {
     // 快照随结果一起上报：审核阶段必须看到“执行完之后的真实位置”，
@@ -168,10 +171,13 @@ export class BrainClient {
       snapshot,
       generation: meta.generation,
       planId: meta.planId,
-      leaseEpoch: this.leaseEpoch,
+      leaseEpoch: meta.leaseEpoch??this.leaseEpoch,
     });
   }
 
+  ready(taskId:string,snapshot:Record<string,unknown>){return this.send("executor_ready",{taskId,snapshot,leaseEpoch:this.leaseEpoch});}
+  setMode(mode:string){return this.send('mode_set',{mode,leaseEpoch:this.leaseEpoch});}
+  acknowledgeStop(taskId:string,snapshot:Record<string,unknown>){return this.send('stop_ack',{taskId,snapshot,leaseEpoch:this.leaseEpoch});}
   setChatOpen(open: boolean) {
     return this.send(open ? "chat_opened" : "chat_closed", { leaseEpoch: this.leaseEpoch });
   }
@@ -191,9 +197,11 @@ export class BrainClient {
     const actionInstanceId = `d${++this.digSeq}`;
     return new Promise((resolve) => {
       this.digWaiters.set(actionInstanceId, resolve);
-      this.send("dig_commit", { ...payload, actionInstanceId, leaseEpoch: this.leaseEpoch });
+      this.send("dig_commit", { ...payload, actionInstanceId, leaseEpoch: payload.leaseEpoch??this.leaseEpoch });
       setTimeout(() => {
-        if (this.digWaiters.delete(actionInstanceId)) resolve({ ok: false, reason: "TIMEOUT" });
+        if(!this.digWaiters.has(actionInstanceId))return;
+        this.send('dig_query',{digAuthId:payload.digAuthId,actionInstanceId,leaseEpoch:payload.leaseEpoch??this.leaseEpoch});
+        setTimeout(()=>{if(this.digWaiters.delete(actionInstanceId))resolve({ok:false,reason:'UNKNOWN_COMMIT'});},timeoutMs);
       }, timeoutMs);
     });
   }
