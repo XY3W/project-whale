@@ -5,12 +5,14 @@ export class ChatPanel {
   private readonly list: HTMLDivElement;
   private readonly input: HTMLTextAreaElement;
   private readonly status: HTMLDivElement;
+  private reasoningTask = "";
+  private reasoningText = "";
+  private reasoningRow: HTMLDivElement | null = null;
 
   readonly open = true;
   busy = false;
 
   onSend: ((text: string) => void) | null = null;
-  onShowReasoning: ((show: boolean) => void) | null = null;
 
   constructor() {
     injectStyles();
@@ -39,7 +41,7 @@ export class ChatPanel {
     try { toggle.checked = localStorage.getItem("whale-show-reasoning") === "1"; } catch {}
     toggle.addEventListener("change", () => {
       try { localStorage.setItem("whale-show-reasoning", toggle.checked ? "1" : "0"); } catch {}
-      this.onShowReasoning?.(toggle.checked);
+      this.renderReasoning();
     });
     const form = this.root.querySelector("form")!;
     form.addEventListener("submit", (e) => {
@@ -64,6 +66,42 @@ export class ChatPanel {
   }
 
   get showReasoning() { return this.root.querySelector<HTMLInputElement>("[data-reasoning]")!.checked; }
+
+  startReasoning(taskId: string) {
+    this.reasoningTask = taskId;
+    this.reasoningText = "";
+    this.renderReasoning();
+  }
+
+  appendReasoning(taskId: string, text: string) {
+    if (taskId !== this.reasoningTask) return;
+    this.reasoningText = (this.reasoningText + text).slice(-12000);
+    this.renderReasoning();
+  }
+
+  endReasoning(taskId?: string) {
+    if (taskId && taskId !== this.reasoningTask) return;
+    this.reasoningTask = "";
+    this.reasoningText = "";
+    this.reasoningRow?.remove();
+    this.reasoningRow = null;
+  }
+
+  private renderReasoning() {
+    if (!this.reasoningTask || !this.showReasoning) {
+      this.reasoningRow?.remove();
+      this.reasoningRow = null;
+      return;
+    }
+    if (!this.reasoningRow) {
+      this.reasoningRow = document.createElement("div");
+      this.reasoningRow.className = "chat-msg chat-reasoning";
+      this.list.appendChild(this.reasoningRow);
+    }
+    this.reasoningRow.textContent = this.reasoningText || "正在思考…";
+    this.reasoningRow.scrollTop = this.reasoningRow.scrollHeight;
+    this.list.scrollTop = this.list.scrollHeight;
+  }
 
   private submit() {
     const text = this.input.value.trim();
@@ -108,6 +146,7 @@ const CSS = `
 .chat-msg{max-width:90%;padding:12px 16px;border-radius:20px;font-size:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word;pointer-events:auto}
 .chat-user{align-self:flex-end;background:rgba(70,110,190,.88);color:#fff}
 .chat-whale{align-self:flex-start;background:rgba(25,39,62,.93);color:#f4f7ff}
+.chat-reasoning{align-self:flex-start;background:rgba(25,39,62,.85);color:#b8c8df;font-size:15px;max-height:240px;overflow-y:auto;overscroll-behavior:contain}
 .chat-status{display:none;padding:8px 12px;color:#ffd4d4;background:rgba(105,35,45,.9);border-radius:16px;font-size:15px;pointer-events:auto}
 .chat-status.show{display:block}
 .chat-form{display:flex;gap:8px;padding:8px 0;pointer-events:auto}

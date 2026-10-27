@@ -197,18 +197,6 @@ async function boot() {
   thinkBadge.className = "thinking-badge";
   thinkBadge.innerHTML = "<i></i><i></i><i></i>";
   document.body.appendChild(thinkBadge);
-  const thinkText = document.createElement("div");
-  thinkText.className = "thinking-stream";
-  thinkBadge.appendChild(thinkText);
-  let reasoningTask = "";
-  let reasoningText = "";
-  const updateReasoning = () => {
-    thinkBadge.classList.toggle("with-reasoning", chat.showReasoning);
-    thinkText.textContent = reasoningText || "正在思考…";
-    thinkText.scrollTop = thinkText.scrollHeight;
-  };
-  chat.onShowReasoning = updateReasoning;
-  updateReasoning();
   let llmThinking = false;
   const setLlmThinking = (on: boolean) => {
     llmThinking = on;
@@ -857,6 +845,7 @@ async function boot() {
 
   client.on({
     onPlan: (msg) => {
+      chat.endReasoning(msg.taskId);
       if(msg.planId&&seenPlans.has(msg.planId))return;
       if(msg.planId){seenPlans.add(msg.planId);if(seenPlans.size>200)seenPlans.delete(seenPlans.values().next().value!);}
       chat.setError(null);
@@ -907,9 +896,10 @@ async function boot() {
         activePlan = null;
       });
     },
-    onReasoningStart: taskId => { reasoningTask = taskId; reasoningText = ""; updateReasoning(); },
-    onReasoningDelta: (taskId, text) => { if (taskId !== reasoningTask) return; reasoningText = (reasoningText + text).slice(-12000); updateReasoning(); },
+    onReasoningStart: taskId => chat.startReasoning(taskId),
+    onReasoningDelta: (taskId, text) => chat.appendReasoning(taskId, text),
     onReply: (msg) => {
+      chat.endReasoning(msg.taskId);
       errorActive = false;
       setError(false);
       if(msg.speech){chat.addMessage("whale", msg.speech);speak(msg.speech);}
@@ -927,15 +917,17 @@ async function boot() {
       chat.setThinking(taskActive);
       // 只有“等模型”的阶段才亮头顶图标；executing 是她在动，不是在想
       setLlmThinking(phase === "thinking" || phase === "checking");
-      if (phase === "idle") chat.setThinking(false);
+      if (phase === "idle") { chat.setThinking(false); chat.endReasoning(); }
     },
     onError: (code, message) => {
+      chat.endReasoning();
       errorActive = true;
       chat.setError(`${code}：${message}`);
       chat.setThinking(false);
       if (code !== "BUSY") setError(true);
     },
     onCancel: (taskId) => {
+      chat.endReasoning(taskId);
       cancelledTasks.add(taskId);
       currentExecutor?.cancel();
       chat.setThinking(false);

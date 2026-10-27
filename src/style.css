@@ -286,9 +286,3 @@ canvas { display: block; }
 
 .world-controls{position:fixed;right:18px;top:16px;display:flex;gap:8px;align-items:center;z-index:20;flex-wrap:wrap;max-width:calc(100vw - 170px)}
 .world-controls button,.memory-dialog button{border:1px solid #b9c8d9;border-radius:9px;background:#fff;padding:8px 12px;color:#263c54;cursor:pointer}.world-controls input{width:65px}.memory-dialog{border:1px solid #d1dce7;border-radius:16px;padding:24px;max-width:680px;max-height:80vh;overflow:auto}.memory-dialog::backdrop{background:#122b4566}.memory-row{display:flex;gap:8px;align-items:center;margin:14px 0;flex-wrap:wrap}.memory-row span{font-size:12px;width:100%}.memory-row input{padding:8px;border:1px solid #ccd6e0;border-radius:6px}
-
-/* Optional live reasoning replaces the head indicator dots. */
-.thinking-stream{display:none;max-width:min(360px,70vw);max-height:160px;overflow-y:auto;overscroll-behavior:contain;white-space:pre-wrap;word-break:break-word;font:14px/1.5 system-ui,sans-serif;color:#eef5ff;pointer-events:auto}
-.thinking-badge.with-reasoning{max-width:min(380px,75vw);height:auto;min-height:0;border-radius:16px;padding:10px 12px}
-.thinking-badge.with-reasoning i{display:none}
-.thinking-badge.with-reasoning .thinking-stream{display:block}
