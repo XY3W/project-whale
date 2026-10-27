@@ -146,7 +146,7 @@ const CSS = `
 .chat-msg{max-width:90%;padding:12px 16px;border-radius:20px;font-size:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word;pointer-events:auto}
 .chat-user{align-self:flex-end;background:rgba(70,110,190,.88);color:#fff}
 .chat-whale{align-self:flex-start;background:rgba(25,39,62,.93);color:#f4f7ff}
-.chat-reasoning{align-self:flex-start;background:rgba(25,39,62,.85);color:#b8c8df;font-size:15px;max-height:240px;overflow-y:auto;overscroll-behavior:contain}
+.chat-reasoning{align-self:flex-start;background:rgba(25,39,62,.85);color:#b8c8df;font-size:15px;line-height:1.55;height:calc(9.3em + 24px);box-sizing:border-box;flex-shrink:0;overflow-y:auto;overscroll-behavior:contain}
 .chat-status{display:none;padding:8px 12px;color:#ffd4d4;background:rgba(105,35,45,.9);border-radius:16px;font-size:15px;pointer-events:auto}
 .chat-status.show{display:block}
 .chat-form{display:flex;gap:8px;padding:8px 0;pointer-events:auto}
