@@ -37,9 +37,9 @@ const REASONING_EFFORT = EFFORT_LEVELS.includes(EFFORT_RAW) ? EFFORT_RAW : THINK
 if (EFFORT_RAW && !REASONING_EFFORT) console.warn(`[llm] 忽略未知的 DEEPSEEK_REASONING_EFFORT=${EFFORT_RAW}`);
 /**
  * 思考 token 和 JSON 输出共用 max_tokens。16×16 棋盘上模型有时会思考到 2000+，
- * 2400 的预算会把 JSON 截断成非法输出（表现为 INVALID_JSON），所以默认给到 8000。
+ * 思考与最终 JSON 共用预算；扫雷实测常超过 8000，因此默认给到 32768。
  */
-const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS ?? (THINKING ? 8000 : 1200));
+const MAX_TOKENS = Number(process.env.DEEPSEEK_MAX_TOKENS ?? (THINKING ? 32768 : 1200));
 const TIMEOUT_MS = Number(process.env.DEEPSEEK_TIMEOUT_MS ?? (THINKING ? 90_000 : 30_000));
 
 export const thinkingEnabled = () => THINKING;
