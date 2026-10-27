@@ -492,9 +492,9 @@ async function boot() {
           return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "OCCUPIED", row: step.row, col: step.col } };
         }
         const center = gomokuCellCenter(step.row, step.col);
-        const tolerance = view.stoneToleranceM ?? 0.2;
+        const tolerance = view.stoneToleranceM ?? 1;
         const distance = Math.hypot(root.position.x - center.x, root.position.z - center.z);
-        if (distance > tolerance) {
+        if (distance > tolerance + 1e-6) {
           return {
             ok: false,
             reason: "NOT_ALIGNED" as const,
@@ -504,7 +504,7 @@ async function boot() {
               tolerance_m: tolerance,
               target: { row: step.row, col: step.col, x: +center.x.toFixed(3), z: +center.z.toFixed(3) },
               position: { x: +root.position.x.toFixed(3), z: +root.position.z.toFixed(3) },
-              hint: `先走到交点 (${step.row},${step.col}) 旁边：还差 ${distance.toFixed(2)}m，需要 ≤${tolerance}m`,
+              hint: `目标点超出可操作范围：离你 ${distance.toFixed(2)}m，需要 ≤${tolerance}m。先走近再落子`,
             },
           };
         }
@@ -834,7 +834,7 @@ async function boot() {
       const center = cellCenterOf(step.row, step.col);
       const distance = Math.hypot(root.position.x - center.x, root.position.z - center.z);
       const tolerance = board.digToleranceM ?? 0.18;
-      if (distance > tolerance) {
+      if (distance > tolerance + 1e-6) {
         return {
           ok: false,
           reason: "PRECONDITION_FAILED",

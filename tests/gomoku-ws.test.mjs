@@ -131,7 +131,7 @@ test("她的落子必须带授权并站在交点上：只派发不动棋盘", as
   assert.equal(result.board.stones[0].color, "black");
 });
 
-test("站位不对：提交被拒，棋盘不变", async (t) => {
+test("超出 1m 可操作范围：提交被拒，棋盘不变", async (t) => {
   const { proc, dir } = await startServer();
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
@@ -141,7 +141,7 @@ test("站位不对：提交被拒，棋盘不变", async (t) => {
   send("gomoku_start", { requestId: "g1", leaseEpoch: epoch });
   const start = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
 
-  // 目标在角落，而角色还在中心
+  // 目标在角落（离中心 3.77m），超过 1m 的可操作半径
   send("debug_plan", {
     leaseEpoch: epoch,
     steps: [{ action: "place_stone", game_id: start.board.gameId, row: 3, col: 3, expected_revision: 0 }],
@@ -164,7 +164,8 @@ test("站位不对：提交被拒，棋盘不变", async (t) => {
   assert.equal(result.ok, false);
   assert.equal(result.reason, "NOT_ALIGNED");
   assert.ok(result.distance_m > 0.2, JSON.stringify(result));
-  assert.ok(String(result.hint).includes("交点"));
+  assert.ok(String(result.hint).includes("可操作范围"), JSON.stringify(result));
+  assert.equal(result.tolerance_m, 1);
 
   const moved = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board && m.board.moves > 0, 800);
   assert.equal(moved, null, "被拒时棋盘不应改变");

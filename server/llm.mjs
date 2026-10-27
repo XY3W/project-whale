@@ -42,7 +42,27 @@ export const thinkingConfig = () => ({ type: THINKING_TYPE, effort: REASONING_EF
 
 export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
-export const SYSTEM_PROMPT = readPrompt("system.txt") + "\n\n" + readPrompt("persona.txt");
+/**
+ * 条件段落：只有对应游戏在进行时才注入它的规则/玩法。
+ *   {{#minesweeper}} ... {{/minesweeper}}
+ *   {{#gomoku}} ... {{/gomoku}}
+ * 没有对局时只留一句“你会玩什么”，避免每轮都把两套规则塞进上下文。
+ */
+export function renderSections(text, flags = {}) {
+  return text
+    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gm, (_, name, body) =>
+      flags[name.toLowerCase()] ? body : "",
+    )
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+/** system 提示词：通用规则 + 人格 + 当前对局相关的部分 */
+export function systemPrompt(flags = {}) {
+  return renderSections(`${readPrompt("system.txt")}\n\n${readPrompt("persona.txt")}`, flags);
+}
+
+/** 兼容旧调用：没有对局上下文的静态拼接 */
+export const SYSTEM_PROMPT = systemPrompt({});
 export const PROMPT_VERSION="prompt-20261027-v4-persistent-chat";
 
 const OUTPUT_CONTRACT = outputContract();
@@ -56,9 +76,10 @@ function contextBlock(ctx) {
 }
 
 function render(templateName, ctx) {
-  const tpl = readPrompt(templateName).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...ctx, phase: ctx.phase ?? templateName.replace(".txt", "") }));
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku };
+  const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...ctx, phase: ctx.phase ?? templateName.replace(".txt", "") }));
   return [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt(flags) },
     { role: "user", content: tpl + "\n\n" + OUTPUT_CONTRACT },
   ];
 }

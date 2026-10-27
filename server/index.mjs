@@ -1067,7 +1067,7 @@ wss.on("connection", (ws, req) => {
             tolerance_m: STONE_TOLERANCE_M,
             target: { row: auth.row, col: auth.col, ...center },
             position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
-            hint: `走到交点 (${auth.row},${auth.col}) 旁边再落子：还差 ${Math.round(actual * 1000) / 1000}m，需要 ≤${STONE_TOLERANCE_M}m`,
+            hint: `目标点超出可操作范围：离你 ${Math.round(actual * 1000) / 1000}m，需要 ≤${STONE_TOLERANCE_M}m。先走近再落子`,
           });
         }
 
