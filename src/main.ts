@@ -159,8 +159,6 @@ async function boot() {
   // ---- 状态 ----
   let phase: Phase = "idle";
   let destination: THREE.Vector3 | null = null;
-  let wantChat = false;
-  let chatYaw = 0;
   let postTurn: (() => void) | null = null;
   let roamTimer = 4;
 
@@ -248,16 +246,6 @@ async function boot() {
     chat.setThinking(true);
     client.sendUserMessage(text, snapshot());
   };
-  chat.onTimeout = () => {
-    bubble.classList.remove("show");
-  };
-  // 关闭聊天：没有进行中的任务时，漫游门禁会自动放行（chat.open 为 false）
-  chat.onClose = () => {
-    bubble.classList.remove("show");
-    client.setChatOpen(false);
-  };
-  chat.onOpen = () => client.setChatOpen(true);
-
   // ---- 移动 ----
   const requestMove = (point: THREE.Vector3) => {
     tmp.copy(point).sub(root.position).setY(0);
@@ -282,27 +270,14 @@ async function boot() {
     phase = "turning";
   };
 
-  const enterChat = () => {
-    if (chat.open) {
-      chat.openPanel();
-      return;
-    }
-    destination = null;
-    // 任务执行中点击角色：先取消旧计划，再由统一入口接管
-    if (motionOwner === "plan") {
-      currentExecutor?.cancel();
-      motionEpoch++;
-      motionOwner = "none"; // 旧 run 的 finally 因 epoch 变化不会清 owner，这里显式释放
-    }
-    if (phase === "walking" || player.state.walking) {
-      player.setWalking(false);
-      phase = "stopping";
-    }
-    chatYaw = Math.atan2(
-      stage.camera.position.x - root.position.x,
-      stage.camera.position.z - root.position.z,
-    );
-    wantChat = true;
+  const tapCharacter = () => {
+    if (!client.connected) { chat.setError("还没有连上大脑服务"); return; }
+    if (readOnly) { chat.setError("另一个页面正在执行角色，这里只读"); return; }
+    errorActive = false;
+    setError(false);
+    chat.setError(null);
+    chat.setThinking(true);
+    client.sendUserMessage("用户轻拍了你一下", snapshot());
   };
 
   // ---- 输入：只识别角色点击 ----
@@ -327,7 +302,7 @@ async function boot() {
     ndc.set((e.clientX / innerWidth) * 2 - 1, -((e.clientY / innerHeight) * 2 - 1));
     raycaster.setFromCamera(ndc, stage.camera);
     if (raycaster.intersectObjects(meshes, true).length === 0) return; // 地面点击不做事
-    enterChat();
+    tapCharacter();
   });
 
   /** 扫雷盘面悬停：只做渲染高亮，点击格子不会移动或挖掘（行为仍由模型下令） */
@@ -1017,13 +992,6 @@ async function boot() {
         if (player.state.base === "idle_stand") phase = "idle";
         break;
       case "idle": {
-        if (wantChat) {
-          wantChat = false;
-          const delta = shortest(root.rotation.y, chatYaw);
-          if (Math.abs(delta) > 0.09) startTurn(chatYaw, () => chat.openPanel());
-          else chat.openPanel();
-          break;
-        }
         if (!destination) break;
         tmp.copy(destination).sub(root.position).setY(0);
         if (tmp.length() < 0.08) {
@@ -1072,7 +1040,7 @@ async function boot() {
     // 模型在思考/退避时也该待在盘边，而不是走开去闲逛。
     const gameInProgress = gameBoard?.status === "playing";
     const canRoam =
-      stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !chat.open && !wantChat && !destination && !roamBusy && !taskActive &&
+      stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !destination && !roamBusy && !taskActive &&
       !gameInProgress && phase === "idle" && !player.state.walking && player.state.base === "idle_stand";
 
     if (canRoam) {
@@ -1184,7 +1152,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, enterChat, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE,
+    stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE,
     getGame: () => gameBoard,
     /** 探针用：当前客户端快照（与服务端同步的同一份） */
     snapshot,

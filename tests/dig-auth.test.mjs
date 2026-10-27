@@ -385,7 +385,7 @@ test("扫雷进行中一分钟没有模型活动会被主动唤醒", async (t) =
   send("game_start", { requestId: "still-1", leaseEpoch: epoch });
   const game = await waitFor(inbox, (m) => m.type === "game_state" && m.board);
   assert.ok(game, "先要有一局在进行");
-  send("chat_closed", { leaseEpoch: epoch });
+  // 即使旧客户端报告聊天栏打开，也不应阻止自主游戏。
 
   // 之后什么都不做：超过阈值没有模型活动时，宿主应当自己发一条提醒
   const t0 = Date.now();

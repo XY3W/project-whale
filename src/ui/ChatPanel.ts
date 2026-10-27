@@ -1,30 +1,15 @@
-/**
- * 右侧聊天面板。
- * 规则来自 NEXT_PHASE_LLM_PLAN.md §4：
- * - 默认隐藏，未打开不能发送
- * - 只有键盘/输入法活动重置 2 分钟计时，鼠标与相机拖动不算
- * - 超时关闭不清空记录；未发送草稿保留
- * - 文本一律用 textContent 写入，不碰 innerHTML
- */
-
-const IDLE_MS = 120_000;
+/** A persistent chat overlay. Showing it never pauses the character. */
 
 export class ChatPanel {
   readonly root: HTMLDivElement;
   private readonly list: HTMLDivElement;
   private readonly input: HTMLTextAreaElement;
   private readonly status: HTMLDivElement;
-  private readonly sendBtn: HTMLButtonElement;
 
-  open = false;
+  readonly open = true;
   busy = false;
-  private deadline = 0;
-  private draft = "";
 
   onSend: ((text: string) => void) | null = null;
-  onTimeout: (() => void) | null = null;
-  onClose: (() => void) | null = null;
-  onOpen: (() => void) | null = null;
 
   constructor() {
     injectStyles();
@@ -34,7 +19,6 @@ export class ChatPanel {
       <div class="chat-head">
         <span>和鲸鱼娘说话</span>
         <span class="chat-state" data-state>未连接</span>
-        <button type="button" class="chat-close" data-close title="关闭">×</button>
       </div>
       <div class="chat-list" data-list></div>
       <div class="chat-status" data-status></div>
@@ -48,12 +32,6 @@ export class ChatPanel {
     this.list = this.root.querySelector("[data-list]")!;
     this.input = this.root.querySelector("[data-input]")!;
     this.status = this.root.querySelector("[data-status]")!;
-    this.sendBtn = this.root.querySelector("[data-send]")!;
-
-    this.root.querySelector("[data-close]")!.addEventListener("click", () => {
-      this.close("manual");
-      this.onClose?.();
-    });
 
     const form = this.root.querySelector("form")!;
     form.addEventListener("submit", (e) => {
@@ -61,22 +39,12 @@ export class ChatPanel {
       this.submit();
     });
     this.input.addEventListener("keydown", (e) => {
-      this.markActivity();
       if (e.isComposing) return; // 中文输入法组词时不提交
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.submit();
       }
     });
-    for (const ev of ["input", "compositionstart", "compositionupdate", "compositionend"] as const) {
-      this.input.addEventListener(ev, () => this.markActivity());
-    }
-
-    const check = () => this.checkTimeout();
-    window.addEventListener("focus", check);
-    document.addEventListener("visibilitychange", check);
-    window.setInterval(check, 1000);
-
     // Restore the current owner's recent conversation after a page reload.
     void fetch('/api/memory').then(r=>r.ok?r.json():null).then(data=>{
       if(!data||this.list.childElementCount!==0||!Array.isArray(data.recentConversation))return;
@@ -87,52 +55,10 @@ export class ChatPanel {
     }).catch(()=>{});
   }
 
-  private markActivity() {
-    if (!this.open) return;
-    this.deadline = performance.now() + IDLE_MS;
-  }
-
-  private checkTimeout() {
-    if (!this.open) return;
-    if (performance.now() <= this.deadline) return;
-    this.draft = this.input.value; // 保留草稿到下次打开
-    this.close("timeout");
-    this.onTimeout?.();
-    this.onClose?.(); // 与手动关闭共用退出路径，通知服务端
-  }
-
-  openPanel() {
-    if (this.open) {
-      this.input.focus();
-      return;
-    }
-    this.open = true;
-    this.root.classList.add("open");
-    document.body.classList.add("chat-open");
-    this.onOpen?.();
-    this.input.value = this.draft;
-    this.deadline = performance.now() + IDLE_MS;
-    requestAnimationFrame(() => this.input.focus());
-    this.setState("就绪");
-  }
-
-  close(reason: "timeout" | "manual" = "manual") {
-    if (!this.open) return;
-    this.open = false;
-    this.root.classList.remove("open");
-    document.body.classList.remove("chat-open");
-    this.draft = this.input.value;
-    this.setState(reason === "timeout" ? "已超时关闭" : "已关闭");
-    this.input.blur();
-  }
-
   private submit() {
-    if (!this.open) return;
     const text = this.input.value.trim();
     if (!text) return;
     this.input.value = "";
-    this.draft = "";
-    this.markActivity();
     this.addMessage("user", text);
     this.onSend?.(text);
   }
@@ -147,7 +73,7 @@ export class ChatPanel {
 
   setThinking(on: boolean) {
     this.busy = on;
-    this.sendBtn.disabled = on;
+    // New user messages may supersede an ongoing task.
     this.setState(on ? "思考中…" : "就绪");
   }
 
@@ -163,29 +89,28 @@ export class ChatPanel {
 }
 
 const CSS = `
-.chat-panel{position:fixed;right:16px;top:16px;bottom:16px;width:min(440px,92vw);display:none;flex-direction:column;
-  background:rgba(12,18,30,.92);border:1px solid rgba(120,160,230,.25);border-radius:12px;
-  color:#dbe7ff;font:15px/1.6 system-ui,sans-serif;backdrop-filter:blur(8px);z-index:25;overflow:hidden}
-.chat-panel.open{display:flex}
-.chat-head{display:flex;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(120,160,230,.18);
-  font-size:13px;letter-spacing:.08em;color:#8fa8cc}
-.chat-state{color:#5f7a9e;margin-left:auto}
-.chat-close{background:none;border:0;color:#8fa8cc;font:18px/1 system-ui,sans-serif;cursor:pointer;padding:0 2px}
-.chat-list{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
-.chat-msg{max-width:90%;padding:10px 12px;border-radius:10px;font-size:15px;white-space:pre-wrap;word-break:break-word}
-.chat-user{align-self:flex-end;background:rgba(70,110,190,.35);border:1px solid rgba(120,160,230,.3)}
-.chat-whale{align-self:flex-start;background:rgba(30,45,70,.9);border:1px solid rgba(120,160,230,.16)}
-.chat-status{display:none;padding:8px 12px;color:#ff8d8d;font-size:13px}
+.chat-panel{position:fixed;right:16px;top:68px;bottom:16px;width:min(420px,calc(100vw - 32px));display:flex;flex-direction:column;
+  background:transparent;border:0;color:#e7efff;font:17px/1.55 system-ui,sans-serif;z-index:25;pointer-events:none}
+.chat-head{display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:16px;color:#b6c7e5;text-shadow:0 1px 4px #05070b}
+.chat-state{color:#a8bad6;margin-left:auto;font-size:14px}
+.chat-list{flex:1;min-height:0;overflow-y:auto;padding:10px 4px;display:flex;flex-direction:column;gap:12px;pointer-events:none;overscroll-behavior:contain}
+.chat-msg{max-width:90%;padding:12px 16px;border-radius:20px;font-size:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word;pointer-events:auto}
+.chat-user{align-self:flex-end;background:rgba(70,110,190,.88);color:#fff}
+.chat-whale{align-self:flex-start;background:rgba(25,39,62,.93);color:#f4f7ff}
+.chat-status{display:none;padding:8px 12px;color:#ffd4d4;background:rgba(105,35,45,.9);border-radius:16px;font-size:15px;pointer-events:auto}
 .chat-status.show{display:block}
-.chat-form{display:flex;gap:8px;padding:10px;border-top:1px solid rgba(120,160,230,.18)}
-.chat-form textarea{flex:1;resize:none;background:rgba(20,30,48,.9);border:1px solid rgba(120,160,230,.25);
-  border-radius:8px;color:#e6efff;padding:10px;font:15px/1.6 system-ui,sans-serif;outline:none}
-.chat-form button{background:rgba(70,110,190,.5);border:1px solid rgba(120,160,230,.4);color:#e6efff;
-  border-radius:8px;padding:0 16px;cursor:pointer;font:15px system-ui,sans-serif}
+.chat-form{display:flex;gap:8px;padding:8px 0;pointer-events:auto}
+.chat-form textarea{min-width:0;flex:1;resize:none;background:rgba(20,30,48,.94);border:0;
+  border-radius:20px;color:#f4f7ff;padding:12px 16px;font:17px/1.5 system-ui,sans-serif;outline:none}
+.chat-form textarea:focus{outline:2px solid rgba(148,185,250,.8);outline-offset:1px}
+.chat-form button{background:rgba(70,110,190,.94);border:0;color:#fff;
+  border-radius:20px;padding:0 18px;cursor:pointer;font:17px system-ui,sans-serif}
 .chat-form button:disabled{opacity:.5;cursor:default}
-.speech-bubble{position:fixed;left:0;top:0;max-width:320px;padding:8px 12px;border-radius:10px;
+@media (max-width:819px){.chat-panel{top:112px;bottom:8px;width:min(390px,calc(100vw - 32px))}}
+
+.speech-bubble{position:fixed;left:0;top:0;max-width:320px;padding:10px 14px;border-radius:18px;
   background:rgba(14,22,36,.94);border:1px solid rgba(120,160,230,.35);color:#e6efff;
-  font:13px/1.45 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .2s;z-index:15;white-space:pre-wrap}
+  font:16px/1.45 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .2s;z-index:15;white-space:pre-wrap}
 .speech-bubble.show{opacity:1}
 .net-error{position:fixed;left:0;top:0;width:64px;height:64px;border-radius:50%;display:none;
   align-items:center;justify-content:center;background:#e23b3b;color:#fff;font:700 34px/1 system-ui,sans-serif;

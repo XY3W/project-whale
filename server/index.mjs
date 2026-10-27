@@ -290,13 +290,13 @@ function noteAutoPlayDelay(ms) {
 
 /**
  * 条件全满足时给自己派一个回合：没有进行中的局就开一局，
- * 局还没结束就发 self_play 请她继续。用户聊天、任务进行中、没有执行端都不打扰。
+ * 局还没结束就发 self_play 请她继续。任务进行中或没有执行端时不触发。
  */
 function tickAutoPlay() {
   if (!AUTO_PLAY || !hasKey()) return;
   const now = Date.now();
   if (Date.now() < autoplay.manualPauseUntil) return;
-  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown" || session.phase === "stopping") {
+  if (session.task || !isLeaseAlive() || session.phase === "unknown" || session.phase === "stopping") {
     if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
     return;
   }
@@ -346,7 +346,7 @@ function tickStillPlaying() {
   if (!AUTO_PLAY || !hasKey()) return;
   const board = games.public();
   if (!board || board.status !== "playing") return;
-  if (session.task || !isLeaseAlive() || session.chatOpen || session.phase === "unknown" || session.phase === "stopping") return;
+  if (session.task || !isLeaseAlive() || session.phase === "unknown" || session.phase === "stopping") return;
   if (Date.now() < autoplay.manualPauseUntil) return;
   const idleMs = Date.now() - lastLlmAt;
   if (idleMs < AUTO_STILL_PLAYING_MS) return;
@@ -1010,11 +1010,6 @@ wss.on("connection", (ws, req) => {
         if (!msg.text || typeof msg.text !== "string") return;
         // 用户消息里带着客户端此刻的真实位姿：先刷新，再基于它规划
         applyClientSnapshot(msg.snapshot);
-        if (!session.chatOpen) {
-          send(ws, "error", { code: "CHAT_CLOSED", message: "聊天框没有打开，不能发送消息" });
-          return;
-        }
-
         // 抢占：取消旧任务未执行步骤，旧结果随后被丢弃
         if (session.task) {
           session.task.superseded = true;
@@ -1126,8 +1121,7 @@ wss.on("connection", (ws, req) => {
         }
         session.chatOpen = true;
         session.chatEpoch = session.leaseEpoch;
-        // 聊天期间 tickAutoPlay 会自己跳过；不用把时间表往后推，
-        // 关掉聊天后她就能回到自己的局
+        // 兼容旧客户端的界面状态；聊天栏是否显示不限制自主行动。
         broadcastState();
         break;
       case "chat_closed":
@@ -1154,7 +1148,7 @@ wss.on("connection", (ws, req) => {
 
 function autonomousAllowed(ignoreGamePause=false){
   autoplay.calls=autoplay.calls.filter(t=>Date.now()-t<3600000);
-  return !session.chatOpen && session.phase!=="unknown" && session.phase!=="stopping" && isLeaseAlive() && (ignoreGamePause||Date.now()>=autoplay.manualPauseUntil) && (AUTO_MAX_CALLS_PER_HOUR<=0||autoplay.calls.length<AUTO_MAX_CALLS_PER_HOUR);
+  return session.phase!=="unknown" && session.phase!=="stopping" && isLeaseAlive() && (ignoreGamePause||Date.now()>=autoplay.manualPauseUntil) && (AUTO_MAX_CALLS_PER_HOUR<=0||autoplay.calls.length<AUTO_MAX_CALLS_PER_HOUR);
 }
 function claimAutoCall(){
   autoplay.calls=autoplay.calls.filter(t=>Date.now()-t<3600000);

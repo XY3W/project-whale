@@ -77,11 +77,6 @@ test("租约、代际与重复结果去重", async (t) => {
   const bState = await waitFor(b.inbox, (m) => m.type === "session_state");
   assert.equal(bState.readOnly, true, "第二个连接应只读");
 
-  // 未打开聊天时拒绝发送
-  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "user_message", text: "挥挥手", leaseEpoch: aState.leaseEpoch }));
-  const closed = await waitFor(a.inbox, (m) => m.type === "error");
-  assert.equal(closed.code, "CHAT_CLOSED");
-
   // 只读端的周期快照静默忽略（不是用户动作，不该在只读页点亮错误图标），
   // 但绝不能改服务端位置：下面的广播里角色坐标必须还是原值
   b.inbox.length = 0;
@@ -102,8 +97,8 @@ test("租约、代际与重复结果去重", async (t) => {
   const denied = await waitFor(b.inbox, (m) => m.type === "error" && m.code === "NOT_EXECUTOR");
   assert.equal(denied.code, "NOT_EXECUTOR");
 
-  // 打开聊天后执行端拿计划
-  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_opened" }));
+  // 即使没有聊天模式，执行端也可以直接发消息。
+  a.ws.send(JSON.stringify({ protocolVersion: 1, type: "chat_closed", leaseEpoch: aState.leaseEpoch }));
   a.ws.send(JSON.stringify({ protocolVersion: 1, type: "user_message", text: "挥挥手", leaseEpoch: aState.leaseEpoch }));
   const plan = await waitFor(a.inbox, (m) => m.type === "execute_plan");
   assert.ok(plan, "应收到 execute_plan");

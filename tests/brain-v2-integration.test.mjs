@@ -10,7 +10,7 @@ function context(body){const text=body.messages[1].content;const at=text.indexOf
 test('实际协议：最终第4次执行也review；消息先落盘；确认记忆同主人回喂；断言40雷未改',async(t)=>{
  let modelPort,serverPort;const calls=[];
  const stub=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const ctx=context(JSON.parse(raw));calls.push(ctx);
- const source=ctx.userMessageId;const out=ctx.userMessage==='我喜欢什么？' ? {type:'finish_task',outcome:'completed',speech:'你喜欢鲸鱼。'} : ctx.userMessage==='我喜欢鲸鱼' ? {type:'finish_task',outcome:'completed',speech:'知道了。',memory_proposals:[{key:'ordinary_interest',value:'鲸鱼',sourceMessageId:source,sourceQuote:'我喜欢鲸鱼'}]} : calls.length<5?{type:'execute_plan',speech:'',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'记住了。',memory_proposals:[{key:'preferred_name',value:'测试员',sourceMessageId:source,sourceQuote:'以后叫我测试员'}]};
+ const source=ctx.userMessageId;const out=ctx.userMessage==='用户轻拍了你一下' ? {type:'finish_task',outcome:'completed',speech:'嗯？'} : ctx.userMessage==='我喜欢什么？' ? {type:'finish_task',outcome:'completed',speech:'你喜欢鲸鱼。'} : ctx.userMessage==='我喜欢鲸鱼' ? {type:'finish_task',outcome:'completed',speech:'知道了。',memory_proposals:[{key:'ordinary_interest',value:'鲸鱼',sourceMessageId:source,sourceQuote:'我喜欢鲸鱼'}]} : calls.length<5?{type:'execute_plan',speech:'',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'记住了。',memory_proposals:[{key:'preferred_name',value:'测试员',sourceMessageId:source,sourceQuote:'以后叫我测试员'}]};
  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(out)}}]}));});
  await new Promise(r=>stub.listen(0,'127.0.0.1',r));modelPort=stub.address().port;
  const portProbe=http.createServer();await new Promise(r=>portProbe.listen(0,'127.0.0.1',r));serverPort=portProbe.address().port;await new Promise(r=>portProbe.close(r));
@@ -23,7 +23,7 @@ test('实际协议：最终第4次执行也review；消息先落盘；确认记�
  const inbox=[];ws=new WebSocket(`ws://127.0.0.1:${serverPort}/ws`,{headers:{cookie}});ws.on('message',d=>inbox.push(JSON.parse(d)));await new Promise(r=>ws.on('open',r));
  async function next(type,predicate=()=>true){for(let i=0;i<250;i++){const n=inbox.findIndex(m=>m.type===type&&predicate(m));if(n>=0)return inbox.splice(n,1)[0];await delay(20);}throw Error('wait '+type);}
  const state=await next('session_state');const send=(type,p={})=>ws.send(JSON.stringify({type,protocolVersion:1,leaseEpoch:state.leaseEpoch,...p}));
- send('chat_opened');send('user_message',{text:'以后叫我测试员',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
+ send('user_message',{text:'以后叫我测试员',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
  for(let i=1;i<=4;i++){const plan=await next('execute_plan');send('plan_result',{taskId:plan.taskId,generation:plan.generation,planId:plan.planId,result:{status:'completed',stopped:true,steps:[{stepId:'s1',action:'wait',status:'succeeded',requested:{duration_s:0},actual:{diagnostic:'x'.repeat(2800)},reasonCode:'OK'}]},snapshot:{x:0,z:0,yawDeg:0,objects:[]}});}
  assert.equal((await next('public_reply')).speech,'记住了。');assert.equal(calls.length,5);assert.equal(calls.at(-1).phase,'review');assert.equal(calls.at(-1).finishOnly,true);assert.equal(calls.at(-1).taskEvidence.length,4);
  assert.equal(calls.at(-1).taskEvidence.at(-1).resultRef,'executionReport');
@@ -42,6 +42,9 @@ test('实际协议：最终第4次执行也review；消息先落盘；确认记�
  const confirmed=await(await fetch(base+'/api/memory',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({op:'confirm',id:interest.id})})).json();assert.equal(confirmed.memories.find(m=>m.id===interest.id).status,'confirmed');
  send('user_message',{text:'我喜欢什么？',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
  assert.equal((await next('public_reply')).speech,'你喜欢鲸鱼。');assert.ok(calls.at(-1).memory.some(m=>m.key==='ordinary_interest'&&m.value==='鲸鱼'));
+ const beforeTap=calls.length;
+ send('user_message',{text:'用户轻拍了你一下',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
+ assert.equal((await next('public_reply')).speech,'嗯？');assert.equal(calls.length,beforeTap+1);assert.equal(calls.at(-1).userMessage,'用户轻拍了你一下');
  const cleared=await(await fetch(base+'/api/memory',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({op:'clear_history'})})).json();assert.deepEqual(cleared.recentConversation,[]);assert.equal(cleared.memories.length,2);
  const {MINE_COUNT}=await import('../server/minesweeper.mjs');assert.equal(MINE_COUNT,40);
 });
