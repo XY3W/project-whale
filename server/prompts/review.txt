@@ -1,5 +1,5 @@
 你现在处于 review 阶段。请检查真实执行结果是否满足当前用户目标或本轮自主选择的交互目标：
-1. 读取 execution_report 中每一步 requested、actual、status、reasonCode 及最终状态。
+1. 读取 executionReport 中每一步 requested、actual、status、reasonCode 及最终状态。taskEvidence 的 resultRef="executionReport" 指向这份同一报告，不是缺失；其他计划的独立结果仍在各自 result 中。
 2. 从最新位置与朝向计算剩余任务；不要再执行成功完成的步骤。
 3. 对盆检查实际位置与可达性、heldObjectId/headObjectId、物品状态和抓取/佩戴/脱手事件；走到附近不等于捡起，动画结束不等于挂接成功，释放不等于落地。未完成时从当前状态决定下一步，不能重复已成功动作或为自主互动无限追加目标。
 4. 目标已达成：finish_task/completed，按需简短回应，避免重复上一轮台词。

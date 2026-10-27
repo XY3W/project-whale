@@ -1,3 +1,6 @@
+/** Application input estimate cap: 256 Ki tokens. Output allowance is configured separately. */
+export const MAX_INPUT_TOKENS = 256 * 1024;
+
 /** 上下文预算与裁剪（E 批）。无准确 tokenizer，使用保守字符估算。 */
 export function estimateTokens(text) {
   return Math.ceil(String(text ?? "").length * 0.6);
@@ -35,4 +38,14 @@ export function estimateRequest({ messages, system = "", capabilities = [], cont
   };
   const total = parts.system + parts.capabilities + parts.context;
   return { total, parts, maxInputTokens, ok: total <= maxInputTokens, estimator: "chars*0.6" };
+}
+
+/** Keep each completed plan's evidence once; the current report already has its own field. */
+export function linkCurrentExecution(evidence, currentPlanId, report) {
+  return evidence.map(entry => {
+    if (!report || entry.planId !== currentPlanId || entry.result !== report) return entry;
+    const {result: _result, ...rest}=entry;
+    void _result;
+    return {...rest,resultRef:'executionReport'};
+  });
 }

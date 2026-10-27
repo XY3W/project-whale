@@ -116,6 +116,9 @@ export async function callModel(messages, signal) {
     throw new ModelError("API_ERROR", `模型返回 ${res.status}：${text.slice(0, 120)}`, res.status);
   }
 
+  if(Number.isFinite(data?.usage?.prompt_tokens)) {
+    console.log(`[llm] prompt_tokens=${data.usage.prompt_tokens} completion_tokens=${data.usage.completion_tokens ?? 'unknown'}`);
+  }
   const choice = data?.choices?.[0];
   const content = choice?.message?.content;
   if (THINKING) {

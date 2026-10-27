@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildHistory, estimateRequest, estimateTokens } from "../server/context.mjs";
+import { buildHistory, estimateRequest, estimateTokens, MAX_INPUT_TOKENS, linkCurrentExecution } from "../server/context.mjs";
 import { addCandidates, confirmedMemories, validateProposals } from "../server/memory.mjs";
 
 test("上下文：预算内保留最近消息，丢弃最旧", () => {
@@ -50,4 +50,18 @@ test("整轮预算：system+能力+上下文合计，超限拒绝", () => {
   const big = estimateRequest({ system: "x".repeat(20000), capabilities: [], context: {}, maxInputTokens: 1000 });
   assert.equal(big.ok, false);
   assert.ok(big.total > big.maxInputTokens);
+});
+
+test("输入估算上限为256K，输出预算不在此改动",()=>{
+ assert.equal(MAX_INPUT_TOKENS,262144);
+ assert.equal(estimateRequest({messages:[{content:'x'.repeat(30000)}],maxInputTokens:MAX_INPUT_TOKENS}).ok,true);
+ assert.equal(estimateRequest({messages:[{content:'x'.repeat(400000)}],maxInputTokens:MAX_INPUT_TOKENS}).ok,false);
+});
+test("当前执行报告只出现一次，历史结果、失败和unknown不丢失",()=>{
+ const old={status:'failed',steps:[{status:'unknown',actual:{committedCount:2}}]};
+ const current={status:'cancelled',steps:[{status:'cancelled',actual:{committedCount:3}}]};
+ const entries=[{planId:'p1',state:'done',result:old},{planId:'p2',state:'processing',result:current}];
+ const out=linkCurrentExecution(entries,'p2',current);
+ assert.deepEqual(out[0],entries[0]);assert.deepEqual(out[1],{planId:'p2',state:'processing',resultRef:'executionReport'});
+ assert.deepEqual(linkCurrentExecution(entries,'p2',{status:'different'}),entries);
 });

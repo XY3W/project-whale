@@ -19,7 +19,7 @@ import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
-import { contextBudget, estimateRequest } from "./context.mjs";
+import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
 
 import { createGameEventQueue } from "./events.mjs";
 import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
@@ -34,11 +34,6 @@ const MAX_ROUNDS = 4;
 const BUDGET_MS = Number(process.env.BRAIN_BUDGET_MS ?? 180_000);
 /** 场地事件的合并窗口：同一批动作只唤醒一次模型 */
 const EVENT_COALESCE_MS = 400;
-/**
- * 整轮输入预算（估算 token）。扫雷棋盘 100 格是主要开销，
- * 8000 会把“带棋盘的合法请求”误判成超限，这里按实测留出余量。
- */
-const MAX_INPUT_TOKENS = 14_000;
 /**
  * 扫雷是她自己玩的：宿主负责开局和“续玩”，模型只负责这一局怎么走。
  * AUTO_MINESWEEPER=0 可以整体关掉；三个间隔都可以用环境变量覆盖。
@@ -574,7 +569,10 @@ function modelContext(task, phase, extra = {}) {
     behaviorMode:{...modeView(store.state),drainTaskId:task.origin==="active"&&!modeView(store.state).acceptingNewAutonomy?task.id:null},
     recentAutonomy:store.state.recentAutonomy??[],
     finishOnly:(task.origin!=="user"&&AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR-1)||task.rounds>=MAX_ROUNDS||(task.origin==="active"&&(!modeView(store.state).acceptingNewAutonomy||task.modeEpoch!==modeView(store.state).modeEpoch||Date.now()>=task.autonomyDeadline)),
-    taskEvidence:[...session.ledger].filter(([id])=>id.startsWith(task.id+"-")).map(([planId,e])=>({planId,state:e.state,result:e.result??null})),
+    taskEvidence:linkCurrentExecution(
+      [...session.ledger].filter(([id])=>id.startsWith(task.id+"-")).map(([planId,e])=>({planId,state:e.state,result:e.result??null})),
+      task.planId,extra.executionReport,
+    ),
     conversationSummary:selfPlay?null:store.state.summaries?.[task.ownerScope]??null,
     leaseAndBudget: {
       leaseEpoch: session.leaseEpoch,

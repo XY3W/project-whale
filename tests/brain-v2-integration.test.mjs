@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
 import {spawn} from 'node:child_process';import WebSocket from 'ws';
+import {estimateRequest} from '../server/context.mjs';
+import {reviewMessages} from '../server/llm.mjs';
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 function context(body){const text=body.messages[1].content;const at=text.indexOf('REQUEST_CONTEXT_JSON:')+'REQUEST_CONTEXT_JSON:'.length;return JSON.parse(text.slice(at).trim().split('\n')[0]);}
 test('实际协议：最终第4次执行也review；消息先落盘；确认记忆同主人回喂；断言40雷未改',async(t)=>{
@@ -22,8 +24,12 @@ test('实际协议：最终第4次执行也review；消息先落盘；确认记�
  async function next(type,predicate=()=>true){for(let i=0;i<250;i++){const n=inbox.findIndex(m=>m.type===type&&predicate(m));if(n>=0)return inbox.splice(n,1)[0];await delay(20);}throw Error('wait '+type);}
  const state=await next('session_state');const send=(type,p={})=>ws.send(JSON.stringify({type,protocolVersion:1,leaseEpoch:state.leaseEpoch,...p}));
  send('chat_opened');send('user_message',{text:'以后叫我测试员',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
- for(let i=1;i<=4;i++){const plan=await next('execute_plan');send('plan_result',{taskId:plan.taskId,generation:plan.generation,planId:plan.planId,result:{status:'completed',stopped:true,steps:[{stepId:'s1',action:'wait',status:'succeeded',requested:{duration_s:0},actual:{},reasonCode:'OK'}]},snapshot:{x:0,z:0,yawDeg:0,objects:[]}});}
+ for(let i=1;i<=4;i++){const plan=await next('execute_plan');send('plan_result',{taskId:plan.taskId,generation:plan.generation,planId:plan.planId,result:{status:'completed',stopped:true,steps:[{stepId:'s1',action:'wait',status:'succeeded',requested:{duration_s:0},actual:{diagnostic:'x'.repeat(2800)},reasonCode:'OK'}]},snapshot:{x:0,z:0,yawDeg:0,objects:[]}});}
  assert.equal((await next('public_reply')).speech,'记住了。');assert.equal(calls.length,5);assert.equal(calls.at(-1).phase,'review');assert.equal(calls.at(-1).finishOnly,true);assert.equal(calls.at(-1).taskEvidence.length,4);
+ assert.equal(calls.at(-1).taskEvidence.at(-1).resultRef,'executionReport');
+ assert.equal(calls.at(-1).executionReport.steps[0].actual.diagnostic.length,2800);
+ assert.equal(calls.at(-1).taskEvidence[0].result.steps[0].actual.diagnostic.length,2800);
+ assert.ok(estimateRequest({messages:reviewMessages(calls.at(-1)),maxInputTokens:262144}).total>14000,'旧14k限制下会失败的多轮报告应能复核');
  const st=JSON.parse(fs.readFileSync(path.join(dir,'data/brain-state.json'),'utf8'));assert.ok(st.messages.find(m=>m.messageId===calls[0].userMessageId));
  const mem=await(await fetch(base+'/api/memory',{headers:{cookie}})).json();assert.equal(mem.memories[0].status,'confirmed');
  assert.equal(mem.recentConversation.length,2);assert.equal(mem.recentConversation[0].content,'以后叫我测试员');
