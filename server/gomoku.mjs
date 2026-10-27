@@ -12,6 +12,16 @@ export const CELLS = SIZE * SIZE;
 export const CELL_M = 8 / SIZE;
 export { SIZE as GOMOKU_SIZE, CELL_M as GOMOKU_CELL_M };
 
+/** 棋盘半宽（交点四周留半格，外框在 ±4） */
+export const BOARD_HALF = (CELL_M * SIZE) / 2;
+/** 落子站位容差：根位置到交点。格子 0.533m，0.2m 仍在格内且看起来是“站在点旁” */
+export const STONE_TOLERANCE_M = 0.2;
+/** 世界坐标 → 交点位置 */
+export const cellCenter = (row, col) => ({
+  x: -BOARD_HALF + (col + 0.5) * CELL_M,
+  z: -BOARD_HALF + (row + 0.5) * CELL_M,
+});
+
 export const BLACK = "black";
 export const WHITE = "white";
 export const other = (color) => (color === BLACK ? WHITE : BLACK);
@@ -132,6 +142,7 @@ export function publicGame(game) {
     line: game.line,
     moves: game.moves.length,
     lastMove: game.lastMove,
+    stoneToleranceM: STONE_TOLERANCE_M,
     stones: game.moves.map(({ row, col, color }) => ({ row, col, color })),
   };
 }

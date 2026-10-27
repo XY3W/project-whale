@@ -21,7 +21,7 @@ import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
 import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView, GomokuView } from "./behavior/protocol.ts";
 import { MinesweeperBoard } from "./game/MinesweeperBoard";
-import { GomokuBoard, gomokuCellAt } from "./game/GomokuBoard";
+import { GomokuBoard, gomokuCellAt, gomokuCellCenter } from "./game/GomokuBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = "/models/playful-v2/character_playful.glb";
@@ -473,6 +473,68 @@ async function boot() {
       player.gesture(id);
       await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
     },
+    /**
+     * 五子棋落子：先走到交点旁（≤stoneToleranceM），做一次落子动作，再提交授权。
+     * 服务端会复检站位与版本，所以这里不“替”服务端决定成败。
+     */
+    stone: {
+      current: () => gomokuView,
+      precheck: (step) => {
+        const view = gomokuView;
+        if (!view) return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "NO_GAME" } };
+        if (view.status !== "playing") return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "GAME_OVER", status: view.status } };
+        if (view.turn !== "black") return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "NOT_YOUR_TURN", turn: view.turn } };
+        if (view.gameId !== step.game_id) return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "STALE_GAME" } };
+        if (step.expected_revision !== view.revision) {
+          return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "STALE_REVISION", actual: view.revision } };
+        }
+        if (view.stones.some((s) => s.row === step.row && s.col === step.col)) {
+          return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "OCCUPIED", row: step.row, col: step.col } };
+        }
+        const center = gomokuCellCenter(step.row, step.col);
+        const tolerance = view.stoneToleranceM ?? 0.2;
+        const distance = Math.hypot(root.position.x - center.x, root.position.z - center.z);
+        if (distance > tolerance) {
+          return {
+            ok: false,
+            reason: "NOT_ALIGNED" as const,
+            detail: {
+              error: "NOT_ALIGNED",
+              distance_m: +distance.toFixed(3),
+              tolerance_m: tolerance,
+              target: { row: step.row, col: step.col, x: +center.x.toFixed(3), z: +center.z.toFixed(3) },
+              position: { x: +root.position.x.toFixed(3), z: +root.position.z.toFixed(3) },
+              hint: `先走到交点 (${step.row},${step.col}) 旁边：还差 ${distance.toFixed(2)}m，需要 ≤${tolerance}m`,
+            },
+          };
+        }
+        if (phase !== "idle" || player.state.walking || player.performing !== null) {
+          return { ok: false, reason: "PRECONDITION_FAILED" as const, detail: { error: "NOT_STILL" } };
+        }
+        return { ok: true };
+      },
+      perform: async (step) => {
+        // 落子动作：目前没有专门的“放子”片段，用一次点头表示把子按在这一点上
+        player.gesture("nod");
+        await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
+        const result = await client.commitStone({
+          stoneAuthId: activePlan?.stoneAuthId ?? null,
+          gameId: step.game_id,
+          row: step.row,
+          col: step.col,
+          expectedRevision: step.expected_revision,
+          x: root.position.x,
+          z: root.position.z,
+          taskId: activePlan?.taskId ?? null,
+          generation: activePlan?.generation ?? null,
+          planId: activePlan?.planId ?? null,
+          leaseEpoch: activePlan?.leaseEpoch,
+        });
+        const { board: _board, ...rest } = result as Record<string, unknown>;
+        void _board;
+        return rest as unknown as { ok: boolean };
+      },
+    },
     tail: async (style, dur) => {
       const epoch=bridgeEpoch;
       player.setTail(style === "tail_swish");
@@ -745,7 +807,7 @@ async function boot() {
   };
 
   /** 当前正在执行的计划：dig 提交要带上任务/计划/授权，服务端据此校验 */
-  let activePlan: { taskId: string; generation?: number; planId?: string; leaseEpoch?:number; digAuthId: string | null } | null = null;
+  let activePlan: { taskId: string; generation?: number; planId?: string; leaseEpoch?:number; digAuthId: string | null; stoneAuthId: string | null } | null = null;
 
   const digBridge: DigBridge = {
     current: () => gameBoard,
@@ -948,6 +1010,7 @@ async function boot() {
           generation: msg.generation,
           planId: msg.planId,
           digAuthId: msg.digAuthId ?? null,
+          stoneAuthId: msg.stoneAuthId ?? null,
           leaseEpoch:msg.leaseEpoch,
         };
         const result = await runOwned("plan", msg.plan as unknown as Plan);

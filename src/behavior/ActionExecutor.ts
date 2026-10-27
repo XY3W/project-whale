@@ -378,14 +378,22 @@ export class ActionExecutor {
         return done("succeeded", { distance_m: round(moved) }, "OK");
       }
 
-      // 五子棋落子：服务端在下发计划时就已经原子落子，这里只负责表现
+      // 五子棋落子：和 dig 一样，站位/回合/版本先过 precheck，
+      // 再由 perform 做完落子动作后带着服务端授权提交。
       case "place_stone": {
-        if (!this.loco.dig) return done("unsupported", null, "CAPABILITY_DISABLED");
-        const raced = await this.withTimeout(this.loco.play("nod"), 20000);
-        const after = { row: step.row, col: step.col };
-        if (!raced.ok) return done("timeout", after, "TIMEOUT");
-        if (this.cancelled) return done("cancelled", after, "CANCELLED");
-        return done("succeeded", after, "OK");
+        const bridge = this.loco.stone;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const pre = bridge.precheck?.(step);
+        if (pre && !pre.ok) return done("failed", pre.detail ?? null, pre.reason ?? "PRECONDITION_FAILED");
+        const raced = await this.withTimeout(bridge.perform(step, stepId), 45000);
+        if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
+        const outcome = raced.value;
+        if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");
+        if (!outcome.ok) {
+          const reason = outcome.reason === "NOT_ALIGNED" ? "NOT_ALIGNED" : "PRECONDITION_FAILED";
+          return done("failed", outcome as unknown as Record<string, unknown>, reason);
+        }
+        return done("succeeded", outcome as unknown as Record<string, unknown>, "OK");
       }
 
       case "dig": {

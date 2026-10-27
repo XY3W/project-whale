@@ -36,6 +36,11 @@ export function createGameEventQueue(max = 8) {
     },
     peek: () => items.slice(),
     size: () => items.length,
+    /** 用户收摊时丢掉这局残留的事件，别让旧事件混进下一局 */
+    clearGame(gameId) {
+      items = gameId ? items.filter((e) => e.gameId !== gameId) : [];
+      return items;
+    },
   };
 }
 

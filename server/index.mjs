@@ -19,7 +19,7 @@ import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
-import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE } from "./gomoku.mjs";
+import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE, STONE_TOLERANCE_M, cellCenter as gomokuCellCenter } from "./gomoku.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
 
@@ -194,6 +194,8 @@ const session = {
   /** dig 授权表：只有服务端下发的计划才能提交挖掘（authId -> 授权记录） */
   digAuth: new Map(),
   digSeq: 0,
+  stoneAuth: new Map(),
+  stoneSeq: 0,
 };
 
 
@@ -776,35 +778,9 @@ function applyOutput(ws, task, out) {
   session.phase = "executing";
   broadcastState();
   console.log(`[plan] ${task.id} turn=${task.rounds} steps=${out.plan.steps.map((s) => s.action).join(",")} speech=${out.speech ? "yes" : "no"}`);
-  // 五子棋：服务端在派发计划时原子落地，不依赖客户端回传；
-  // 拒绝时（版本过期/占位/错回合）让她 5 秒后重新规划，而不是把错误当成功。
-  const stoneStep = out.plan.steps.find((step) => step.action === "place_stone");
-  if (stoneStep) {
-    const applied = gomoku.move({
-      gameId: stoneStep.game_id,
-      row: stoneStep.row,
-      col: stoneStep.col,
-      color: GOMOKU_BLACK,
-      expectedRevision: stoneStep.expected_revision,
-    });
-    send(ws, "gomoku_state", { board: gomoku.public(), result: { ok: applied.ok, reason: applied.reason ?? null } });
-    broadcastState();
-    if (!applied.ok) {
-      // 没有棋局还提 place_stone 属于模型幻觉：直接收尾，不要把重试排成环
-      if (applied.reason === "NO_GAME") {
-        console.log("[gomoku] 没有棋局却收到 place_stone，按模型错误收尾");
-        endTask("gomoku move without game");
-        return;
-      }
-      console.log(`[gomoku] 她的落子被拒 ${applied.reason}，5s 后重新规划`);
-      endTask("gomoku move rejected", { retryMs: 5000 });
-      return;
-    }
-    console.log(`[gomoku] 她落子 (${stoneStep.row},${stoneStep.col}) rev=${gomoku.public().revision}`);
-    if (gomoku.status !== "playing") {
-      noteGameEvent("gomoku_finished", gomoku.public(), { result: gomoku.status, winner: gomoku.public().winner });
-    }
-  }
+  // 五子棋落子与挖掘同一套：下发一次性授权，由客户端走到交点、做完落子动作后提交；
+  // 服务端在提交时复检站位与版本，不信任客户端单方面宣布“到位”。
+  const stoneAuthId = issueStoneAuth(task, out.plan);
   // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
   // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
   const digAuthId = issueDigAuth(task, out.plan);
@@ -817,8 +793,38 @@ function applyOutput(ws, task, out) {
     turnId: task.rounds,
     speech: out.speech ?? "",
     digAuthId,
+    stoneAuthId,
     plan: out.plan,
   });
+}
+
+/**
+ * 为计划里的 place_stone 发放一次性授权：和 dig 一样，客户端必须带着这个 id 提交，
+ * 服务端逐项复检任务/代际/计划/局/交点/版本/站位。
+ */
+function issueStoneAuth(task, plan) {
+  const step = (plan.steps ?? []).find((s) => s.action === "place_stone");
+  if (!step) return null;
+  const authId = `stone-${task.id}-${++session.stoneSeq}-g${task.generation}`;
+  session.stoneAuth.set(authId, {
+    authId,
+    taskId: task.id,
+    generation: task.generation,
+    planId: task.planId,
+    gameId: step.game_id,
+    row: step.row,
+    col: step.col,
+    expectedRevision: step.expected_revision,
+    issuedAt: Date.now(),
+    used: false,
+    response: null,
+  });
+  const unused = [...session.stoneAuth].filter(([, a]) => !a.used);
+  for (const [id] of unused.slice(0, -1)) session.stoneAuth.delete(id);
+  const used = [...session.stoneAuth].filter(([, a]) => a.used);
+  for (const [id] of used.slice(0, Math.max(0, used.length - 8))) session.stoneAuth.delete(id);
+  console.log(`[gomoku] 落子授权 ${authId} (${step.row},${step.col}) rev=${step.expected_revision}`);
+  return authId;
 }
 
 /**
@@ -942,6 +948,7 @@ wss.on("connection", (ws, req) => {
           // 用户主动收摊：硬暂停，普通退避和任务收尾都不许把它缩短
           autoplay.manualPauseUntil = Date.now() + AUTO_AFTER_MANUAL_END_MS;
           autoplay.backoff = 1;
+          gameEvents.clearGame(before ?? "");
           noteAutoPlayDelay(0);persist();store.flush();
           console.log(result.cleared ? `[game] 用户收起了 ${before}` : `[game] 用户结束了 ${result.board?.gameId}`);
           // 只有“进行中→结束”才需要告诉模型；收摊已经被用户拿走了
@@ -960,6 +967,10 @@ wss.on("connection", (ws, req) => {
         send(ws, "gomoku_state", { board });
         broadcastState();
         console.log(`[gomoku] 开局 ${board.gameId}（她执黑先行）`);
+        // 手动开局就是“我要你下”：解除手动结束留下的暂停，也允许她继续自主回合
+        autoplay.manualPauseUntil = 0;
+        autoplay.nextAt = 0;
+        persist();
         if (board.gameId !== previous) {
           // 她执黑：开局就该她走
           noteGameEvent("gomoku_started", board, { trigger: "user_button" });
@@ -981,6 +992,7 @@ wss.on("connection", (ws, req) => {
         send(ws, "gomoku_state", { board: gomoku.public(), result: { ok: result.ok, reason: result.reason ?? null } });
         broadcastState();
         if (result.ok && !result.replay) {
+          autoplay.manualPauseUntil = 0;
           console.log(`[gomoku] 用户落子 (${msg.row},${msg.col}) rev=${gomoku.public().revision}`);
           if (gomoku.status === "won" || gomoku.status === "draw") {
             noteGameEvent("gomoku_finished", gomoku.public(), { result: gomoku.status, winner: gomoku.public().winner });
@@ -1001,8 +1013,70 @@ wss.on("connection", (ws, req) => {
         broadcastState();
         if (result.ok) {
           autoplay.manualPauseUntil = Date.now() + AUTO_AFTER_MANUAL_END_MS;
+          if (result.cleared) gameEvents.clearGame(before ?? "");
           console.log(result.cleared ? `[gomoku] 用户收起了 ${before}` : `[gomoku] 用户结束了 ${result.board?.gameId}`);
           if (!result.cleared) noteGameEvent("gomoku_finished", result.board, { result: "ended", trigger: "user_button" });
+        }
+        break;
+      }
+
+      case "gomoku_commit": {
+        const reply = (body) => send(ws, "stone_result", { stoneAuthId: msg.stoneAuthId, ...body });
+        if (!isLease(ws)) return reply({ ok: false, reason: "NOT_EXECUTOR" });
+        if (!isLeaseAlive()) return reply({ ok: false, reason: "LEASE_STALE" });
+        if (!epochOk(msg)) return reply({ ok: false, reason: "STALE_LEASE" });
+
+        const task = session.task;
+        const auth = session.stoneAuth.get(String(msg.stoneAuthId ?? ""));
+        if (!auth) return reply({ ok: false, reason: "NO_AUTH" });
+        if (!task || task.id !== auth.taskId || task.generation !== auth.generation) {
+          return reply({ ok: false, reason: "STALE_TASK", taskId: auth.taskId });
+        }
+        if (auth.used) return reply(auth.response ?? { ok: false, reason: "ALREADY_COMMITTED" });
+        if (msg.planId && auth.planId && msg.planId !== auth.planId) return reply({ ok: false, reason: "STALE_PLAN" });
+
+        const board = gomoku.public();
+        if (!board) return reply({ ok: false, reason: "NO_GAME" });
+        if (auth.gameId !== board.gameId || msg.gameId !== auth.gameId) return reply({ ok: false, reason: "STALE_GAME" });
+        if (msg.row !== auth.row || msg.col !== auth.col) return reply({ ok: false, reason: "STALE_CELL" });
+        if (board.status !== "playing") return reply({ ok: false, reason: "GAME_OVER", status: board.status });
+        if (auth.expectedRevision !== board.revision || Number(msg.expectedRevision) !== auth.expectedRevision) {
+          return reply({ ok: false, reason: "STALE_REVISION", revision: board.revision });
+        }
+
+        // 站位复检：客户端上报的位置和角色权威坐标都必须落在交点容差内
+        const center = gomokuCellCenter(auth.row, auth.col);
+        const reported = Math.hypot(Number(msg.x) - center.x, Number(msg.z) - center.z);
+        const actual = Math.hypot(character.x - center.x, character.z - center.z);
+        if (!Number.isFinite(reported) || reported > STONE_TOLERANCE_M || actual > STONE_TOLERANCE_M) {
+          return reply({
+            ok: false,
+            reason: "NOT_ALIGNED",
+            distance_m: Math.round(Math.max(Number.isFinite(reported) ? reported : 9, actual) * 1000) / 1000,
+            tolerance_m: STONE_TOLERANCE_M,
+            target: { row: auth.row, col: auth.col, ...center },
+            position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
+            hint: `走到交点 (${auth.row},${auth.col}) 旁边再落子：还差 ${Math.round(actual * 1000) / 1000}m，需要 ≤${STONE_TOLERANCE_M}m`,
+          });
+        }
+
+        const result = gomoku.move({
+          gameId: auth.gameId,
+          row: auth.row,
+          col: auth.col,
+          color: GOMOKU_BLACK,
+          expectedRevision: auth.expectedRevision,
+        });
+        const response = { ok: result.ok, reason: result.reason ?? null, board: gomoku.public() };
+        auth.used = true;
+        auth.response = response;
+        reply(response);
+        if (result.ok) {
+          broadcastState();
+          console.log(`[gomoku] 她落子 (${auth.row},${auth.col}) rev=${gomoku.public().revision}`);
+          if (gomoku.status !== "playing") {
+            noteGameEvent("gomoku_finished", gomoku.public(), { result: gomoku.status, winner: gomoku.public().winner });
+          }
         }
         break;
       }

@@ -81,6 +81,8 @@ export interface Locomotion {
   basin?: BasinBridge;
   /** 可选：扫雷挖掘能力 */
   dig?: DigBridge;
+  /** 可选：五子棋落子能力 */
+  stone?: StoneBridge;
 }
 
 export interface BasinView {
@@ -184,7 +186,30 @@ export interface GomokuView {
   line: { row: number; col: number }[] | null;
   moves: number;
   lastMove: GomokuStone | null;
+  /** 落子站位容差（米），由服务端下发 */
+  stoneToleranceM?: number;
   stones: GomokuStone[];
+}
+
+export interface StoneOutcome {
+  ok: boolean;
+  reason?: string;
+  status?: string;
+  distance_m?: number;
+  tolerance_m?: number;
+  [key: string]: unknown;
+}
+
+/** 五子棋落子：服务端授权 + 客户端走到位后提交 */
+export interface StoneBridge {
+  current(): GomokuView | null;
+  /** 站位/回合/版本前置检查，不通过就报给模型 */
+  precheck?(step: { game_id: string; row: number; col: number; expected_revision: number }): {
+    ok: boolean;
+    reason?: ReasonCode;
+    detail?: Record<string, unknown>;
+  };
+  perform(step: { game_id: string; row: number; col: number; expected_revision: number }, stepId?: string): Promise<StoneOutcome>;
 }
 
 export interface DigBridge {

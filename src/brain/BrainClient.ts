@@ -11,6 +11,8 @@ export interface PlanMessage {
   leaseEpoch?: number;
   /** 服务端为这次 dig 发放的授权 id，提交时必须原样带回 */
   digAuthId?: string | null;
+  /** 服务端为这次 place_stone 发放的授权 id */
+  stoneAuthId?: string | null;
   speech: string;
   plan: { steps: unknown[] };
 }
@@ -46,6 +48,7 @@ export class BrainClient {
   leaseEpoch = 0;
   private digSeq = 0;
   private digWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
+  private stoneWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
   private takeover: ReturnType<typeof setInterval> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
 
@@ -138,6 +141,11 @@ export class BrainClient {
         case "gomoku_state":
           this.handlers.onGomoku?.(msg.board);
           break;
+        case "stone_result": {
+          const resolve = this.stoneWaiters.get(String(msg.stoneAuthId));
+          if (resolve) { this.stoneWaiters.delete(String(msg.stoneAuthId)); resolve(msg); }
+          break;
+        }
         case "dig_result": {
           const resolve = this.digWaiters.get(String(msg.actionInstanceId));
           if (resolve) { this.digWaiters.delete(String(msg.actionInstanceId)); resolve(msg); }
@@ -222,6 +230,19 @@ export class BrainClient {
   /** 五子棋结束/收起 */
   endGomoku() {
     return this.send("gomoku_end", { leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 五子棋落子提交：走到位、做完落子动作后调用，等待服务端复检结算 */
+  commitStone(payload: Record<string, unknown>, timeoutMs = 8000): Promise<Record<string, unknown>> {
+    const authId = String(payload.stoneAuthId ?? "");
+    return new Promise((resolve) => {
+      if (!authId) { resolve({ ok: false, reason: "NO_AUTH" }); return; }
+      this.stoneWaiters.set(authId, resolve);
+      this.send("gomoku_commit", { ...payload, leaseEpoch: payload.leaseEpoch ?? this.leaseEpoch });
+      setTimeout(() => {
+        if (this.stoneWaiters.delete(authId)) resolve({ ok: false, reason: "UNKNOWN_COMMIT" });
+      }, timeoutMs);
+    });
   }
 
   /** 挖掘提交：由执行器在 dig_contact 时刻调用，等待服务端结算 */
