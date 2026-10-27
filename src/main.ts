@@ -926,6 +926,7 @@ async function boot() {
       if(msg.speech){chat.addMessage("whale", msg.speech);speak(msg.speech);}
     },
     onMode:value=>controls.updateMode(value),
+    onMemoryUpdated:count=>controls.updatePending(count),
     onTaskState: (phase,taskId) => {
       if((phase==='thinking'||phase==='checking')&&motionOwner==='roaming'){currentExecutor?.cancel();}
       if(phase==='thinking'&&taskId){void waitBodySettled().then(ok=>{if(ok)client.ready(taskId,snapshot());});}

@@ -11,7 +11,7 @@
 import {digAim} from "../shared/dig-aim.mjs";
 import { randomUUID } from "node:crypto";
 import { modeView, changeMode } from "./behavior-mode.mjs";
-import { ownerIdentity, recordMessage, propose, editMemory, memoryView, relevantMemory, acceptSummary } from "./preferences.mjs";
+import { ownerIdentity, recordMessage, propose, editMemory, memoryView, relevantMemory, acceptSummary, recentConversation } from "./preferences.mjs";
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -91,11 +91,11 @@ const server = http.createServer(async (req,res)=>{
   const owner=ownerIdentity(req,res,path.join(process.cwd(),"data"));
   if(req.url?.startsWith('/api/memory')){
     res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');
-    if(req.method==='GET'){res.end(JSON.stringify({memories:memoryView(store.state,owner)}));return;}
+    if(req.method==='GET'){res.end(JSON.stringify({memories:memoryView(store.state,owner),recentConversation:recentConversation(store.state,owner),conversationSummary:store.state.summaries?.[owner]?.text??null}));return;}
     if(req.method!=='POST'||req.headers['content-type']?.split(';')[0]!=='application/json'||(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)){res.writeHead(403).end('{}');return;}
     try{let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>8192)throw Error('请求过长');}
       store.update(st=>editMemory(st,owner,JSON.parse(raw)));store.flush();
-      res.end(JSON.stringify({memories:memoryView(store.state,owner)}));
+      res.end(JSON.stringify({memories:memoryView(store.state,owner),recentConversation:recentConversation(store.state,owner),conversationSummary:store.state.summaries?.[owner]?.text??null}));
     }catch(err){res.writeHead(400).end(JSON.stringify({error:err.message}));}return;
   }
   serveStatic(req,res);
@@ -711,7 +711,12 @@ function startEventTask() {
 
 function absorbMemory(task,out){
   if(task.origin!=="user"||!task.ownerScope||(store.state.memoryRevision?.[task.ownerScope]??0)!==task.memoryRevision)return;
+  const before=memoryView(store.state,task.ownerScope).map(({id,status})=>`${id}:${status}`).join('|');
   store.update(st=>{propose(st,task.ownerScope,out.memoryProposals??[],task.contextSourceIds??[task.messageId]);acceptSummary(st,task.ownerScope,out.summaryProposal,task.contextSourceIds??[]);});store.flush();
+  const after=memoryView(store.state,task.ownerScope);
+  if(after.map(({id,status})=>`${id}:${status}`).join('|')!==before){
+    send(task.originWs,'memory_updated',{pendingCount:after.filter(m=>m.status==='candidate').length});
+  }
 }
 
 function applyOutput(ws, task, out) {

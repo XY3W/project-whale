@@ -4,7 +4,8 @@ export function mountControls(client:BrainClient,audio:PropAudio){
   const box=document.createElement('div');box.className='world-controls';
   const mode=document.createElement('button'),sound=document.createElement('button'),memory=document.createElement('button');
   const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='1';volume.step='.05';volume.value=String(audio.volume);volume.title='音量';volume.setAttribute('aria-label','音量');
-  memory.textContent='记忆';sound.textContent='关闭声音';sound.title='声音默认开启；浏览器可能需要先点击页面';mode.textContent='活跃10分钟';box.append(mode,sound,volume,memory);document.body.append(box);
+  const setPending=(count:number)=>{memory.textContent=count>0?`记忆 · ${count}待确认`:'记忆';};
+  setPending(0);sound.textContent='关闭声音';sound.title='声音默认开启；浏览器可能需要先点击页面';mode.textContent='活跃10分钟';box.append(mode,sound,volume,memory);document.body.append(box);
   let current:{mode:string;expiresAt?:number;remainingMs?:number}={mode:'quiet'};
   mode.onclick=()=>client.setMode(current.mode==='active'?'quiet':'active');
   // Best effort before interaction; browsers may keep the context suspended until a gesture.
@@ -22,13 +23,25 @@ export function mountControls(client:BrainClient,audio:PropAudio){
   const request=async(body?:unknown)=>{const r=await fetch('/api/memory',body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok)throw Error(data.error??'记忆操作失败');return data;};
   const render=async()=>{dialog.replaceChildren();const title=document.createElement('h2');title.textContent='记忆与聊天';dialog.append(title);
     const close=document.createElement('button');close.textContent='关闭';close.onclick=()=>dialog.close();dialog.append(close);
-    try{const data=await request();for(const item of data.memories){const row=document.createElement('div');row.className='memory-row';const label=document.createElement('span');label.textContent=`${item.status==='confirmed'?'已记住':'待确认'} · ${item.key}`;const input=document.createElement('input');input.value=item.value;input.maxLength=60;
+    try{const data=await request();setPending(data.memories.filter((m:{status:string})=>m.status==='candidate').length);
+      const description=document.createElement('p');description.textContent='长期记忆保存稳定的称呼和偏好，待确认的内容需要你同意。普通聊天保存在近期对话中，并不会自动变成长期记忆。';dialog.append(description);
+      const memoryHeading=document.createElement('h3');memoryHeading.textContent='长期记忆';dialog.append(memoryHeading);
+      for(const item of data.memories){const row=document.createElement('div');row.className='memory-row';const label=document.createElement('span');const names:Record<string,string>={preferred_name:'称呼',response_language:'语言',response_style:'表达方式',ordinary_interest:'兴趣'};label.textContent=`${item.status==='confirmed'?'已记住':'待确认'} · ${names[item.key]??'偏好'}`;const input=document.createElement('input');input.value=item.value;input.maxLength=60;
       const save=document.createElement('button');save.textContent=item.status==='confirmed'?'保存修改':'确认';save.onclick=async()=>{await request({op:'edit',id:item.id,value:input.value});await render();};
       const del=document.createElement('button');del.textContent='删除';del.onclick=async()=>{await request({op:'delete',id:item.id});await render();};row.append(label,input,save,del);dialog.append(row);}
-      if(!data.memories.length){const empty=document.createElement('p');empty.textContent='还没有记忆。明确说“以后叫我…”可记录称呼，其他偏好需在这里确认。';dialog.append(empty);}
+      if(!data.memories.length){const empty=document.createElement('p');empty.textContent='还没有长期记忆。可以说“以后叫我小蓝”或“我喜欢鲸鱼”，如果提取到偏好候选，会在这里等待确认。';dialog.append(empty);}
+      const recentHeading=document.createElement('h3');recentHeading.textContent='近期对话';dialog.append(recentHeading);
+      const summary=data.conversationSummary;if(typeof summary==='string'&&summary){const note=document.createElement('p');note.textContent=`对话摘要：${summary}`;dialog.append(note);}
+      const recent=Array.isArray(data.recentConversation)?data.recentConversation:[];
+      if(!recent.length){const empty=document.createElement('p');empty.textContent='还没有近期对话。';dialog.append(empty);}
+      const list=document.createElement('div');list.className='memory-conversation';
+      for(const item of recent){if(!['user','assistant'].includes(item.role)||typeof item.content!=='string')continue;
+        const row=document.createElement('p');row.textContent=`${item.role==='user'?'你':'大肥鱼'}：${item.content}`;list.append(row);}
+      dialog.append(list);
       for(const [op,text]of [['clear_history','清空聊天记录'],['clear_memory','清空长期记忆']]){const b=document.createElement('button');b.textContent=text;b.onclick=async()=>{await request({op});if(op==='clear_history')document.querySelector('.chat-list')?.replaceChildren();await render();};dialog.append(b);}
     }catch(err){const error=document.createElement('p');error.textContent=String(err);dialog.append(error);}
   };
   memory.onclick=()=>{dialog.showModal();void render();};
-  return {updateMode(value:unknown){current=value as typeof current;},readOnly(value:boolean){mode.disabled=value;audio.allowed=!value;}};
+  void request().then(data=>setPending(data.memories.filter((m:{status:string})=>m.status==='candidate').length)).catch(()=>{});
+  return {updatePending:setPending,updateMode(value:unknown){current=value as typeof current;},readOnly(value:boolean){mode.disabled=value;audio.allowed=!value;}};
 }

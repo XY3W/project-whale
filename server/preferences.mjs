@@ -59,3 +59,11 @@ export function acceptSummary(st,owner,p,allowed) {
   if(!p.sourceMessageIds.every(id=>allowed.includes(id)&&(st.messages??[]).some(m=>m.ownerScope===owner&&m.messageId===id)))return;
   st.summaries??={};st.summaries[owner]={text:p.text,sourceMessageIds:p.sourceMessageIds,derived:true,updatedAt:Date.now()};
 }
+
+/** Recent dialogue is separate from confirmed long-term preferences. */
+export function recentConversation(st,owner,now=Date.now()) {
+  const days=Number(process.env.MESSAGE_RETENTION_DAYS??30);
+  const cutoff=now-(Number.isFinite(days)&&days>0?days:30)*86400000;
+  return (st.messages??[]).filter(m=>m.ownerScope===owner&&m.createdAt>=cutoff&&['user','assistant'].includes(m.role))
+    .slice(-24).map(({role,content,createdAt})=>({role,content,createdAt}));
+}

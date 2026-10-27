@@ -8,7 +8,7 @@ function context(body){const text=body.messages[1].content;const at=text.indexOf
 test('实际协议：最终第4次执行也review；消息先落盘；确认记忆同主人回喂；断言40雷未改',async(t)=>{
  let modelPort,serverPort;const calls=[];
  const stub=http.createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;const ctx=context(JSON.parse(raw));calls.push(ctx);
- const source=ctx.userMessageId;const out=calls.length<5?{type:'execute_plan',speech:'',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'记住了。',memory_proposals:[{key:'preferred_name',value:'测试员',sourceMessageId:source,sourceQuote:'以后叫我测试员'}]};
+ const source=ctx.userMessageId;const out=ctx.userMessage==='我喜欢什么？' ? {type:'finish_task',outcome:'completed',speech:'你喜欢鲸鱼。'} : ctx.userMessage==='我喜欢鲸鱼' ? {type:'finish_task',outcome:'completed',speech:'知道了。',memory_proposals:[{key:'ordinary_interest',value:'鲸鱼',sourceMessageId:source,sourceQuote:'我喜欢鲸鱼'}]} : calls.length<5?{type:'execute_plan',speech:'',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'记住了。',memory_proposals:[{key:'preferred_name',value:'测试员',sourceMessageId:source,sourceQuote:'以后叫我测试员'}]};
  res.setHeader('Content-Type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(out)}}]}));});
  await new Promise(r=>stub.listen(0,'127.0.0.1',r));modelPort=stub.address().port;
  const portProbe=http.createServer();await new Promise(r=>portProbe.listen(0,'127.0.0.1',r));serverPort=portProbe.address().port;await new Promise(r=>portProbe.close(r));
@@ -26,6 +26,16 @@ test('实际协议：最终第4次执行也review；消息先落盘；确认记�
  assert.equal((await next('public_reply')).speech,'记住了。');assert.equal(calls.length,5);assert.equal(calls.at(-1).phase,'review');assert.equal(calls.at(-1).finishOnly,true);assert.equal(calls.at(-1).taskEvidence.length,4);
  const st=JSON.parse(fs.readFileSync(path.join(dir,'data/brain-state.json'),'utf8'));assert.ok(st.messages.find(m=>m.messageId===calls[0].userMessageId));
  const mem=await(await fetch(base+'/api/memory',{headers:{cookie}})).json();assert.equal(mem.memories[0].status,'confirmed');
- const other=await(await fetch(base+'/api/memory')).json();assert.equal(other.memories.length,0);
+ assert.equal(mem.recentConversation.length,2);assert.equal(mem.recentConversation[0].content,'以后叫我测试员');
+ const other=await(await fetch(base+'/api/memory')).json();assert.equal(other.memories.length,0);assert.deepEqual(other.recentConversation,[]);
+ send('user_message',{text:'我喜欢鲸鱼',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
+ const update=await next('memory_updated',m=>m.pendingCount===1);assert.equal(update.pendingCount,1);
+ assert.equal((await next('public_reply')).speech,'知道了。');
+ const updated=await(await fetch(base+'/api/memory',{headers:{cookie}})).json();assert.equal(updated.memories.find(m=>m.key==='ordinary_interest').status,'candidate');assert.equal(updated.recentConversation.length,4);
+ const interest=updated.memories.find(m=>m.key==='ordinary_interest');
+ const confirmed=await(await fetch(base+'/api/memory',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({op:'confirm',id:interest.id})})).json();assert.equal(confirmed.memories.find(m=>m.id===interest.id).status,'confirmed');
+ send('user_message',{text:'我喜欢什么？',snapshot:{x:0,z:0,yawDeg:0,objects:[]}});
+ assert.equal((await next('public_reply')).speech,'你喜欢鲸鱼。');assert.ok(calls.at(-1).memory.some(m=>m.key==='ordinary_interest'&&m.value==='鲸鱼'));
+ const cleared=await(await fetch(base+'/api/memory',{method:'POST',headers:{cookie,'content-type':'application/json'},body:JSON.stringify({op:'clear_history'})})).json();assert.deepEqual(cleared.recentConversation,[]);assert.equal(cleared.memories.length,2);
  const {MINE_COUNT}=await import('../server/minesweeper.mjs');assert.equal(MINE_COUNT,40);
 });

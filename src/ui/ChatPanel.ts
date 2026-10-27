@@ -76,6 +76,15 @@ export class ChatPanel {
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
     window.setInterval(check, 1000);
+
+    // Restore the current owner's recent conversation after a page reload.
+    void fetch('/api/memory').then(r=>r.ok?r.json():null).then(data=>{
+      if(!data||this.list.childElementCount!==0||!Array.isArray(data.recentConversation))return;
+      for(const item of data.recentConversation){
+        if((item.role==='user'||item.role==='assistant')&&typeof item.content==='string')
+          this.addMessage(item.role==='user'?'user':'whale',item.content);
+      }
+    }).catch(()=>{});
   }
 
   private markActivity() {

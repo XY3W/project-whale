@@ -48,7 +48,7 @@ export const thinkingConfig = () => ({ type: THINKING_TYPE, effort: REASONING_EF
 export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
 export const SYSTEM_PROMPT = readPrompt("system.txt") + "\n\n" + readPrompt("persona.txt");
-export const PROMPT_VERSION="prompt-20261027-v2";
+export const PROMPT_VERSION="prompt-20261027-v3-natural";
 
 const OUTPUT_CONTRACT = outputContract();
 

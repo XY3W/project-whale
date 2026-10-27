@@ -290,3 +290,5 @@ canvas { display: block; }
 /* Keep scene controls accessible beside chat on wide screens and out of its way on phones. */
 @media (min-width: 820px) { body.chat-open .world-controls { right: 472px; max-width: calc(100vw - 490px); } }
 @media (max-width: 819px) { body.chat-open .world-controls { display: none; } }
+
+.memory-conversation{max-height:230px;overflow-y:auto;border:1px solid #d7e0ea;border-radius:8px;padding:4px 10px;margin-bottom:14px;white-space:pre-wrap;overflow-wrap:anywhere}.memory-conversation p{margin:8px 0;font-size:13px}.memory-dialog h3{margin:18px 0 8px}.memory-dialog>p{font-size:13px;line-height:1.5}

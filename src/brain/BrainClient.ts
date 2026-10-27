@@ -25,6 +25,7 @@ type Handlers = {
   onReply?: (msg: ReplyMessage) => void;
   onTaskState?: (phase: string, taskId?:string) => void;
   onMode?:(mode:unknown)=>void;
+  onMemoryUpdated?:(pendingCount:number)=>void;
   onCancel?: (taskId: string) => void;
   onReadOnly?: (readOnly: boolean) => void;
   onReconcile?: () => void;
@@ -118,6 +119,9 @@ export class BrainClient {
           if (msg.needsReconcile) this.handlers.onReconcile?.();
           break;
         }
+        case "memory_updated":
+          this.handlers.onMemoryUpdated?.(Number(msg.pendingCount)||0);
+          break;
         case "game_state":
           this.handlers.onGame?.(msg.board);
           break;
