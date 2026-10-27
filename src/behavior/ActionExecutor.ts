@@ -378,6 +378,16 @@ export class ActionExecutor {
         return done("succeeded", { distance_m: round(moved) }, "OK");
       }
 
+      // 五子棋落子：服务端在下发计划时就已经原子落子，这里只负责表现
+      case "place_stone": {
+        if (!this.loco.dig) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const raced = await this.withTimeout(this.loco.play("nod"), 20000);
+        const after = { row: step.row, col: step.col };
+        if (!raced.ok) return done("timeout", after, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", after, "CANCELLED");
+        return done("succeeded", after, "OK");
+      }
+
       case "dig": {
         const bridge = this.loco.dig;
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");

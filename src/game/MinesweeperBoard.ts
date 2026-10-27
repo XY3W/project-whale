@@ -142,6 +142,8 @@ export class MinesweeperBoard {
     const mat = this.floor.material as THREE.MeshStandardMaterial;
     const next = this.active ? this.texture : this.floorMap;
     if (mat.map === next) return;
+    // 地板是共享资源：另一块棋盘正占着时，不要把它抢回来
+    if (!this.active && mat.map !== this.texture) return;
     mat.map = next;
     mat.needsUpdate = true;
   }

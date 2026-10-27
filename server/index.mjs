@@ -18,11 +18,13 @@ import path from "node:path";
 import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
+import { GomokuService } from "./gomoku-service.mjs";
+import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE } from "./gomoku.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
 
 import { createGameEventQueue } from "./events.mjs";
-import { boardContext, characterContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
+import { boardContext, characterContext, gomokuContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
 import { CAPABILITY_VERSION, ModelError, PROMPT_VERSION, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 import { validatePlan } from "./capabilities.mjs";
 
@@ -100,6 +102,7 @@ const wss = new WebSocketServer({ server, path: "/ws" });
 let nextTask = 100;
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
 const games = new GameService(path.join(process.cwd(), "data", "minesweeper.json"));
+const gomoku = new GomokuService(path.join(process.cwd(), "data", "gomoku.json"));
 function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -258,6 +261,7 @@ function statePayload(ws) {
     behaviorMode:modeView(store.state),
     ...propPayload(),
     game: games.public(),
+    gomoku: gomoku.public(),
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,
@@ -296,8 +300,10 @@ function tickAutoPlay() {
   if (!AUTO_PLAY || !hasKey()) return;
   const now = Date.now();
   if (Date.now() < autoplay.manualPauseUntil) return;
+  // 五子棋进行中就不自动开局扫雷（两盘互斥，场上一次只摆一个盘）
+  if (gomoku.public()?.status === "playing") return;
   if (session.task || !isLeaseAlive() || session.phase === "unknown" || session.phase === "stopping") {
-    if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
+    if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${!!isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
     return;
   }
   if (now < autoplay.nextAt) {
@@ -344,12 +350,15 @@ function tickAutoPlay() {
  */
 function tickStillPlaying() {
   if (!AUTO_PLAY || !hasKey()) return;
-  const board = games.public();
-  if (!board || board.status !== "playing") return;
   if (session.task || !isLeaseAlive() || session.phase === "unknown" || session.phase === "stopping") return;
   if (Date.now() < autoplay.manualPauseUntil) return;
   const idleMs = Date.now() - lastLlmAt;
   if (idleMs < AUTO_STILL_PLAYING_MS) return;
+  const g = gomoku.public();
+  const board = games.public();
+  const waitingForHer = !!g && g.status === "playing" && g.turn === GOMOKU_BLACK;
+  const stillDigging = !!board && board.status === "playing";
+  if (!waitingForHer && !stillDigging) return;
   autoplay.calls = autoplay.calls.filter((t) => Date.now() - t < 3_600_000);
   if (AUTO_MAX_CALLS_PER_HOUR > 0 && autoplay.calls.length >= AUTO_MAX_CALLS_PER_HOUR) {
     if (Date.now() - (autoplay.stillWarnedAt ?? 0) > 60_000) {
@@ -359,6 +368,21 @@ function tickStillPlaying() {
     return;
   }
   autoplay.stillWarnedAt = 0;
+  if (waitingForHer) {
+    console.log(`[gomoku] 轮到她已 ${Math.round(idleMs / 1000)}s 没动静，主动唤醒`);
+    gameEvents.push({
+      eventId: `ev${++eventSeq}`,
+      type: "gomoku_your_turn",
+      gameId: g.gameId,
+      revision: g.revision,
+      status: g.status,
+      at: new Date().toISOString(),
+      idleMs,
+    });
+    scheduleEventTurn();
+    lastLlmAt = Date.now();
+    return;
+  }
   console.log(`[autoplay] 扫雷进行中已 ${Math.round(idleMs / 1000)}s 没有模型活动，主动唤醒`);
   gameEvents.push({
     eventId: `ev${++eventSeq}`,
@@ -593,6 +617,7 @@ function modelContext(task, phase, extra = {}) {
     characterState: characterContext(character),
     props: propsContext(props),
     board: boardContext(board, character),
+    gomoku: gomokuContext(gomoku.public(), character, GOMOKU_BLACK),
     ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: recent })),
     memory: selfPlay?[]:relevantMemory(store.state,task.ownerScope),
     ...extra,
@@ -751,6 +776,35 @@ function applyOutput(ws, task, out) {
   session.phase = "executing";
   broadcastState();
   console.log(`[plan] ${task.id} turn=${task.rounds} steps=${out.plan.steps.map((s) => s.action).join(",")} speech=${out.speech ? "yes" : "no"}`);
+  // 五子棋：服务端在派发计划时原子落地，不依赖客户端回传；
+  // 拒绝时（版本过期/占位/错回合）让她 5 秒后重新规划，而不是把错误当成功。
+  const stoneStep = out.plan.steps.find((step) => step.action === "place_stone");
+  if (stoneStep) {
+    const applied = gomoku.move({
+      gameId: stoneStep.game_id,
+      row: stoneStep.row,
+      col: stoneStep.col,
+      color: GOMOKU_BLACK,
+      expectedRevision: stoneStep.expected_revision,
+    });
+    send(ws, "gomoku_state", { board: gomoku.public(), result: { ok: applied.ok, reason: applied.reason ?? null } });
+    broadcastState();
+    if (!applied.ok) {
+      // 没有棋局还提 place_stone 属于模型幻觉：直接收尾，不要把重试排成环
+      if (applied.reason === "NO_GAME") {
+        console.log("[gomoku] 没有棋局却收到 place_stone，按模型错误收尾");
+        endTask("gomoku move without game");
+        return;
+      }
+      console.log(`[gomoku] 她的落子被拒 ${applied.reason}，5s 后重新规划`);
+      endTask("gomoku move rejected", { retryMs: 5000 });
+      return;
+    }
+    console.log(`[gomoku] 她落子 (${stoneStep.row},${stoneStep.col}) rev=${gomoku.public().revision}`);
+    if (gomoku.status !== "playing") {
+      noteGameEvent("gomoku_finished", gomoku.public(), { result: gomoku.status, winner: gomoku.public().winner });
+    }
+  }
   // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
   // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
   const digAuthId = issueDigAuth(task, out.plan);
@@ -859,6 +913,7 @@ wss.on("connection", (ws, req) => {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
+        if (gomoku.public()) { gomoku.clear(); send(ws, "gomoku_state", { board: null }); console.log("[gomoku] 收起五子棋，改开扫雷"); }
         const previous = games.public()?.gameId ?? null;
         const board = games.start(msg.requestId);
         send(ws, "game_state", { board });
@@ -891,6 +946,63 @@ wss.on("connection", (ws, req) => {
           console.log(result.cleared ? `[game] 用户收起了 ${before}` : `[game] 用户结束了 ${result.board?.gameId}`);
           // 只有“进行中→结束”才需要告诉模型；收摊已经被用户拿走了
           if (!result.cleared) noteGameEvent("game_finished", result.board, { result: "ended", trigger: "user_button" });
+        }
+        break;
+      }
+
+      case "gomoku_start": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能开局" }); break; }
+        if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        // 五子棋与扫雷互斥：开一局就收起另一局
+        if (games.public()) { games.clear(); send(ws, "game_state", { board: null }); console.log("[game] 收起扫雷，改开五子棋"); }
+        const previous = gomoku.public()?.gameId ?? null;
+        const board = gomoku.start(msg.requestId);
+        send(ws, "gomoku_state", { board });
+        broadcastState();
+        console.log(`[gomoku] 开局 ${board.gameId}（她执黑先行）`);
+        if (board.gameId !== previous) {
+          // 她执黑：开局就该她走
+          noteGameEvent("gomoku_started", board, { trigger: "user_button" });
+        }
+        break;
+      }
+
+      case "gomoku_move": {
+        if (!isLease(ws)) { send(ws, "gomoku_state", { board: gomoku.public(), error: "NOT_EXECUTOR" }); break; }
+        if (!epochOk(msg)) { send(ws, "gomoku_state", { board: gomoku.public(), error: "STALE_LEASE" }); break; }
+        const result = gomoku.move({
+          moveId: msg.moveId,
+          gameId: msg.gameId,
+          row: msg.row,
+          col: msg.col,
+          color: GOMOKU_WHITE, // 用户固定执白
+          expectedRevision: msg.expectedRevision,
+        });
+        send(ws, "gomoku_state", { board: gomoku.public(), result: { ok: result.ok, reason: result.reason ?? null } });
+        broadcastState();
+        if (result.ok && !result.replay) {
+          console.log(`[gomoku] 用户落子 (${msg.row},${msg.col}) rev=${gomoku.public().revision}`);
+          if (gomoku.status === "won" || gomoku.status === "draw") {
+            noteGameEvent("gomoku_finished", gomoku.public(), { result: gomoku.status, winner: gomoku.public().winner });
+          } else {
+            // 轮到她了
+            noteGameEvent("gomoku_turn", gomoku.public(), {});
+          }
+        }
+        break;
+      }
+
+      case "gomoku_end": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能结束对局" }); break; }
+        if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        const before = gomoku.public()?.gameId ?? null;
+        const result = gomoku.end();
+        send(ws, "gomoku_state", { board: gomoku.public(), ended: result.ok });
+        broadcastState();
+        if (result.ok) {
+          autoplay.manualPauseUntil = Date.now() + AUTO_AFTER_MANUAL_END_MS;
+          console.log(result.cleared ? `[gomoku] 用户收起了 ${before}` : `[gomoku] 用户结束了 ${result.board?.gameId}`);
+          if (!result.cleared) noteGameEvent("gomoku_finished", result.board, { result: "ended", trigger: "user_button" });
         }
         break;
       }

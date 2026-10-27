@@ -55,6 +55,7 @@ export type Step =
   | { action: "run"; distance_m: number }
   | { action: "walk_adjust"; distance_m: number }
   | { action: "dig"; game_id: string; row: number; col: number; expected_revision: number }
+  | { action: "place_stone"; game_id: string; row: number; col: number; expected_revision: number }
   | { action: "parallel"; items: Step[] };
 
 export interface Plan {
@@ -165,6 +166,25 @@ export interface DigPrecheck {
   reason?: ReasonCode;
   /** 给模型看的具体原因：NO_GAME / NO_SCOOP / NOT_IN_CELL / STALE_REVISION ... */
   detail?: Record<string, unknown>;
+}
+
+export interface GomokuStone {
+  row: number;
+  col: number;
+  color: "black" | "white";
+}
+
+export interface GomokuView {
+  gameId: string;
+  size: number;
+  revision: number;
+  status: "playing" | "won" | "draw" | "ended";
+  turn: "black" | "white";
+  winner: "black" | "white" | null;
+  line: { row: number; col: number }[] | null;
+  moves: number;
+  lastMove: GomokuStone | null;
+  stones: GomokuStone[];
 }
 
 export interface DigBridge {

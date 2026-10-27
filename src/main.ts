@@ -19,8 +19,9 @@ import { Hud } from "./ui/Hud";
 import { PropItem } from "./prop/PropItem";
 import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
-import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView } from "./behavior/protocol.ts";
+import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView, GomokuView } from "./behavior/protocol.ts";
 import { MinesweeperBoard } from "./game/MinesweeperBoard";
+import { GomokuBoard, gomokuCellAt } from "./game/GomokuBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = "/models/playful-v2/character_playful.glb";
@@ -123,6 +124,40 @@ async function boot() {
 
   const board = new MinesweeperBoard(stage.scene, stage.groundTop);
   let gameBoard: GameView | null = null;
+  const gomokuBoard = new GomokuBoard(stage.scene, stage.groundTop);
+  let gomokuView: GomokuView | null = null;
+
+  /** 五子棋状态条（和扫雷共用样式，互斥显示） */
+  const gomokuChip = document.createElement("div");
+  gomokuChip.className = "game-chip gomoku-chip";
+  document.body.appendChild(gomokuChip);
+  const gomokuButton = document.getElementById("start-gomoku") as HTMLButtonElement | null;
+  const syncGomokuButton = () => {
+    if (!gomokuButton) return;
+    const onField = !!gomokuView;
+    gomokuButton.textContent = onField ? "五子棋结束" : "五子棋开局";
+    gomokuButton.style.background = onField ? "#8a3a3a" : "#3d62ad";
+  };
+  const renderGomokuChip = (view: GomokuView | null) => {
+    if (!view) {
+      gomokuChip.classList.remove("show");
+      syncGomokuButton();
+      return;
+    }
+    const label =
+      view.status === "won"
+        ? view.winner === "black" ? "她赢了" : "你赢了"
+        : view.status === "draw" ? "和棋"
+        : view.status === "ended" ? "已结束"
+        : view.turn === "white" ? "轮到你" : "她正在想";
+    gomokuChip.textContent = `五子棋 15×15 · ${label} · 第 ${view.moves} 手`;
+    gomokuChip.classList.toggle("playing", view.status === "playing");
+    gomokuChip.classList.toggle("won", view.status === "won" || view.status === "draw");
+    gomokuChip.classList.toggle("ended", view.status === "ended");
+    gomokuChip.classList.remove("lost");
+    gomokuChip.classList.add("show");
+    syncGomokuButton();
+  };
 
   /** 左上角状态条：没开局时隐藏，开局后显示盘面信息 */
   const gameChip = document.createElement("div");
@@ -299,6 +334,21 @@ async function boot() {
     downAt = null;
     if (moved > 6 || !quick) return;
 
+    // 五子棋：轮到你时，点交点落子
+    if (gomokuView && gomokuBoard.visible && gomokuView.status === "playing" && gomokuView.turn === "white") {
+      const cell = gomokuHoverAt(e.clientX, e.clientY);
+      if (cell && !gomokuView.stones.some((s) => s.row === cell.row && s.col === cell.col)) {
+        client.gomokuMove({
+          gameId: gomokuView.gameId,
+          row: cell.row,
+          col: cell.col,
+          expectedRevision: gomokuView.revision,
+          moveId: `${gomokuView.gameId}-${gomokuView.revision}`,
+        });
+        return;
+      }
+    }
+
     ndc.set((e.clientX / innerWidth) * 2 - 1, -((e.clientY / innerHeight) * 2 - 1));
     raycaster.setFromCamera(ndc, stage.camera);
     if (raycaster.intersectObjects(meshes, true).length === 0) return; // 地面点击不做事
@@ -318,10 +368,28 @@ async function boot() {
     if (Math.abs(x) >= half || Math.abs(z) >= half) return null;
     return { row: Math.floor((z + half) / cellSize), col: Math.floor((x + half) / cellSize) };
   };
+  /** 五子棋交点悬停：只有轮到你、且点在交点附近时才给预落子提示 */
+  const gomokuHoverAt = (clientX: number, clientY: number) => {
+    if (!gomokuView || !gomokuBoard.visible) return null;
+    ndc.set((clientX / innerWidth) * 2 - 1, -((clientY / innerHeight) * 2 - 1));
+    raycaster.setFromCamera(ndc, stage.camera);
+    const hit = raycaster.intersectObject(gomokuBoard.mesh, false)[0];
+    if (!hit) return null;
+    return gomokuCellAt(hit.point.x, hit.point.z);
+  };
   canvas.addEventListener("pointermove", (e) => {
+    if (gomokuView && gomokuBoard.visible) {
+      board.setHover(null);
+      gomokuBoard.setHover(gomokuHoverAt(e.clientX, e.clientY));
+      return;
+    }
+    gomokuBoard.setHover(null);
     board.setHover(hoverCellAt(e.clientX, e.clientY));
   });
-  canvas.addEventListener("pointerleave", () => board.setHover(null));
+  canvas.addEventListener("pointerleave", () => {
+    board.setHover(null);
+    gomokuBoard.setHover(null);
+  });
 
   // ---- 调试 HUD（仅 ?debug）----
   if (DEBUG) {
@@ -763,6 +831,24 @@ async function boot() {
   };
   loco.dig = digBridge;
 
+  gomokuButton?.addEventListener("click", () => {
+    if (!client.connected) {
+      chat.setError("还没有连上大脑服务，稍等一下再开局");
+      return;
+    }
+    if (readOnly) {
+      chat.setError("另一个页面正在执行角色，这里只读");
+      return;
+    }
+    chat.setError(null);
+    if (gomokuView) {
+      client.endGomoku();
+      speak(gomokuView.status === "playing" ? "这局先下到这里。" : "收起来了。", 1800);
+      return;
+    }
+    client.startGomoku(`gm${Date.now()}`);
+  });
+
   startButton?.addEventListener("click", () => {
     // 连接还没就绪、或这个页面只是只读镜像时给个提示，而不是静默失败
     if (!client.connected) {
@@ -952,9 +1038,27 @@ async function boot() {
     },
     onGame: (value) => {
       gameBoard = (value as GameView) ?? null;
-      board.update((value as never) ?? null);
+      if (gameBoard) {
+        // 两盘互斥：扫雷盘上桌，先让五子棋交还地板
+        gomokuView = null;
+        gomokuBoard.show(false);
+        renderGomokuChip(null);
+      }
+      board.update(gameBoard as never);
       renderChip(gameBoard);
       syncStartButton();
+    },
+    onGomoku: (value) => {
+      gomokuView = (value as GomokuView) ?? null;
+      if (gomokuView) {
+        // 五子棋真的上桌了才需要把扫雷盘收起来（session_state 每次心跳都带 gomoku:null，
+        // 无条件去收起会误伤正在进行的扫雷盘）
+        gameBoard = null;
+        renderChip(null);
+        board.show(false);
+      }
+      gomokuBoard.update(gomokuView);
+      renderGomokuChip(gomokuView);
     },
     onBasin: (record) => {
       if (basinApplied) return;
@@ -1134,6 +1238,7 @@ async function boot() {
 
     root.updateMatrixWorld(true);
     board.tick();
+    gomokuBoard.tick();
     stepPropWorld(dt);
     basin.update(dt, player.performanceTime);
     scoop.update(dt, player.performanceTime);
@@ -1166,6 +1271,8 @@ async function boot() {
   (window as unknown as Record<string, unknown>).whale = {
     stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE,
     getGame: () => gameBoard,
+    gomokuBoard,
+    getGomoku: () => gomokuView,
     /** 探针用：当前客户端快照（与服务端同步的同一份） */
     snapshot,
     get executor() { return currentExecutor; },

@@ -46,6 +46,17 @@ export const CAPABILITIES = [
       expected_revision: { type: "number", min: 0, note: "必须等于公开棋盘 revision" },
     },
   },
+  {
+    id: "place_stone",
+    enabled: true,
+    channels: ["item"],
+    params: {
+      game_id: { type: "string", note: "当前五子棋的 gameId" },
+      row: { type: "number", min: 0, max: 14, note: "0 从 -Z 向 +Z" },
+      col: { type: "number", min: 0, max: 14, note: "0 从 -X 向 +X" },
+      expected_revision: { type: "number", min: 0, note: "必须等于公开棋盘的 revision" },
+    },
+  },
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
   { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
   { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: HAND_OBJECTS, note: "盆→左手，饭勺→右手" } } },
@@ -116,21 +127,23 @@ export function validatePlan(plan) {
  * 这条规则写在代码里，不依赖模型读提示词；违规计划整体拒绝，不派发残步。
  */
 export function assertDigPlacement(steps) {
-  const digAt = steps.map((s, i) => (s && s.action === "dig" ? i : -1)).filter((i) => i >= 0);
+  // dig 和 place_stone 都是一次性“落地”动作：最多一个，且必须是最后一步
+  for (const [action, label] of [["dig", "DIG"], ["place_stone", "STONE"]]) {
+    const at = steps.map((s, i) => (s && s.action === action ? i : -1)).filter((i) => i >= 0);
+    if (at.length > 1) throw new ModelError(`MULTIPLE_${label}_STEPS`, `一个计划最多一个 ${action}`, 0);
+    if (at.length === 1 && at[0] !== steps.length - 1) {
+      throw new ModelError(`${label}_NOT_LAST`, `${action} 必须是一个计划的最后一步`, 0);
+    }
+  }
   if (digInParallel(steps)) {
-    throw new ModelError("DIG_IN_PARALLEL", "dig 不能放进 parallel", 0);
-  }
-  if (digAt.length > 1) {
-    throw new ModelError("MULTIPLE_DIG_STEPS", "一个计划最多一个 dig", 0);
-  }
-  if (digAt.length === 1 && digAt[0] !== steps.length - 1) {
-    throw new ModelError("DIG_NOT_LAST", "dig 必须是一个计划的最后一步", 0);
+    throw new ModelError("DIG_IN_PARALLEL", "dig/place_stone 不能放进 parallel", 0);
   }
 }
 
 function digInParallel(steps) {
   return steps.some(
-    (s) => s && s.action === "parallel" && Array.isArray(s.items) && s.items.some((it) => it && it.action === "dig"),
+    (s) => s && s.action === "parallel" && Array.isArray(s.items)
+      && s.items.some((it) => it && (it.action === "dig" || it.action === "place_stone")),
   );
 }
 
@@ -204,6 +217,20 @@ export function validateStep(step, id = "step") {
       }
       return { action: "dig", game_id: step.game_id, row, col, expected_revision: revision };
     }
+    case "place_stone": {
+      const { row, col, expected_revision: revision } = step;
+      if (!Number.isInteger(row) || row < 0 || row > 14 || !Number.isInteger(col) || col < 0 || col > 14) {
+        throw new ModelError("INVALID_SCHEMA", `${id} row/col 必须是 0..14 的整数`, 0);
+      }
+      if (!Number.isInteger(revision) || revision < 0) {
+        throw new ModelError("INVALID_SCHEMA", `${id} expected_revision 必须是非负整数`, 0);
+      }
+      if (typeof step.game_id !== "string" || !step.game_id) {
+        throw new ModelError("INVALID_SCHEMA", `${id} game_id 缺失`, 0);
+      }
+      return { action: "place_stone", game_id: step.game_id, row, col, expected_revision: revision };
+    }
+
     case "walk_to_basin":
       return { action: "walk_to_basin" };
     case "pickup":
@@ -237,7 +264,9 @@ export function validateStep(step, id = "step") {
       const items = Array.isArray(step.items) ? step.items : [];
       if (!items.length || items.length > 3) throw new ModelError("INVALID_SCHEMA", `${id} items 数量必须是 1..3`, 0);
       if (items.some((it) => it && it.action === "parallel")) throw new ModelError("INVALID_SCHEMA", `${id} 不允许嵌套 parallel`, 0);
-      if (items.some((it) => it && it.action === "dig")) throw new ModelError("DIG_IN_PARALLEL", `${id} dig 不能放进 parallel`, 0);
+      if (items.some((it) => it && (it.action === "dig" || it.action === "place_stone"))) {
+        throw new ModelError("DIG_IN_PARALLEL", `${id} dig/place_stone 不能放进 parallel`, 0);
+      }
       if(parallelConflict(items))throw new ModelError("CHANNEL_CONFLICT",`${id} 并行动作资源冲突`,0);
       return { action: "parallel", items: items.map((it, j) => validateStep(it, `${id}.${j + 1}`)) };
     }

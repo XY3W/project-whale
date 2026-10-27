@@ -34,6 +34,7 @@ type Handlers = {
   onSnapshot?: (s: { x: number; z: number; yawDeg: number }) => void;
   onBasin?: (basin: Record<string, unknown>) => void;
   onGame?: (board: unknown) => void;
+  onGomoku?: (board: unknown) => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -123,6 +124,7 @@ export class BrainClient {
           }
           if (msg.basin) this.handlers.onBasin?.(msg.basin as Record<string, unknown>);
           if ("game" in msg) this.handlers.onGame?.(msg.game);
+          if ("gomoku" in msg) this.handlers.onGomoku?.(msg.gomoku);
           if(msg.behaviorMode)this.handlers.onMode?.(msg.behaviorMode);
           if (msg.needsReconcile) this.handlers.onReconcile?.();
           break;
@@ -132,6 +134,9 @@ export class BrainClient {
           break;
         case "game_state":
           this.handlers.onGame?.(msg.board);
+          break;
+        case "gomoku_state":
+          this.handlers.onGomoku?.(msg.board);
           break;
         case "dig_result": {
           const resolve = this.digWaiters.get(String(msg.actionInstanceId));
@@ -202,6 +207,21 @@ export class BrainClient {
   /** 用户主动结束当前局（按钮变成「扫雷结束」时调用） */
   endGame() {
     return this.send("game_end", { leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 五子棋开局：她执黑先行 */
+  startGomoku(requestId = `gm${Date.now()}`) {
+    return this.send("gomoku_start", { requestId, leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 用户（白方）点交点落子 */
+  gomokuMove(payload: { gameId: string; row: number; col: number; expectedRevision: number; moveId?: string }) {
+    return this.send("gomoku_move", { ...payload, leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 五子棋结束/收起 */
+  endGomoku() {
+    return this.send("gomoku_end", { leaseEpoch: this.leaseEpoch });
   }
 
   /** 挖掘提交：由执行器在 dig_contact 时刻调用，等待服务端结算 */

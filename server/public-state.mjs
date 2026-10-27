@@ -8,6 +8,7 @@
 import {digAim} from "../shared/dig-aim.mjs";
 import { OBJECTS } from "./capabilities.mjs";
 import { DIG_TOLERANCE_M, SIZE, cellAt, cellCenter } from "./minesweeper.mjs";
+import { BLACK, GOMOKU_CELL_M, GOMOKU_SIZE, WIN_LENGTH } from "./gomoku.mjs";
 
 /** 只有这三种状态会落盘：飞行和转移中要么回到稳定态，要么按 unknown 处理 */
 export const PERSISTED_PROP_STATES = new Set(["resting", "held", "worn", "flying", "transferring", "reserved", "unknown"]);
@@ -149,6 +150,50 @@ export function boardContext(board, character = null) {
     legend: "rows[row][col]：. = 未揭示（未知）；0-9 = 已揭示格的邻雷数；* = 已引爆的雷",
     rows,
   };
+}
+
+/**
+ * 五子棋公开棋盘：15 行 × 15 字符（● 黑 / ○ 白 / . 空），比逐格 JSON 省得多。
+ * 只给规则与局面，不给任何“该堵哪”的引擎提示。
+ */
+export function gomokuContext(view, character = null, myColor = BLACK) {
+  if (!view) return null;
+  const grid = Array.from({ length: GOMOKU_SIZE }, () => Array(GOMOKU_SIZE).fill("."));
+  for (const stone of view.stones ?? []) {
+    if (!grid[stone.row] || grid[stone.row][stone.col] === undefined) continue;
+    grid[stone.row][stone.col] = stone.color === BLACK ? "●" : "○";
+  }
+  const half = (GOMOKU_SIZE * GOMOKU_CELL_M) / 2;
+  return {
+    gameId: view.gameId,
+    revision: view.revision,
+    status: view.status,
+    size: GOMOKU_SIZE,
+    winLength: WIN_LENGTH,
+    turn: view.turn,
+    myColor,
+    yourTurn: view.turn === myColor,
+    lastMove: view.lastMove ? { row: view.lastMove.row, col: view.lastMove.col, color: view.lastMove.color } : null,
+    moves: view.moves,
+    winner: view.winner,
+    line: view.line ?? null,
+    cellSizeM: GOMOKU_CELL_M,
+    boardHalf: half,
+    coordinateRule: `row 从 -Z 向 +Z、col 从 -X 向 +X；交点 x=${-half}+col*${GOMOKU_CELL_M}，z=${-half}+row*${GOMOKU_CELL_M}`,
+    legend: "rows[row][col]：● 黑（你）、○ 白（用户）、. 空；${myColor} 是你执的颜色",
+    rows: grid.map((line) => line.join("")),
+    currentCell: character && Number.isFinite(character.x) && Number.isFinite(character.z)
+      ? clampCell(character, half)
+      : null,
+  };
+}
+
+function clampCell(character, half) {
+  const col = Math.round((character.x + half) / GOMOKU_CELL_M);
+  const row = Math.round((character.z + half) / GOMOKU_CELL_M);
+  if (!Number.isInteger(row) || !Number.isInteger(col)) return null;
+  if (row < 0 || col < 0 || row >= GOMOKU_SIZE || col >= GOMOKU_SIZE) return null;
+  return { row, col };
 }
 
 /** 角色朝向与当前格，模型用它算转向和站位 */
