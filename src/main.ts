@@ -896,7 +896,12 @@ async function boot() {
         activePlan = null;
       });
     },
-    onReasoningStart: taskId => chat.startReasoning(taskId),
+    onReasoningStart: taskId => {
+      errorActive = false;
+      setError(false);
+      chat.setError(null);
+      chat.startReasoning(taskId);
+    },
     onReasoningDelta: (taskId, text) => chat.appendReasoning(taskId, text),
     onReply: (msg) => {
       chat.endReasoning(msg.taskId);
@@ -973,6 +978,7 @@ async function boot() {
         setLlmThinking(false);
         setError(true);
       } else {
+        errorActive = false;
         chat.setError(null);
         setError(false);
         taskActive = false;
