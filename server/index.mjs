@@ -48,6 +48,10 @@ const AUTO_START_IDLE_MS = Number(process.env.AUTO_START_IDLE_MS ?? 90_000);
  * 按回合计会把实际开销低估 4 倍。思考模式下每次调用约 7k 输入 + 3~7k 输出，
  * 一局之内尽量让她下完，所以默认给到 300；`AUTO_MAX_CALLS=0` 表示不限制。
  */
+/** 支持 playful-v2 动作集的执行端版本；落子还要求 count33（走到位 + 提交） */
+const RUNTIME_V2 = new Set(["playful-v2-count32", "playful-v2-count33"]);
+const RUNTIME_STONE = "playful-v2-count33";
+
 const AUTO_MAX_CALLS_PER_HOUR = Number(process.env.AUTO_MAX_CALLS ?? 300);
 /**
  * 扫雷进行中但模型一分钟没动静 → 宿主主动发一条提醒把她叫醒。
@@ -608,8 +612,8 @@ function modelContext(task, phase, extra = {}) {
       budgetMs: BUDGET_MS,
       remainingMs: Math.max(0, BUDGET_MS - (Date.now() - task.startedAt)),
     },
-    capabilities: describeCapabilities().filter(cap=>task.originWs?.runtimeVersion==="playful-v2-count32"||!["set_basin_grip","knock_basin"].includes(cap.id)).map(cap=>cap.id==='play'&&[...props.values()].some(p=>p.state==='held')?{...cap,params:{action_id:{enum:['nod','look_left','look_right'],note:'持物时禁用未适配双臂的greet/notice/think'}}}:cap),
-    disabledCapabilities: [...describeDisabled(),...(task.originWs?.runtimeVersion==="playful-v2-count32"?[]:[{id:"set_basin_grip",reason:"执行页面需刷新到playful-v2-count32"},{id:"knock_basin",reason:"执行页面需刷新到playful-v2-count32"}])],
+    capabilities: describeCapabilities().filter(cap=>RUNTIME_V2.has(task.originWs?.runtimeVersion)||!["set_basin_grip","knock_basin"].includes(cap.id)).map(cap=>cap.id==='play'&&[...props.values()].some(p=>p.state==='held')?{...cap,params:{action_id:{enum:['nod','look_left','look_right'],note:'持物时禁用未适配双臂的greet/notice/think'}}}:cap),
+    disabledCapabilities: [...describeDisabled(),...(RUNTIME_V2.has(task.originWs?.runtimeVersion)?[]:[{id:"set_basin_grip",reason:"执行页面需刷新到playful-v2-count32"},{id:"knock_basin",reason:"执行页面需刷新到playful-v2-count32"}])],
     capabilityVersion: CAPABILITY_VERSION,
     world: {
       walkableHalf: 3.7,
@@ -767,7 +771,14 @@ function applyOutput(ws, task, out) {
     endTask("round budget");
     return;
   }
-  if(out.plan.steps.some(s=>['knock_basin','set_basin_grip'].includes(s.action))&&ws.runtimeVersion!=='playful-v2-count32'){
+  // 老页面上的 place_stone 只会点头、不会提交，必须让它先刷新，否则棋盘永远不长子
+  if (out.plan.steps.some((s) => s.action === "place_stone") && ws.runtimeVersion !== RUNTIME_STONE) {
+    send(ws, "error", { code: "RELOAD_REQUIRED", message: "五子棋落子需要刷新页面后使用新执行器" });
+    console.log(`[gomoku] 执行端版本 ${ws.runtimeVersion ?? "unknown"} 不支持走到位落子，要求刷新`);
+    endTask("old runtime (stone)");
+    return;
+  }
+  if(out.plan.steps.some(s=>['knock_basin','set_basin_grip'].includes(s.action))&&!RUNTIME_V2.has(ws.runtimeVersion)){
     send(ws,'error',{code:'RELOAD_REQUIRED',message:'请刷新页面后使用新动作'});endTask('old runtime');return;
   }
   task.plan = out.plan;
@@ -1244,6 +1255,30 @@ wss.on("connection", (ws, req) => {
         if (entry && entry.state === "processing") return; // 首次结果正在处理，忽略重复
         // 进入模型上下文前先瘦身：旧客户端可能把整张棋盘塞在 dig.actual 里
         msg.result = trimExecutionReport(msg.result);
+        // 五子棋：计划里要落子、但棋盘 revision 没变 → 落子其实没生效
+        // （客户端可能没提交、被拒、或者版本过旧只点了头）。明确提醒她重来，
+        // 否则她会以为已经下过了。
+        const stoneStep = task.plan?.steps?.find((step) => step.action === "place_stone");
+        if (stoneStep) {
+          // 把客户端上报的这一步结果摘要打进日志，方便直接看出是没提交、被拒、还是没走到位
+          const reported = Array.isArray(msg.result?.steps)
+            ? msg.result.steps.find((r) => r?.action === "place_stone")
+            : null;
+          console.log(`[gomoku] place_stone 结果 ${JSON.stringify(reported?.status ?? msg.result?.status ?? null)} ${JSON.stringify(reported?.reasonCode ?? null)} ${JSON.stringify(reported?.actual ?? null)?.slice(0, 220)}`);
+        }
+        const liveGomoku = gomoku.public();
+        if (stoneStep && liveGomoku && liveGomoku.status === "playing" && liveGomoku.turn === GOMOKU_BLACK && liveGomoku.revision === stoneStep.expected_revision) {
+          console.log("[gomoku] 计划结束但棋盘没变：提醒重新落子");
+          gameEvents.push({
+            eventId: `ev${++eventSeq}`,
+            type: "gomoku_place_failed",
+            gameId: liveGomoku.gameId,
+            revision: liveGomoku.revision,
+            status: liveGomoku.status,
+            at: new Date().toISOString(),
+            hint: "落子没有生效：棋盘没有任何变化。重新走位（根位置距目标交点 ≤0.2m）后再 place_stone；如果确实到不了，就说明原因。",
+          });
+        }
         if (msg.planId) session.ledger.set(msg.planId, { state: "processing", result: msg.result });
 
         if(task.stopping){endTask("cancelled plan settled");return;}

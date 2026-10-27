@@ -68,7 +68,7 @@ export class BrainClient {
     this.ws.addEventListener("open", () => {
       this.retry = 0;
       this.handlers.onConnection?.(true);
-      this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count32"});
+      this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count33"});
       this.startHeartbeat();
     });
     this.ws.addEventListener("close", () => {
@@ -77,7 +77,7 @@ export class BrainClient {
     });
     // 页面重新可见/聚焦时重新申请执行权（后台节流会导致心跳断档）
     const reclaim = () => {
-      if (document.visibilityState === "visible") this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count32"});
+      if (document.visibilityState === "visible") this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count33"});
     };
     document.addEventListener("visibilitychange", reclaim);
     window.addEventListener("focus", () => this.send("hello", {}));

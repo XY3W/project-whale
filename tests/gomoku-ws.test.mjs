@@ -40,7 +40,13 @@ function connect() {
   const inbox = [];
   ws.on("message", (raw) => inbox.push(JSON.parse(String(raw))));
   const send = (type, payload = {}) => ws.send(JSON.stringify({ protocolVersion: 1, type, ...payload }));
-  return new Promise((res) => ws.on("open", () => res({ ws, inbox, send })));
+  return new Promise((res) =>
+    ws.on("open", () => {
+      // 伪客户端也要报运行版本：落子要求 count33（走到位 + 提交）
+      send("hello", { runtimeVersion: "playful-v2-count33", stopReadyProtocol: 1 });
+      res({ ws, inbox, send });
+    }),
+  );
 }
 
 async function waitFor(inbox, pred, timeout = 6000) {
@@ -51,6 +57,12 @@ async function waitFor(inbox, pred, timeout = 6000) {
     await sleep(50);
   }
   return null;
+}
+
+/** 拿到 hello 之后最新的 session_state（代际以它为准） */
+async function lastState(inbox) {
+  await sleep(150);
+  return inbox.filter((m) => m.type === "session_state").at(-1);
 }
 
 /** 交点世界坐标（与服务端 cellCenter 一致） */
@@ -64,7 +76,7 @@ test("开局：她执黑，棋盘 15×15、0 子、轮到黑方", async (t) => {
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
-  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const state = await lastState(inbox);
   send("gomoku_start", { requestId: "g1", leaseEpoch: state.leaseEpoch });
   const board = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
   assert.ok(board, "应当回 gomoku_state");
@@ -80,7 +92,7 @@ test("她的落子必须带授权并站在交点上：只派发不动棋盘", as
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
-  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const state = await lastState(inbox);
   const epoch = state.leaseEpoch;
   send("gomoku_start", { requestId: "g1", leaseEpoch: epoch });
   const start = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
@@ -124,7 +136,7 @@ test("站位不对：提交被拒，棋盘不变", async (t) => {
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
-  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const state = await lastState(inbox);
   const epoch = state.leaseEpoch;
   send("gomoku_start", { requestId: "g1", leaseEpoch: epoch });
   const start = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
@@ -163,7 +175,7 @@ test("没有授权不能落子", async (t) => {
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
-  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const state = await lastState(inbox);
   const epoch = state.leaseEpoch;
   send("gomoku_start", { requestId: "g1", leaseEpoch: epoch });
   const start = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
@@ -188,7 +200,7 @@ test("用户落子：轮到她之前不能被接受；接受后回合切换", as
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
-  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const state = await lastState(inbox);
   const epoch = state.leaseEpoch;
   send("gomoku_start", { requestId: "g1", leaseEpoch: epoch });
   const start = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
@@ -217,7 +229,7 @@ test("结束：进行中结束保留盘面，再点收摊", async (t) => {
   const { ws, inbox, send } = await connect();
   t.after(() => { ws.close(); proc.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
-  const state = await waitFor(inbox, (m) => m.type === "session_state");
+  const state = await lastState(inbox);
   const epoch = state.leaseEpoch;
   send("gomoku_start", { requestId: "g1", leaseEpoch: epoch });
   const start = await waitFor(inbox, (m) => m.type === "gomoku_state" && m.board);
