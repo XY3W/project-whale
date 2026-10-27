@@ -110,7 +110,7 @@ const CSS = `
 
 .speech-bubble{position:fixed;left:0;top:0;max-width:320px;padding:10px 14px;border-radius:18px;
   background:rgba(14,22,36,.94);border:1px solid rgba(120,160,230,.35);color:#e6efff;
-  font:16px/1.45 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .2s;z-index:15;white-space:pre-wrap}
+  font:18px/1.45 system-ui,sans-serif;pointer-events:none;opacity:0;transition:opacity .2s;z-index:15;white-space:pre-wrap}
 .speech-bubble.show{opacity:1}
 .net-error{position:fixed;left:0;top:0;width:64px;height:64px;border-radius:50%;display:none;
   align-items:center;justify-content:center;background:#e23b3b;color:#fff;font:700 34px/1 system-ui,sans-serif;
