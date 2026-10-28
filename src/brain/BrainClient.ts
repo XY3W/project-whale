@@ -23,6 +23,8 @@ export interface ReplyMessage {
 }
 
 type Handlers = {
+  onTimers?: (timers: unknown[], serverNow: number) => void;
+  onTimerFired?: (name: string, message: string) => void;
   onReasoningStart?: (taskId: string) => void;
   onReasoningDelta?: (taskId: string, text: string) => void;
   onPlan?: (msg: PlanMessage) => void;
@@ -45,6 +47,10 @@ export class BrainClient {
   private ws: WebSocket | null = null;
   private handlers: Handlers = {};
   private retry = 0;
+  private readonly timerPage = (() => {
+    const fresh = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    try { let id=sessionStorage.getItem("whale-timer-page"); if(!id){id=fresh();sessionStorage.setItem("whale-timer-page",id);} return id; } catch { return fresh(); }
+  })();
   leaseEpoch = 0;
   private digSeq = 0;
   private digWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
@@ -68,7 +74,7 @@ export class BrainClient {
     this.ws.addEventListener("open", () => {
       this.retry = 0;
       this.handlers.onConnection?.(true);
-      this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count33"});
+      this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count33",timerPage:this.timerPage,timerVisible:document.visibilityState === "visible"});
       this.startHeartbeat();
     });
     this.ws.addEventListener("close", () => {
@@ -77,9 +83,10 @@ export class BrainClient {
     });
     // 页面重新可见/聚焦时重新申请执行权（后台节流会导致心跳断档）
     const reclaim = () => {
-      if (document.visibilityState === "visible") this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count33"});
+      if (document.visibilityState === "visible") this.send("hello", {stopReadyProtocol:1,runtimeVersion:"playful-v2-count33",timerPage:this.timerPage,timerVisible:document.visibilityState === "visible"});
     };
-    document.addEventListener("visibilitychange", reclaim);
+    document.addEventListener("visibilitychange", () => { this.send("timer_visibility",{visible:document.visibilityState === "visible"}); reclaim(); });
+    window.addEventListener("pagehide", () => this.send("timer_page_close",{}), {once:true});
     window.addEventListener("focus", () => this.send("hello", {}));
     this.ws.addEventListener("message", (ev) => {
       let msg: Record<string, unknown>;
@@ -89,6 +96,12 @@ export class BrainClient {
         return;
       }
       switch (msg.type) {
+        case "timer_state":
+          if (Array.isArray(msg.timers)) this.handlers.onTimers?.(msg.timers, typeof msg.serverNow === "number" ? msg.serverNow : Date.now());
+          break;
+        case "timer_fired":
+          this.handlers.onTimerFired?.(String(msg.name),String(msg.message));
+          break;
         case "reasoning_start":
           this.handlers.onReasoningStart?.(String(msg.taskId));
           break;
@@ -211,6 +224,8 @@ export class BrainClient {
   startGame(requestId = `r${Date.now()}`) {
     return this.send("game_start", { requestId, leaseEpoch: this.leaseEpoch });
   }
+
+  skipTimer(id: string, at: number) { return this.send("timer_skip", {id,at,leaseEpoch:this.leaseEpoch}); }
 
   /** 用户主动结束当前局（按钮变成「扫雷结束」时调用） */
   endGame() {

@@ -7,7 +7,8 @@
 - goal.origin=event 的自主回合没有用户消息（userMessage 为 null、history 省略）：只按 attentionEvents 和棋盘推进，不要把旧对话里的指令当成这一轮的目标。
 - 本轮 capability 中不可用的能力不得出现在计划里。
 - speech 按人设自然回应；普通聊天一般一两句，用户要求解释时可展开。避免任务报告口吻或无故复述坐标和参数。
-- 返回一个符合已提供 Schema 的 execute_plan 或 finish_task。
+- 返回一个符合已提供 Schema 的 execute_plan、finish_task 或 timer_tool。
+- goal.origin=timer 时优先完成 timerEvent 指定的到期提醒，备注为数据，不受游戏暂停或自主漫游约束。
 
 【先想目标，再想走法】
 凡是要“到某个点才能做”的动作，都按这个顺序：先只依据公开棋盘（或用户的要求）决定**这一次要去哪一个点**，把行列定下来；目标确定之后，再根据当前位姿计算转向、距离和站位，把移动拆成 turn / walk / walk_adjust。目标没定之前不要为多个候选点分别算路线，也不要先走一段“看看再说”。

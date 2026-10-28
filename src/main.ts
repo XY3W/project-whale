@@ -9,6 +9,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
 import { ChatPanel } from "./ui/ChatPanel";
+import { TimerPanel } from "./ui/TimerPanel";
 import { BrainClient } from "./brain/BrainClient";
 import type { Plan } from "./behavior/protocol.ts";
 import { ActionExecutor } from "./behavior/ActionExecutor";
@@ -212,6 +213,7 @@ async function boot() {
   // ---- UI ----
   const chat = new ChatPanel();
   const client = new BrainClient();
+  const timerPanel = new TimerPanel((id, at) => client.skipTimer(id, at));
   let taskActive = false;
   let readOnly = false;
   let stateApplied = false;
@@ -255,6 +257,7 @@ async function boot() {
     base: player.state.base,
     walking: player.state.walking,
     chatOpen: chat.open,
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     heldObjectId: basin.state === "held" ? "basin" : scoop.state === "held" ? "rice_scoop" : null,
     headObjectId: basin.state === "worn" ? "basin" : null,
     slots: { left_hand: basin.state === "held" ? "basin" : null, right_hand: scoop.state === "held" ? "rice_scoop" : null, head: basin.state === "worn" ? "basin" : null },
@@ -992,6 +995,8 @@ async function boot() {
   };
 
   client.on({
+    onTimers: (list, serverNow) => timerPanel.update(list, serverNow),
+    onTimerFired: (_name, message) => { chat.addMessage("whale", message); speak(message); },
     onPlan: (msg) => {
       chat.endReasoning(msg.taskId);
       if(msg.planId&&seenPlans.has(msg.planId))return;

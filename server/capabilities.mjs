@@ -97,6 +97,10 @@ const byId = new Map(CAPABILITIES.map((c) => [c.id, c]));
 
 export function validatePlan(plan) {
   if (!plan || typeof plan !== "object") throw new ModelError("INVALID_SCHEMA", "输出不是对象", 0);
+  if (plan.type === "timer_tool") {
+    if (!["create", "list", "cancel"].includes(plan.operation)) throw new ModelError("INVALID_SCHEMA", "定时器操作无效", 0);
+    return {type:"timer_tool", operation:plan.operation, timer:plan.timer, timer_id:plan.timer_id};
+  }
   if (plan.type === "finish_task") {
     if (!["completed", "cannot_complete", "cancelled"].includes(plan.outcome)) {
       throw new ModelError("INVALID_SCHEMA", "finish_task.outcome 非法", 0);
@@ -293,6 +297,7 @@ export function outputContract() {
   return [
     'execute_plan: {"type":"execute_plan","speech":"string","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
     'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
+    'timer_tool: {"type":"timer_tool","operation":"create","timer":{"name":"任务名","first_at":"带时区的 ISO 8601 真实时间","interval_seconds":null或整数秒,"total_occurrences":null或整数,"display_message":"提醒文字","wake_note":"到期时交给自己的提醒任务"}}；list: {"type":"timer_tool","operation":"list"}；cancel: {"type":"timer_tool","operation":"cancel","timer_id":"任务ID"}。',
     "Step 只能取以下之一：",
     steps,
     '  {"action":"parallel","items":[Step 1..3]}（不嵌套，通道不冲突）',
