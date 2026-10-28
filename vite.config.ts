@@ -11,6 +11,6 @@ export default defineConfig({
   },
   build: {
     target: "es2022",
-    rollupOptions: { input: { main: "index.html", animation: "animation.html", basin: "basin.html" } },
+    rollupOptions: { input: { main: "index.html", animation: "animation.html", basin: "basin.html", blink: "blink.html" } },
   },
 });

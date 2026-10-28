@@ -1,0 +1,31 @@
+{
+  "sourceSha256": "6d2e12549bfa1056216482631203c5f7cc3aa5569f8226e02824b776cfc4c640",
+  "outputSha256": "aa516298d843212f90383c6943144b751d16306d597b1df988c45976d3e9dc10",
+  "originalBinaryPrefixIdentical": true,
+  "originalMeshesIdentical": true,
+  "originalAnimationsIdentical": true,
+  "originalSkinIdentical": true,
+  "addedMeshes": [
+    {
+      "name": "Blink_Left_Lash",
+      "vertices": 98,
+      "triangles": 96
+    },
+    {
+      "name": "Blink_Left_Upper",
+      "vertices": 343,
+      "triangles": 576
+    },
+    {
+      "name": "Blink_Right_Lash",
+      "vertices": 98,
+      "triangles": 96
+    },
+    {
+      "name": "Blink_Right_Upper",
+      "vertices": 343,
+      "triangles": 576
+    }
+  ],
+  "outputBytes": 37537640
+}

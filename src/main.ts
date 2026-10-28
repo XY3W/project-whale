@@ -25,7 +25,7 @@ import { MinesweeperBoard } from "./game/MinesweeperBoard";
 import { GomokuBoard, gomokuCellAt, gomokuCellCenter } from "./game/GomokuBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
-const MODEL = "/models/playful-v2/character_playful.glb";
+const MODEL = "/models/blink-v1/character_blink_v1.glb";
 const BASIN_ASSET_DIR = "/models/playful-v2";
 const BASIN_MODEL = "/models/playful-v2/steel_basin_v2.glb";
 const SCOOP_MODEL = "/models/playful-v2/rice_scoop_straight_v3.glb";
@@ -54,7 +54,7 @@ async function boot() {
   gltf.scene.traverse((o) => {
     const m = o as THREE.Mesh;
     if (m.isMesh) {
-      m.castShadow = true;
+      m.castShadow = !m.name.startsWith("Blink_");
       m.receiveShadow = true;
       m.frustumCulled = false;
       if ((m as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(m as THREE.SkinnedMesh);
@@ -1330,6 +1330,7 @@ async function boot() {
     const setup=document.createElement('button');setup.textContent='验收双持准备';setup.onclick=()=>{currentExecutor?.cancel();stopMotion();basin.restore({state:'held',position:[0,1,0],grip:'outward'});scoop.restore({state:'held',position:[0,1,0]});updateBasinHold();output.textContent='双持就绪';};
     tools.append(setup);
     for(const count of [1,10,32]){const b=document.createElement('button');b.textContent=`验收敲${count}下`;b.onclick=()=>{output.textContent='执行中';void runOwned('plan',{steps:[{action:'knock_basin',object_id:'basin',tool_id:'rice_scoop',count,tempo:'normal'}]}).then(r=>{output.textContent=JSON.stringify(r?.steps[0]?.actual??r);});};tools.append(b);}
+    for (const [label, action] of [['眨眼', () => player.blink.trigger()], ['保持闭眼', () => player.blink.setManual(1)], ['自然眨眼', () => player.blink.setManual(null)]] as const) { const b=document.createElement('button');b.textContent=label;b.onclick=action;tools.append(b); }
     const cancel=document.createElement('button');cancel.textContent='停止验收';cancel.onclick=()=>currentExecutor?.cancel();tools.append(cancel,output);document.body.append(tools);
   }
 

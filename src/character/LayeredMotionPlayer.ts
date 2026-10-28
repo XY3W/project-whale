@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { PoseOverlay } from './PoseOverlay.ts';
+import { BlinkController } from './BlinkController.ts';
 
 
 export interface PerformanceEvent {
@@ -48,6 +49,7 @@ type MoveKind = 'walk' | 'run' | 'adjust';
 /** Baked poses only. Locomotion transitions are authored; no runtime bone solving. */
 export class LayeredMotionPlayer {
   readonly mixer: THREE.AnimationMixer;
+  readonly blink: BlinkController;
   private actions = new Map<string, THREE.AnimationAction>();
   private base = 'idle_stand';
   private baseTime = 0;
@@ -77,6 +79,7 @@ export class LayeredMotionPlayer {
   private readonly root: THREE.Object3D;
   constructor(root: THREE.Object3D, clips: THREE.AnimationClip[]) {
     this.root=root;
+    this.blink=new BlinkController(root);
     this.mixer = new THREE.AnimationMixer(root);
     for (const clip of clips) {
       const a = this.mixer.clipAction(clip); a.setEffectiveWeight(0); a.play();
@@ -489,6 +492,11 @@ export class LayeredMotionPlayer {
   }
 
   update(dt: number) {
+    this.updateBody(dt);
+    this.blink.update(dt);
+  }
+
+  private updateBody(dt: number) {
     this.movementDelta=0;
     if (this.soloAction) {
       if (!this.soloPaused) this.mixer.update(dt);
