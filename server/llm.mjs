@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { CAPABILITY_VERSION, CAPABILITIES, ModelError, outputContract, validatePlan } from "./capabilities.mjs";
+import { toolSummary } from "./tools.mjs";
 
 const PROMPT_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), "prompts");
 const readPrompt = (name) => fs.readFileSync(path.join(PROMPT_DIR, name), "utf8");
@@ -78,7 +79,8 @@ function skillSection(index = []) {
   let used = 0;
   let hidden = 0;
   for (const item of index) {
-    const line = `- ${item.id} ${item.title}${item.trigger ? ` · ${item.trigger}` : ""}`;
+    const tag = item.kind === "script" ? "[脚本] " : "";
+    const line = `- ${item.id} ${tag}${item.title}${item.trigger ? ` · ${item.trigger}` : ""}`;
     if (used + line.length > SKILL_INDEX_CHARS) { hidden += 1; continue; }
     lines.push(line);
     used += line.length;
@@ -87,6 +89,7 @@ function skillSection(index = []) {
   return `【我的经验（技能）】
 下面是你自己写的技能索引（只有名称和用途，正文不在提示词里）。觉得用得上就先 skill_tool {"operation":"read","skill_id":"…"} 读正文，下一轮照它做；不需要就直接做事。
 ${lines.join("\n")}${more}
+需要结果就 skill_tool {"operation":"run","skill_id":"…","input":…}（只对 [脚本] 技能有效，在沙箱里跑，读不到文件也上不了网）。
 你也能新建/修改/停用：{"operation":"create"|"revise"|"disable"|"enable", ...}；写完立即生效。
 `;
 }
@@ -119,6 +122,23 @@ function render(templateName, ctx) {
   return [
     { role: "system", content: systemPrompt(flags) },
     { role: "user", content: tpl + "\n\n" + OUTPUT_CONTRACT },
+  ];
+}
+
+/**
+ * tools 模式的起始消息：system（含技能索引）+ 任务上下文。
+ * 之后的轮次只追加 assistant(tool_calls) / tool(result)，前缀保持稳定以便命中缓存。
+ */
+export function toolStartMessages(ctx) {
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, skillIndex: ctx.skills?.index ?? [] };
+  const { index, ...restSkills } = ctx.skills ?? {};
+  const clean = ctx.skills ? { ...ctx, skills: restSkills } : ctx;
+  return [
+    { role: "system", content: systemPrompt(flags) },
+    {
+      role: "user",
+      content: `REQUEST_CONTEXT_JSON:\n${JSON.stringify(clean)}\n\n${toolSummary()}`,
+    },
   ];
 }
 

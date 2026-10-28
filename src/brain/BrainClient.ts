@@ -252,7 +252,7 @@ export class BrainClient {
 
   /** 技能管理（给界面用；模型自己走 skill_tool） */
   getSkills() { return this.send("skills_get", {}); }
-  saveSkill(payload: { id?: string; title: string; trigger: string; body: string; tags?: string[] }) {
+  saveSkill(payload: { id?: string; title: string; trigger: string; body: string; tags?: string[]; kind?: string; script?: string }) {
     return this.send("skills_save", payload);
   }
   setSkill(id: string, enabled: boolean) { return this.send("skills_set", { id, enabled }); }

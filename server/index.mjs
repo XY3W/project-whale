@@ -22,6 +22,10 @@ import { GomokuService } from "./gomoku-service.mjs";
 import { createSpeechTidy } from "./speech.mjs";
 import { SkillRegistry } from "./skills.mjs";
 import { createFailureLog, describeFailures } from "./failures.mjs";
+import { runScript } from "./sandbox.mjs";
+import { toolStartMessages } from "./llm.mjs";
+import { PROTOCOL as LLM_PROTOCOL } from "./llm.mjs";
+import { toolDefinitions } from "./tools.mjs";
 import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE, STONE_TOLERANCE_M, cellCenter as gomokuCellCenter } from "./gomoku.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
@@ -117,6 +121,12 @@ const gomoku = new GomokuService(path.join(process.cwd(), "data", "gomoku.json")
 const speechTidy = createSpeechTidy();
 /** 她自己写的经验（技能）；正文按需读取，不常驻提示词 */
 const skills = new SkillRegistry(path.join(process.cwd(), "data", "skills.json"));
+/** tools 协议：一轮任务里最多几次模型往返 */
+const MAX_TOOL_TURNS = 6;
+/** transcript 压缩阈值：超过这个字符数就把旧工具结果换成摘要 */
+const TRANSCRIPT_CHARS = 40000;
+const TOOLS = toolDefinitions();
+
 /** 失败档案：给“写技能”提供结构化证据（不存思考链） */
 const failures = createFailureLog();
 function loadState() {
@@ -535,6 +545,12 @@ function endTask(reason, opts = {}) {
     activeNoProgress=progress?0:activeNoProgress+1;
     store.update(st=>{st.recentAutonomy=[...(st.recentAutonomy??[]),{taskId:finished.id,at:Date.now(),progress,actions:results.flatMap(r=>r.steps?.map(s=>({action:s.action,status:s.status}))??[])}].slice(-4);});
   }
+  if (finished?.pending) {
+    const pending = finished.pending;
+    finished.pending = null;
+    if (pending.timer) clearTimeout(pending.timer);
+    pending.resolve?.({ ok: false, error: "任务已结束" });
+  }
   finished?.abort?.abort();
   if (session.budgetTimer) { clearTimeout(session.budgetTimer); session.budgetTimer = null; }
   session.task = null;
@@ -696,8 +712,9 @@ function modelContext(task, phase, extra = {}) {
     skills: {
       ...skills.stats(),
       // 只进 system prompt 的索引：编号 + 名称 + 何时用
-      index: skills.catalog().map(({ id, title, trigger }) => ({ id, title, trigger })),
+      index: skills.catalog().map(({ id, title, trigger, kind }) => ({ id, title, trigger, kind })),
       doc: task.skillDoc ?? null,
+      run: task.skillRun ?? null,
       note: task.skillNote ?? null,
     },
     gomoku: gomokuContext(gomoku.public(), character, GOMOKU_BLACK),
@@ -708,6 +725,120 @@ function modelContext(task, phase, extra = {}) {
 }
 
 /** 自主回合的触发原因，写进 goal.note 让模型一眼看到这一轮为什么被叫醒 */
+/**
+ * 执行一次技能操作。json 协议走 applyOutput 的 skill_tool 分支，
+ * tools 协议由 executeToolCall 直接调用；两者共享同一套语义。
+ */
+async function skillOp(task, ws, out = {}) {
+  const op = out.operation;
+  task.skillNote = null;
+  const args = out.skill ?? {};
+  try {
+    if (op === "list") {
+      task.skillListing = skills.catalog({ includeDisabled: true, filter: out.filter ?? "" });
+      task.skillNote = `目录已取到：${task.skillListing.length} 条`;
+      return { ok: true, note: task.skillNote, listing: task.skillListing };
+    }
+    if (op === "read") {
+      const doc = skills.read(out.skill_id);
+      if (!doc) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
+      task.skillDoc = { id: doc.id, title: doc.title, trigger: doc.trigger, body: doc.body, version: doc.version, kind: doc.kind ?? "text", script: doc.kind === "script" ? String(doc.script ?? "").slice(0, 1500) : null };
+      task.skillRead = doc.id;
+      task.skillNote = `已读到「${doc.title}」v${doc.version}`;
+      console.log(`[skill] ${task.id} read ${doc.id} ${doc.title}`);
+      return { ok: true, note: task.skillNote, doc: task.skillDoc };
+    }
+    if (op === "create") {
+      const { skill, duplicate } = skills.create(args, {
+        taskId: task.id,
+        signature: task.skillCandidate?.signature ?? null,
+      });
+      task.skillNote = duplicate ? `已经有一条一样的「${skill.title}」，直接沿用` : `新技能已注册并启用：${skill.title}`;
+      if (!duplicate) announceSkill("create", skill);
+      console.log(`[skill] ${task.id} create ${skill.id} ${skill.title}${duplicate ? "（重复）" : ""}`);
+      return { ok: true, note: task.skillNote, skill: { id: skill.id, title: skill.title, kind: skill.kind ?? "text" }, duplicate };
+    }
+    if (op === "revise") {
+      const skill = skills.revise(out.skill_id, args);
+      task.skillNote = `已更新「${skill.title}」到 v${skill.version}`;
+      announceSkill("revise", skill);
+      console.log(`[skill] ${task.id} revise ${skill.id} v${skill.version}`);
+      return { ok: true, note: task.skillNote, skill: { id: skill.id, title: skill.title, version: skill.version } };
+    }
+    if (op === "run") {
+      const skill = skills.get(out.skill_id);
+      if (!skill) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
+      if ((skill.kind ?? "text") !== "script") throw Object.assign(new Error("这条技能不是脚本，读正文照做就行"), { code: "SKILL_NOT_SCRIPT" });
+      console.log(`[skill] ${task.id} run ${skill.id} ${skill.title}`);
+      const res = await runScript(skill.script, { input: out.input ?? null });
+      skill.usage = skill.usage ?? { injected: 0, succeeded: 0, failed: 0 };
+      skill.usage.injected += 1;
+      skill.usage.lastUsedAt = Date.now();
+      skills.save();
+      task.skillRead = skill.id;
+      task.skillRun = { id: skill.id, title: skill.title, ok: res.ok, value: res.value ?? null, logs: res.logs ?? [], ms: res.ms, error: res.error ?? null };
+      task.skillNote = res.ok ? `脚本「${skill.title}」跑完了（${res.ms}ms）` : `脚本「${skill.title}」失败：${res.error}`;
+      return { ok: res.ok, note: task.skillNote, run: task.skillRun };
+    }
+    if (op === "disable" || op === "enable") {
+      const skill = skills.setEnabled(out.skill_id, op === "enable");
+      task.skillNote = `${op === "enable" ? "已启用" : "已停用"}「${skill.title}」`;
+      announceSkill(op, skill);
+      console.log(`[skill] ${task.id} ${op} ${skill.id}`);
+      return { ok: true, note: task.skillNote };
+    }
+    throw Object.assign(new Error(`未知技能操作：${op}`), { code: "SKILL_UNKNOWN_OP" });
+  } catch (err) {
+    task.skillNote = `技能操作失败：${err.message}`;
+    console.log(`[skill] ${task.id} ${op} 失败 ${err.code ?? ""} ${err.message}`);
+    return { ok: false, error: err.message, code: err.code ?? null };
+  }
+}
+
+/** 定时器操作；json 与 tools 两条路径共用 */
+async function timerOp(task, ws, out = {}) {
+  if (task.origin !== "user" || !ws.timerPage) {
+    send(ws, "error", { code: "TIMER_UNAVAILABLE", message: "定时器需要当前网页会话和用户指令" });
+    return { ok: false, error: "定时器需要当前网页会话和用户指令" };
+  }
+  try {
+    let speech;
+    if (out.operation === "create") {
+      const t = timers.create(ws.ownerScope, ws.timerPage, out.timer ?? {});
+      let date;
+      try { date = new Date(t.next_at).toLocaleString("zh-CN", { timeZone: task.snapshot?.timeZone ?? "Asia/Shanghai" }); }
+      catch { date = new Date(t.next_at).toISOString(); }
+      speech = `已设置“${t.name}”，${date}提醒你。`;
+    } else if (out.operation === "cancel") {
+      if (!timers.cancel(ws.ownerScope, ws.timerPage, out.timer_id)) throw new Error("没有找到这个定时任务");
+      speech = "已取消这个定时任务。";
+    } else {
+      const list = timers.list(ws.ownerScope, ws.timerPage);
+      speech = list.length ? `当前有 ${list.length} 个定时任务：${list.map((t) => t.name).join("、")}。` : "目前没有定时任务。";
+    }
+    send(ws, "timer_state", { timers: timers.list(ws.ownerScope, ws.timerPage), serverNow: Date.now() });
+    send(ws, "public_reply", { taskId: task.id, speech });
+    store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
+    return { ok: true, speech };
+  } catch (err) {
+    send(ws, "error", { code: "TIMER_INVALID", message: err.message });
+    return { ok: false, error: err.message };
+  }
+}
+
+/** 技能操作完成后的统一收尾：计数、上限、继续规划 */
+function afterSkillOp(task, ws) {
+  task.skillOps = (task.skillOps ?? 0) + 1;
+  const limit = 3;
+  if (task.skillOps >= limit || task.rounds >= MAX_ROUNDS) {
+    task.skillOps = 0;
+    endTask("skill op limit");
+    return;
+  }
+  broadcastState();
+  runPlanning(task, ws);
+}
+
 /**
  * 失败签名统计：同一个「原因码:动作」在最近若干任务里反复出现，就认为她在同一个坑里打转，
  * 下一轮把证据放进 attentionEvents，让她自己决定要不要写一条技能。
@@ -813,6 +944,9 @@ function fakeBrain(task, ws) {
   persist();
   session.phase = "executing";
   broadcastState();
+  if (task.toolsMode) {
+    task.pending = { planId: task.planId, resolve: null, timer: null };
+  }
   send(ws, "execute_plan", {
     taskId: task.id,
     generation: task.generation,
@@ -824,12 +958,156 @@ function fakeBrain(task, ws) {
   });
 }
 
+/** 等执行端就绪（和 json 路径同样的握手） */
+async function waitTaskReady(task) {
+  const deadline = Date.now() + 30000;
+  while (!task.ready && session.task === task && !task.abort?.signal.aborted && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  if (session.task !== task || task.abort?.signal.aborted) return false;
+  return task.ready;
+}
+
+/** 追加式 transcript：老的 tool 结果只留摘要，避免越跑越大 */
+function compactTranscript(task) {
+  const messages = task.messages;
+  if (!messages || messages.length < 6) return;
+  let total = messages.reduce((n, m) => n + (typeof m.content === "string" ? m.content.length : 0), 0);
+  if (total <= TRANSCRIPT_CHARS) return;
+  // 从最早的 tool 消息开始压缩，system / 首条 user / 最近 4 条一律保留
+  for (let i = 2; i < messages.length - 4 && total > TRANSCRIPT_CHARS; i++) {
+    const m = messages[i];
+    if (m.role !== "tool" || typeof m.content !== "string" || m.content.length < 400) continue;
+    const preview = m.content.slice(0, 300);
+    total -= m.content.length - preview.length - 40;
+    messages[i] = { ...m, content: `${preview}…[已压缩]` };
+  }
+}
+
+/** 当前世界状态，随工具结果一起回灌，保证 transcript 里的棋盘是最新的 */
+function worldSnapshot() {
+  const board = games.public();
+  const g = gomoku.public();
+  return {
+    board: board ? { gameId: board.gameId, revision: board.revision, status: board.status, revealedSafe: board.revealedSafe, remainingSafe: board.remainingSafe } : null,
+    gomoku: g ? { gameId: g.gameId, revision: g.revision, status: g.status, turn: g.turn, moves: g.moves, lastMove: g.lastMove } : null,
+    position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
+  };
+}
+
+/** 派发一套动作并等客户端回结果；超时/取消一律作为工具错误返回，不抛出 */
+function dispatchAndAwait(task, ws, plan, speech) {
+  return new Promise((resolve) => {
+    const before = session.ledger.size;
+    applyOutput(ws, task, { ...plan, speech });
+    if (session.task !== task) return resolve({ ok: false, error: "任务已结束，动作未执行" });
+    const pending = task.pending;
+    if (!pending) return resolve({ ok: false, error: "计划没有下发成功" });
+    pending.timer = setTimeout(() => {
+      if (task.pending !== pending) return;
+      task.pending = null;
+      resolve({ ok: false, error: "等待执行结果超时", timeout: true });
+    }, Math.max(30000, BUDGET_MS));
+    pending.resolve = resolve;
+    void before;
+  });
+}
+
+/** 执行一次工具调用；返回值会作为 tool 消息内容 */
+async function executeToolCall(task, ws, call) {
+  if (!call.args || typeof call.args !== "object") {
+    return { ok: false, error: `工具参数不是合法 JSON：${String(call.argumentsRaw ?? "").slice(0, 120)}` };
+  }
+  if (call.name === "finish") {
+    const outcome = ["completed", "cannot_complete", "cancelled"].includes(call.args.outcome) ? call.args.outcome : "completed";
+    const speech = speechTidy.tidy(String(call.args.speech ?? ""));
+    if (speech) {
+      send(ws, "public_reply", { taskId: task.id, speech });
+      if (task.origin === "user") store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
+    }
+    endTask(`finish:${outcome}`);
+    return { ok: true, done: true, outcome };
+  }
+  if (call.name === "run_plan") {
+    let plan;
+    try {
+      plan = validatePlan({ type: "execute_plan", speech: call.args.speech ?? "", decision_note: call.args.decision_note, steps: call.args.steps ?? [], memory_proposals: [] });
+    } catch (err) {
+      // ③ 校验失败 = 工具错误文本，让模型当轮自己改
+      return { ok: false, error: err.message };
+    }
+    const result = await dispatchAndAwait(task, ws, plan, call.args.speech);
+    return { ...result, world: worldSnapshot() };
+  }
+  if (call.name === "skill") return await skillOp(task, ws, call.args);
+  if (call.name === "timer") return await timerOp(task, ws, call.args);
+  return { ok: false, error: `没有这个工具：${call.name}` };
+}
+
+/** 工具循环：模型自己决定下一步，动作结果作为 tool 消息回灌 */
+async function runToolLoop(task, ws) {
+  try {
+    if (!(await waitTaskReady(task))) throw new ModelError("EXECUTOR_NOT_READY", "角色尚未停稳，停止规划", 0);
+    if (!task.messages) {
+      const ctx = modelContext(task, "planning", { attentionEvents: takeTaskEvents(task), executionReport: null, clientSnapshot: task.snapshot ?? null });
+      task.messages = toolStartMessages(ctx);
+      task.skillIndexSnapshot = ctx.skills?.index ?? [];
+    }
+    task.toolsMode = true;
+    for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+      if (session.task !== task || task.abort?.signal.aborted) return;
+      if (Date.now() - task.startedAt > BUDGET_MS) {
+        send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，先停在这里。" });
+        endTask("budget exceeded");
+        return;
+      }
+      send(ws, "reasoning_start", { taskId: task.id });
+      const out = await callModel(task.messages, task.abort?.signal, (text) => {
+        if (session.task === task && !task.abort?.signal.aborted) send(ws, "reasoning_delta", { taskId: task.id, text });
+      }, { tools: TOOLS });
+      if (task.origin === "event") autoplay.calls.push(Date.now());
+      noteLlmActivity();
+      if (!out.calls.length) {
+        // 模型只给了话 → 按正常收尾处理
+        const speech = speechTidy.tidy(out.content ?? "");
+        if (speech) {
+          send(ws, "public_reply", { taskId: task.id, speech });
+          if (task.origin === "user") store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
+        }
+        endTask("tool loop: text only");
+        return;
+      }
+      task.messages.push({
+        role: "assistant",
+        content: out.content || null,
+        tool_calls: out.calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.argumentsRaw ?? "{}" } })),
+      });
+      for (const call of out.calls) {
+        if (session.task !== task) return;
+        const result = await executeToolCall(task, ws, call);
+        task.messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 4000) });
+        if (result.done) return;
+      }
+      compactTranscript(task);
+      persist();
+    }
+    endTask("tool loop limit");
+  } catch (err) {
+    if (err instanceof ModelError) fail(ws, task, err);
+    else {
+      console.error("[tools] loop failed", err?.message ?? err);
+      fail(ws, task, new ModelError("LOOP_ERROR", `工具循环出错：${err?.message ?? err}`, 0));
+    }
+  }
+}
+
 async function runPlanning(task, ws) {
   if (!session.task || session.task.id !== task.id) return;
   if (!hasKey()) {
     fakeBrain(task, ws);
     return;
   }
+  if (LLM_PROTOCOL === "tools") return runToolLoop(task, ws);
   try {
     const deadline=Date.now()+30000;
     while(!task.ready&&session.task===task&&!task.abort?.signal.aborted&&Date.now()<deadline)await new Promise(r=>setTimeout(r,25));
@@ -884,66 +1162,18 @@ function absorbMemory(task,out){
 function applyOutput(ws, task, out) {
   if (!session.task || session.task.id !== task.id) return;
   if (out.type === "skill_tool") {
-    const op = out.operation;
-    task.skillNote = null;
-    try {
-      if (op === "list") {
-        task.skillListing = skills.catalog({ includeDisabled: true, filter: out.filter ?? "" });
-        task.skillNote = `目录已取到：${task.skillListing.length} 条`;
-      } else if (op === "read") {
-        const doc = skills.read(out.skill_id);
-        if (!doc) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
-        task.skillDoc = { id: doc.id, title: doc.title, trigger: doc.trigger, body: doc.body, version: doc.version };
-        task.skillRead = doc.id;
-        task.skillNote = `已读到「${doc.title}」v${doc.version}`;
-        console.log(`[skill] ${task.id} read ${doc.id} ${doc.title}`);
-      } else if (op === "create") {
-        const { skill, duplicate } = skills.create(out.skill ?? {}, {
-          taskId: task.id,
-          signature: task.skillCandidate?.signature ?? null,
-        });
-        task.skillNote = duplicate ? `已经有一条一样的「${skill.title}」，直接沿用` : `新技能已注册并启用：${skill.title}`;
-        if (!duplicate) announceSkill("create", skill);
-        console.log(`[skill] ${task.id} create ${skill.id} ${skill.title}${duplicate ? "（重复）" : ""}`);
-      } else if (op === "revise") {
-        const skill = skills.revise(out.skill_id, out.skill ?? {});
-        task.skillNote = `已更新「${skill.title}」到 v${skill.version}`;
-        announceSkill("revise", skill);
-        console.log(`[skill] ${task.id} revise ${skill.id} v${skill.version}`);
-      } else if (op === "disable" || op === "enable") {
-        const skill = skills.setEnabled(out.skill_id, op === "enable");
-        task.skillNote = `${op === "enable" ? "已启用" : "已停用"}「${skill.title}」`;
-        announceSkill(op, skill);
-        console.log(`[skill] ${task.id} ${op} ${skill.id}`);
-      }
-    } catch (err) {
-      task.skillNote = `技能操作失败：${err.message}`;
-      console.log(`[skill] ${task.id} ${op} 失败 ${err.code ?? ""} ${err.message}`);
-    }
-    task.skillOps = (task.skillOps ?? 0) + 1;
-    const limit = 3;
-    if (task.skillOps >= limit || task.rounds >= MAX_ROUNDS) {
-      task.skillOps = 0;
-      endTask("skill op limit");
-      return;
-    }
-    broadcastState();
-    runPlanning(task, ws);
+    skillOp(task, ws, out).then(() => afterSkillOp(task, ws));
     return;
   }
 
   if (out.type === "timer_tool") {
-    if (task.origin !== "user" || !ws.timerPage) { send(ws,"error",{code:"TIMER_UNAVAILABLE",message:"定时器需要当前网页会话和用户指令"}); endTask("timer unavailable"); return; }
-    try {
-      let speech;
-      if (out.operation === "create") { const t=timers.create(ws.ownerScope,ws.timerPage,out.timer ?? {}); let date; try { date=new Date(t.next_at).toLocaleString("zh-CN",{timeZone:task.snapshot?.timeZone??"Asia/Shanghai"}); } catch { date=new Date(t.next_at).toISOString(); } speech=`已设置“${t.name}”，${date}提醒你。`; }
-      else if (out.operation === "cancel") { if(!timers.cancel(ws.ownerScope,ws.timerPage,out.timer_id)) throw Error("没有找到这个定时任务"); speech="已取消这个定时任务。"; }
-      else { const list=timers.list(ws.ownerScope,ws.timerPage); speech=list.length?`当前有 ${list.length} 个定时任务：${list.map(t=>t.name).join("、")}。`:"目前没有定时任务。"; }
-      send(ws,"timer_state",{timers:timers.list(ws.ownerScope,ws.timerPage),serverNow:Date.now()});
-      send(ws,"public_reply",{taskId:task.id,speech}); store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",speech)); endTask("timer tool");
-    } catch(err) { send(ws,"error",{code:"TIMER_INVALID",message:err.message}); endTask("timer invalid"); }
+    timerOp(task, ws, out).then((res) => {
+      if (res?.ok) endTask("timer tool");
+      else endTask("timer invalid");
+    });
     return;
   }
+
   absorbMemory(task, out);
   if(task.planId&&session.ledger.get(task.planId)?.state==="processing")session.ledger.set(task.planId,{...session.ledger.get(task.planId),state:"done"});
   if (out.type === "finish_task") {
@@ -958,7 +1188,7 @@ function applyOutput(ws, task, out) {
     endTask();
     return;
   }
-  if ((task.origin!=="user"&&task.origin!=="timer"&&AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR) || task.rounds >= MAX_ROUNDS || (task.origin==="active"&&(!modeView(store.state).acceptingNewAutonomy||task.modeEpoch!==modeView(store.state).modeEpoch||Date.now()>=task.autonomyDeadline))) {
+  if (!task.toolsMode && ((task.origin!=="user"&&task.origin!=="timer"&&AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR) || task.rounds >= MAX_ROUNDS || (task.origin==="active"&&(!modeView(store.state).acceptingNewAutonomy||task.modeEpoch!==modeView(store.state).modeEpoch||Date.now()>=task.autonomyDeadline)))) {
     session.phase = "blocked";
     if (task.origin !== "event") send(ws, "public_reply", { taskId: task.id, speech: "已经到最大执行轮数，需要新的指示。" });
     endTask("round budget");
@@ -991,6 +1221,9 @@ function applyOutput(ws, task, out) {
   const digAuthId = issueDigAuth(task, out.plan);
   const planSpeech = speechTidy.tidy(out.speech || "");
   if(planSpeech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",planSpeech));
+  if (task.toolsMode) {
+    task.pending = { planId: task.planId, resolve: null, timer: null };
+  }
   send(ws, "execute_plan", {
     taskId: task.id,
     generation: task.generation,
@@ -1247,8 +1480,9 @@ wss.on("connection", (ws, req) => {
       case "skills_save": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能改技能" }); break; }
         try {
-          if (msg.id) skills.revise(msg.id, { title: msg.title, trigger: msg.trigger, body: msg.body, tags: msg.tags });
-          else skills.create({ title: msg.title, trigger: msg.trigger, body: msg.body, tags: msg.tags }, { ui: true });
+          const payload = { title: msg.title, trigger: msg.trigger, body: msg.body, tags: msg.tags, kind: msg.kind, script: msg.script };
+          if (msg.id) skills.revise(msg.id, payload);
+          else skills.create(payload, { ui: true });
           broadcastSkills();
         } catch (err) {
           send(ws, "error", { code: err.code ?? "SKILL_INVALID", message: err.message });
@@ -1548,6 +1782,16 @@ wss.on("connection", (ws, req) => {
         }
         session.phase = "checking";
         broadcastState();
+        // tools 模式：把结果交还给工具循环，由模型自己决定下一步（不再单独起 review）
+        if (task.toolsMode && task.pending) {
+          const pending = task.pending;
+          task.pending = null;
+          if (pending.timer) clearTimeout(pending.timer);
+          pending.resolve?.({ ok: true, result: msg.result, world: worldSnapshot() });
+          session.phase = "thinking";
+          broadcastState();
+          return;
+        }
         setTimeout(async () => {
           const task = session.task;
           if (!task || task.id !== msg.taskId) return;

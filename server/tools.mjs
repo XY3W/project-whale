@@ -78,7 +78,7 @@ export function toolDefinitions() {
             operation: { type: "string", enum: ["list", "read", "create", "revise", "disable", "enable", "run"] },
             skill_id: { type: "string", description: "read/revise/disable/enable/run 时的技能 id" },
             filter: { type: "string", description: "list 的关键词过滤" },
-            input: { description: "run 时传给脚本的参数，任意 JSON 值" },
+            input: { description: "run 时传给脚本的参数（脚本里用 input 读取），任意 JSON 值" },
             skill: {
               type: "object",
               description: "create/revise 的技能内容",

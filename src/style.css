@@ -298,3 +298,5 @@ canvas { display: block; }
 
 /* 系统提示行（技能事件等） */
 .chat-msg.chat-note{opacity:.62;font-size:12px;font-style:normal;color:#9fb3c8;padding-left:2px}
+.skill-kind{display:flex;align-items:center;gap:6px;font-size:12px;color:#44576d}
+.skill-script{background:#eef4fa;border:1px dashed #c3d3e3}

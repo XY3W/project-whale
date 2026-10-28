@@ -41,7 +41,7 @@ export function mountControls(client:BrainClient,audio:PropAudio){
     }catch(err){const error=document.createElement('p');error.textContent=String(err);dialog.append(error);}
   };
   // ---- 技能管理：列表 / 新建 / 编辑 / 启停 / 删除（删除只在这里有） ----
-  type Skill = { id:string; title:string; trigger:string; body:string; status:string; version:number; usage?:{injected?:number;succeeded?:number;failed?:number} };
+  type Skill = { id:string; title:string; trigger:string; body:string; status:string; version:number; kind?:string; script?:string; usage?:{injected?:number;succeeded?:number;failed?:number} };
   let skillCache: { skills: Skill[]; stats: { enabled:number; disabled:number; max:number } } = { skills: [], stats: { enabled:0, disabled:0, max:100 } };
   const skillDialog=document.createElement('dialog');skillDialog.className='memory-dialog skill-dialog';document.body.append(skillDialog);
   const el=(tag:string,cls?:string,text?:string)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
@@ -54,19 +54,23 @@ export function mountControls(client:BrainClient,audio:PropAudio){
     for(const skill of skillCache.skills){
       const row=el('div','skill-row');
       const on=skill.status==='enabled';
-      const head2=el('div','skill-head',`${on?'🟢':'⚪'} ${skill.title}${on?'':'（已停用）'} · v${skill.version}`);
+      const kindTag = skill.kind==='script' ? ' 〔脚本〕' : '';
+      const head2=el('div','skill-head',`${on?'🟢':'⚪'} ${skill.title}${kindTag}${on?'':'（已停用）'} · v${skill.version}`);
       const trig=el('div','skill-trigger',`用途：${skill.trigger}`);
       const use=skill.usage??{};
       const stat=el('div','skill-stat',`读取 ${use.injected??0} 次 · 成功 ${use.succeeded??0} / 失败 ${use.failed??0}`);
       const bodyEl=el('pre','skill-body',skill.body);
+      const scriptEl = skill.kind==='script' ? el('pre','skill-body skill-script',`脚本：\n${skill.script ?? ''}`) : null;
       const actions=el('div','skill-actions');
       const toggle=el('button',undefined,on?'停用':'启用');
       toggle.onclick=()=>{client.setSkill(skill.id,!on);setTimeout(()=>client.getSkills(),200);};
-      const edit=el('button',undefined,'编辑');edit.onclick=()=>{bodyEl.style.display=bodyEl.style.display==='none'?'block':'none';};
+      const edit=el('button',undefined,'查看');edit.onclick=()=>{const hide=bodyEl.style.display!=='none';bodyEl.style.display=hide?'none':'block';if(scriptEl)scriptEl.style.display=hide?'none':'block';};
       const del=el('button',undefined,'删除');
       del.onclick=()=>{if(!confirm(`确定删除「${skill.title}」？她以后不能再调用它。`))return;client.deleteSkill(skill.id);setTimeout(()=>client.getSkills(),200);};
       actions.append(toggle,edit,del);
-      row.append(head2,trig,stat,bodyEl,actions);
+      row.append(head2,trig,stat,bodyEl);
+      if(scriptEl) row.append(scriptEl);
+      row.append(actions);
       skillDialog.append(row);
     }
     // 新建表单
@@ -74,9 +78,19 @@ export function mountControls(client:BrainClient,audio:PropAudio){
     const t=document.createElement('input');t.placeholder='名称（≤24字）';t.maxLength=24;
     const g=document.createElement('input');g.placeholder='什么时候用（≤40字）';g.maxLength=40;
     const b=document.createElement('textarea');b.placeholder='正文：具体步骤、注意什么（≤600字）';b.maxLength=600;b.rows=4;
+    const isScript=document.createElement('input');isScript.type='checkbox';
+    const isScriptLabel=el('label','skill-kind','脚本型（可在沙箱里执行）');isScriptLabel.prepend(isScript);
+    const scriptBox=document.createElement('textarea');scriptBox.placeholder='脚本：用 input 读入参，用 emit(value) 返回结果；没有文件/网络权限';scriptBox.rows=5;scriptBox.maxLength=3000;scriptBox.style.display='none';
+    isScript.onchange=()=>{scriptBox.style.display=isScript.checked?'block':'none';};
     const add=el('button',undefined,'新建技能');
-    add.onclick=()=>{if(!t.value.trim()||!g.value.trim()||!b.value.trim()){alert('三项都要填');return;}client.saveSkill({title:t.value,trigger:g.value,body:b.value});t.value=g.value=b.value='';setTimeout(()=>client.getSkills(),250);};
-    form.append(el('h3',undefined,'新建一条'),t,g,b,add);
+    add.onclick=()=>{
+      if(!t.value.trim()||!g.value.trim()||!b.value.trim()){alert('名称、用途、说明都要填');return;}
+      if(isScript.checked&&!scriptBox.value.trim()){alert('脚本型需要填脚本');return;}
+      client.saveSkill({title:t.value,trigger:g.value,body:b.value,kind:isScript.checked?'script':'text',script:isScript.checked?scriptBox.value:undefined});
+      t.value=g.value=b.value='';scriptBox.value='';isScript.checked=false;scriptBox.style.display='none';
+      setTimeout(()=>client.getSkills(),250);
+    };
+    form.append(el('h3',undefined,'新建一条'),t,g,b,isScriptLabel,scriptBox,add);
     skillDialog.append(form);
   };
   skillBtn.onclick=()=>{skillDialog.showModal();renderSkills();client.getSkills();};

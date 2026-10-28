@@ -13,7 +13,8 @@ import path from "node:path";
 import { CAPABILITIES } from "./capabilities.mjs";
 
 export const MAX_ENABLED = 100;
-export const LIMITS = { title: 24, trigger: 40, body: 600, tags: 4 };
+export const LIMITS = { title: 24, trigger: 40, body: 600, tags: 4, script: 3000 };
+export const KINDS = ["text", "script"];
 /** 越权/注入类词：技能正文不许出现，避免她自己改写系统规则 */
 const BLOCKED = [
   /忽略(以上|之前|前面|上述)/,
@@ -56,7 +57,12 @@ export function validateSkillInput(input = {}) {
     .map((t) => clamp(t, 12))
     .filter(Boolean)
     .slice(0, LIMITS.tags);
-  return { title, trigger, body, tags };
+  const kind = KINDS.includes(input.kind) ? input.kind : "text";
+  const script = kind === "script" ? String(input.script ?? "").slice(0, LIMITS.script) : null;
+  if (kind === "script" && script.trim().length < 5) {
+    throw Object.assign(new Error("脚本型技能需要提供 script 源码"), { code: "SKILL_SCRIPT" });
+  }
+  return { title, trigger, body, tags, kind, script };
 }
 
 export class SkillRegistry {
@@ -122,7 +128,7 @@ export class SkillRegistry {
     return this.state.skills
       .filter((s) => includeDisabled || s.status === "enabled")
       .filter((s) => !q || `${s.title} ${s.trigger} ${(s.tags ?? []).join(" ")}`.toLowerCase().includes(q))
-      .map((s) => ({ id: s.id, title: s.title, trigger: s.trigger, status: s.status, used: s.usage?.injected ?? 0 }));
+      .map((s) => ({ id: s.id, title: s.title, trigger: s.trigger, status: s.status, kind: s.kind ?? "text", used: s.usage?.injected ?? 0 }));
   }
 
   /** 读正文：计入“被查阅”次数 */
@@ -179,9 +185,11 @@ export class SkillRegistry {
       trigger: patch.trigger ?? skill.trigger,
       body: patch.body ?? skill.body,
       tags: patch.tags ?? skill.tags,
+      kind: patch.kind ?? skill.kind ?? "text",
+      script: patch.script ?? skill.script ?? "",
     });
     // 历史里存的是**改之前**的内容，否则回滚会滚回新版本
-    const previous = { title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags };
+    const previous = { title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags, kind: skill.kind ?? "text", script: skill.script ?? null };
     skill.history = [...(skill.history ?? []), { version: skill.version, ...previous, at: skill.updatedAt }].slice(-5);
     skill.version += 1;
     Object.assign(skill, merged, { updatedAt: now() });
@@ -195,9 +203,9 @@ export class SkillRegistry {
     if (!skill) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
     const entry = (skill.history ?? []).find((h) => h.version === version);
     if (!entry) throw Object.assign(new Error("没有这个历史版本"), { code: "SKILL_NO_VERSION" });
-    skill.history = [...(skill.history ?? []), { version: skill.version, title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags, at: skill.updatedAt }].slice(-5);
+    skill.history = [...(skill.history ?? []), { version: skill.version, title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags, kind: skill.kind ?? "text", script: skill.script ?? null, at: skill.updatedAt }].slice(-5);
     skill.version += 1;
-    Object.assign(skill, { title: entry.title, trigger: entry.trigger, body: entry.body, tags: entry.tags, updatedAt: now() });
+    Object.assign(skill, { title: entry.title, trigger: entry.trigger, body: entry.body, tags: entry.tags, kind: entry.kind ?? "text", script: entry.script ?? null, updatedAt: now() });
     this.bump();
     return skill;
   }
