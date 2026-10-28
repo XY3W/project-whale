@@ -59,6 +59,16 @@ export const CAPABILITIES = [
   },
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
   { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
+  {
+    id: "walk_to_stone",
+    enabled: true,
+    changesPosition: true,
+    channels: ["motion"],
+    params: {
+      row: { type: "number", min: 0, max: 14, note: "五子棋目标交点行" },
+      col: { type: "number", min: 0, max: 14, note: "五子棋目标交点列" },
+    },
+  },
   { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: HAND_OBJECTS, note: "盆→左手，饭勺→右手" } } },
   { id: "wear", enabled: true, channels: ["item"], params: { object_id: { enum: WEARABLE_OBJECTS, note: "只有盆能戴" } } },
   { id: "unwear", enabled: true, channels: ["item"], params: { object_id: { enum: WEARABLE_OBJECTS } } },
@@ -237,6 +247,14 @@ export function validateStep(step, id = "step") {
 
     case "walk_to_basin":
       return { action: "walk_to_basin" };
+
+    case "walk_to_stone": {
+      const { row, col } = step;
+      if (!Number.isInteger(row) || row < 0 || row > 14 || !Number.isInteger(col) || col < 0 || col > 14) {
+        throw new ModelError("INVALID_SCHEMA", `${id} row/col 必须是 0..14 的整数`, 0);
+      }
+      return { action: "walk_to_stone", row, col };
+    }
     case "pickup":
     case "wear":
     case "unwear": {

@@ -481,3 +481,47 @@ test("贴墙跑动：越界同样 BLOCKED", async () => {
   assert.ok(r.steps[1].actual.available_m <= 0.2001);
   assert.equal(pos.x, 3.5, "被挡住时不应移动");
 });
+
+// ---- walk_to_stone：宿主算站位，模型只给行列 ----
+test("walk_to_stone 走到交点旁并回报剩余距离", async () => {
+  const { loco } = makeMoveLoco();
+  let called = null;
+  loco.walkToStone = async (row, col) => {
+    called = { row, col };
+    return { ok: true, distance_m: 0.55, moved: 0.9, position: { x: 1, z: 1 } };
+  };
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "walk_to_stone", row: 3, col: 4 }] });
+  assert.deepEqual(called, { row: 3, col: 4 });
+  assert.equal(r.steps[0].status, "succeeded");
+  assert.equal(r.steps[0].actual.distance_m, 0.55);
+});
+
+test("walk_to_stone 没接线时报 CAPABILITY_DISABLED", async () => {
+  const { loco } = makeMoveLoco();
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "walk_to_stone", row: 3, col: 4 }] });
+  assert.equal(r.steps[0].reasonCode, "CAPABILITY_DISABLED");
+});
+
+test("walk_to_stone 走不到时报 NOT_ALIGNED", async () => {
+  const { loco } = makeMoveLoco();
+  loco.walkToStone = async () => ({ ok: false, error: "NOT_ALIGNED", distance_m: 1.4, tolerance_m: 1 });
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "walk_to_stone", row: 9, col: 11 }] });
+  assert.equal(r.steps[0].reasonCode, "NOT_ALIGNED");
+});
+
+test("walk_to_stone 之后接 place_stone：两步都执行", async () => {
+  const { loco } = makeMoveLoco();
+  loco.walkToStone = async () => ({ ok: true, distance_m: 0.5 });
+  loco.stone = {
+    current: () => null,
+    perform: async (step) => ({ ok: true, row: step.row, col: step.col }),
+  };
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "walk_to_stone", row: 5, col: 5 }, { action: "place_stone", game_id: "g", row: 5, col: 5, expected_revision: 0 }] });
+  assert.equal(r.steps.length, 2);
+  assert.equal(r.steps[0].status, "succeeded");
+  assert.equal(r.steps[1].status, "succeeded");
+});

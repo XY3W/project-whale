@@ -443,6 +443,20 @@ export class ActionExecutor {
         return done("succeeded", { plan: outcome.plan, alignment: bridge.alignment("basin") }, "OK");
       }
 
+      // 走到五子棋交点旁边：站位/转向/步数由宿主算好，模型只给行列
+      case "walk_to_stone": {
+        const walkTo = this.loco.walkToStone;
+        if (!walkTo) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const raced = await this.withTimeout(walkTo(step.row, step.col), 120000);
+        if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
+        const outcome = raced.value;
+        if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");
+        if (!outcome.ok) {
+          return done("failed", outcome as unknown as Record<string, unknown>, outcome.error === "BLOCKED" ? "BLOCKED" : "NOT_ALIGNED");
+        }
+        return done("succeeded", outcome as unknown as Record<string, unknown>, "OK");
+      }
+
       case "pickup": {
         const bridge = this.loco.basin;
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");

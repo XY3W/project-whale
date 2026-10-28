@@ -14,7 +14,7 @@ import { BrainClient } from "./brain/BrainClient";
 import type { Plan } from "./behavior/protocol.ts";
 import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
-import { cyclesFor } from "./behavior/distances.ts";
+import { cyclesFor, nearestSupported } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
 import { PropItem } from "./prop/PropItem";
@@ -475,6 +475,63 @@ async function boot() {
     play: async (id) => {
       player.gesture(id);
       await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
+    },
+    /**
+     * 走到五子棋交点旁边：宿主算站位（离交点约 0.55m）并拆成 turn + walk + adjust，
+     * 模型只给行列。这样它不用自己做距离算术，落子前也不会因为“没走近”反复失败。
+     */
+    walkToStone: async (row, col) => {
+      const target = gomokuCellCenter(row, col);
+      const from = { x: root.position.x, z: root.position.z };
+      const dx = target.x - from.x;
+      const dz = target.z - from.z;
+      const distance = Math.hypot(dx, dz);
+      const tolerance = gomokuView?.stoneToleranceM ?? 1;
+      // 已经够近就不用动
+      if (distance <= tolerance * 0.6) {
+        return { ok: true, distance_m: +distance.toFixed(3), position: from, moved: 0 };
+      }
+      const standOff = 0.55;
+      const want = Math.max(0, distance - standOff);
+      const yaw = Math.atan2(dx, dz);
+      await loco.turn!(signedDeltaDeg(degYaw(), yaw));
+      // walk 只有 0.09+0.18n，剩下的用 walk_adjust 补齐（最多 4 cm 一次）
+      let rest = want;
+      let moved = 0;
+      while (rest >= 0.09 - 1e-9) {
+        const stepM = nearestSupported(rest).below;
+        if (!Number.isFinite(stepM) || stepM <= 0) break;
+        await loco.walk!(stepM);
+        rest -= stepM;
+        moved += stepM;
+        if (rest < 0.09) break;
+      }
+      while (rest >= 0.02 - 1e-9) {
+        const adj = loco.adjust ? Math.min(0.08, Math.floor(rest / 0.02) * 0.02) : 0;
+        if (!adj) break;
+        await loco.adjust!(adj);
+        rest -= adj;
+        moved += adj;
+      }
+      const after = { x: root.position.x, z: root.position.z };
+      const distanceAfter = Math.hypot(target.x - after.x, target.z - after.z);
+      if (distanceAfter > tolerance) {
+        return {
+          ok: false,
+          error: "NOT_ALIGNED",
+          distance_m: +distanceAfter.toFixed(3),
+          tolerance_m: tolerance,
+          position: { x: +after.x.toFixed(3), z: +after.z.toFixed(3) },
+          moved: +moved.toFixed(3),
+          hint: `走到 (${row},${col}) 旁边后仍差 ${distanceAfter.toFixed(2)}m（需要 ≤${tolerance}m），可能被边界挡住，换个方向或换更近的点`,
+        };
+      }
+      return {
+        ok: true,
+        distance_m: +distanceAfter.toFixed(3),
+        position: { x: +after.x.toFixed(3), z: +after.z.toFixed(3) },
+        moved: +moved.toFixed(3),
+      };
     },
     /**
      * 五子棋落子：先走到交点旁（≤stoneToleranceM），做一次落子动作，再提交授权。

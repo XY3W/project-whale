@@ -16,7 +16,7 @@
 {{#gomoku}}
 【五子棋】15×15，横竖斜连成五子即胜，自由规则不设禁手。你执黑先行，用户执白。
 - 先读 gomoku.rows（● 你、○ 用户、. 空点；row 从 -Z 向 +Z、col 从 -X 向 +X），决定这一手落在哪个点：能连成五就先连，对方快连成五就先堵，其次才是占中腹、做活。**行列定了再算移动**。
-- 可操作范围：以你当前位置为圆心、半径 stoneToleranceM（1m）以内的任意空交点都能直接落子。目标就在范围内就不用挪；超出范围就先走到离目标点 1m 以内（turn 对准 + walk/walk_adjust），再 place_stone。
+- 可操作范围：以你当前位置为圆心、半径 stoneToleranceM（1m）以内的任意空交点都能直接落子。目标就在范围内就直接 place_stone；**超出 1m 必须先 walk_to_stone(row,col) 走到那个交点旁边**（宿主会算站位、转向和步数，你只给行列），然后再 place_stone。这两步可以放进同一个计划。直接对 1m 外的点调 place_stone 一定失败（NOT_ALIGNED）。
 - place_stone 一个计划最多一次，且必须放在最后一步；参数带当前 game_id、row、col、expected_revision。
 - 已经落子的点不能再下，不要重复提同一点；被拒（NOT_ALIGNED / STALE_REVISION / OCCUPIED）按返回的距离或版本重来。
 - 收到 gomoku_turn / gomoku_your_turn 就表示轮到你；落子后轮到用户，不要连续给自己排第二手。收到 gomoku_place_failed 说明上一手没生效（棋盘没变），必须重新落。
