@@ -477,26 +477,23 @@ async function boot() {
       await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
     },
     /**
-     * 走到五子棋交点旁边：宿主算站位（离交点约 0.55m）并拆成 turn + walk + adjust，
-     * 模型只给行列。这样它不用自己做距离算术，落子前也不会因为“没走近”反复失败。
+     * 走到指定世界坐标：宿主算转向与步数（walk + walk_adjust），模型只给目标点。
+     * 落点不止五子棋——任何“先站到某个位置”的需求都能用。
      */
-    walkToStone: async (row, col) => {
-      const target = gomokuCellCenter(row, col);
+    walkTo: async (x, z, toleranceM = 0.1) => {
       const from = { x: root.position.x, z: root.position.z };
-      const dx = target.x - from.x;
-      const dz = target.z - from.z;
+      const dx = x - from.x;
+      const dz = z - from.z;
       const distance = Math.hypot(dx, dz);
-      const tolerance = gomokuView?.stoneToleranceM ?? 1;
-      // 已经够近就不用动
-      if (distance <= tolerance * 0.6) {
-        return { ok: true, distance_m: +distance.toFixed(3), position: from, moved: 0 };
+      const tolerance = Math.max(0.02, Math.min(0.5, toleranceM));
+      if (distance <= tolerance) {
+        return { ok: true, distance_m: +distance.toFixed(3), position: { x: +from.x.toFixed(3), z: +from.z.toFixed(3) }, moved: 0 };
       }
-      const standOff = 0.55;
-      const want = Math.max(0, distance - standOff);
-      const yaw = Math.atan2(dx, dz);
-      await loco.turn!(signedDeltaDeg(degYaw(), yaw));
-      // walk 只有 0.09+0.18n，剩下的用 walk_adjust 补齐（最多 4 cm 一次）
-      let rest = want;
+      // atan2 返回弧度，turn 用度：这里必须换算，否则只会转一点点
+      const targetDeg = (Math.atan2(dx, dz) * 180) / Math.PI;
+      await loco.turn!(signedDeltaDeg(degYaw(), targetDeg));
+      // 目标距离取容差的一半：步长是 0.18/0.02 的量化档位，留足余量才不会“差一点”判失败
+      let rest = Math.max(0, distance - tolerance * 0.5);
       let moved = 0;
       while (rest >= 0.09 - 1e-9) {
         const stepM = nearestSupported(rest).below;
@@ -514,21 +511,21 @@ async function boot() {
         moved += adj;
       }
       const after = { x: root.position.x, z: root.position.z };
-      const distanceAfter = Math.hypot(target.x - after.x, target.z - after.z);
-      if (distanceAfter > tolerance) {
+      const remaining = Math.hypot(x - after.x, z - after.z);
+      if (remaining > tolerance + 0.02) {
         return {
           ok: false,
           error: "NOT_ALIGNED",
-          distance_m: +distanceAfter.toFixed(3),
+          distance_m: +remaining.toFixed(3),
           tolerance_m: tolerance,
           position: { x: +after.x.toFixed(3), z: +after.z.toFixed(3) },
           moved: +moved.toFixed(3),
-          hint: `走到 (${row},${col}) 旁边后仍差 ${distanceAfter.toFixed(2)}m（需要 ≤${tolerance}m），可能被边界挡住，换个方向或换更近的点`,
+          hint: `还差 ${remaining.toFixed(2)}m（需要 ≤${tolerance}m），可能被边界挡住或距离档位不够，换个方向或换个目标点`,
         };
       }
       return {
         ok: true,
-        distance_m: +distanceAfter.toFixed(3),
+        distance_m: +remaining.toFixed(3),
         position: { x: +after.x.toFixed(3), z: +after.z.toFixed(3) },
         moved: +moved.toFixed(3),
       };

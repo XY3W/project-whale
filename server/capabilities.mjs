@@ -60,13 +60,14 @@ export const CAPABILITIES = [
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
   { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
   {
-    id: "walk_to_stone",
+    id: "walk_to",
     enabled: true,
     changesPosition: true,
     channels: ["motion"],
     params: {
-      row: { type: "number", min: 0, max: 14, note: "五子棋目标交点行" },
-      col: { type: "number", min: 0, max: 14, note: "五子棋目标交点列" },
+      x: { type: "number", min: -3.7, max: 3.7, note: "目标点世界坐标 x（米）" },
+      z: { type: "number", min: -3.7, max: 3.7, note: "目标点世界坐标 z（米）" },
+      tolerance_m: { type: "number", min: 0.02, max: 0.5, note: "可选，到位半径，默认 0.1" },
     },
   },
   { id: "pickup", enabled: true, channels: ["item"], params: { object_id: { enum: HAND_OBJECTS, note: "盆→左手，饭勺→右手" } } },
@@ -248,12 +249,16 @@ export function validateStep(step, id = "step") {
     case "walk_to_basin":
       return { action: "walk_to_basin" };
 
-    case "walk_to_stone": {
-      const { row, col } = step;
-      if (!Number.isInteger(row) || row < 0 || row > 14 || !Number.isInteger(col) || col < 0 || col > 14) {
-        throw new ModelError("INVALID_SCHEMA", `${id} row/col 必须是 0..14 的整数`, 0);
+    case "walk_to": {
+      const { x, z } = step;
+      if (!Number.isFinite(x) || !Number.isFinite(z) || Math.abs(x) > 3.7 || Math.abs(z) > 3.7) {
+        throw new ModelError("INVALID_SCHEMA", `${id} x/z 必须是 ±3.7 米内的数字`, 0);
       }
-      return { action: "walk_to_stone", row, col };
+      const tol = step.tolerance_m === undefined ? 0.1 : Number(step.tolerance_m);
+      if (!Number.isFinite(tol) || tol < 0.02 || tol > 0.5) {
+        throw new ModelError("INVALID_SCHEMA", `${id} tolerance_m 必须在 0.02..0.5 之间`, 0);
+      }
+      return { action: "walk_to", x, z, tolerance_m: tol };
     }
     case "pickup":
     case "wear":

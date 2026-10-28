@@ -48,7 +48,7 @@ export type Step =
   | { action: "tail"; style: "tail_idle" | "tail_swish"; duration_s: number }
   | { action: "wait"; duration_s: number }
   | { action: "walk_to_basin" }
-  | { action: "walk_to_stone"; row: number; col: number }
+  | { action: "walk_to"; x: number; z: number; tolerance_m: number }
   | { action: "pickup"; object_id: string }
   | { action: "wear"; object_id: string }
   | { action: "unwear"; object_id: string }
@@ -84,8 +84,8 @@ export interface Locomotion {
   dig?: DigBridge;
   /** 可选：五子棋落子能力 */
   stone?: StoneBridge;
-  /** 可选：走到五子棋交点旁边（宿主算站位与步数） */
-  walkToStone?(row: number, col: number): Promise<{ ok: boolean; distance_m?: number; position?: { x: number; z: number }; error?: string; [k: string]: unknown }>;
+  /** 可选：走到指定世界坐标（宿主算转向与步数） */
+  walkTo?(x: number, z: number, toleranceM: number): Promise<{ ok: boolean; distance_m?: number; position?: { x: number; z: number }; error?: string; [k: string]: unknown }>;
 }
 
 export interface BasinView {

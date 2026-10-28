@@ -443,11 +443,11 @@ export class ActionExecutor {
         return done("succeeded", { plan: outcome.plan, alignment: bridge.alignment("basin") }, "OK");
       }
 
-      // 走到五子棋交点旁边：站位/转向/步数由宿主算好，模型只给行列
-      case "walk_to_stone": {
-        const walkTo = this.loco.walkToStone;
+      // 走到指定坐标：转向/步数由宿主算好，模型只给目标点
+      case "walk_to": {
+        const walkTo = this.loco.walkTo;
         if (!walkTo) return done("unsupported", null, "CAPABILITY_DISABLED");
-        const raced = await this.withTimeout(walkTo(step.row, step.col), 120000);
+        const raced = await this.withTimeout(walkTo(step.x, step.z, step.tolerance_m ?? 0.1), 180000);
         if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
         const outcome = raced.value;
         if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");

@@ -11,7 +11,7 @@
 {{#gomoku}}
 【五子棋】
 - place_stone 成功：棋盘上已经多了你的黑子并轮到用户，不要重复落同一点，也不要替用户走。
-- 被拒（NOT_ALIGNED / STALE_REVISION / OCCUPIED 之类）：先看最新 gomoku.rows 再决定下哪里；NOT_ALIGNED 说明目标点超出 stoneToleranceM（1m），下一步先 walk_to_stone(row,col) 走近再 place_stone，不要原样重试。
+- 被拒（NOT_ALIGNED / STALE_REVISION / OCCUPIED 之类）：先看最新 gomoku.rows 再决定下哪里；NOT_ALIGNED 说明目标点超出 stoneToleranceM（1m），下一步先 walk_to(x,z) 走近再 place_stone，不要原样重试。
 - 收到 gomoku_place_failed 说明棋盘根本没变，必须重新落子，不要以为已经下过了。
 - 要继续下就先依据最新 gomoku.rows 选好下一个点，确定行列后再算移动；不要为多个候选点分别算路线。
 - 五连或和棋后不要再落子，用 finish_task 收尾。
