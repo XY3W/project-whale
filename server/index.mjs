@@ -19,6 +19,7 @@ import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
+import { createSpeechTidy } from "./speech.mjs";
 import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE, STONE_TOLERANCE_M, cellCenter as gomokuCellCenter } from "./gomoku.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
@@ -110,6 +111,8 @@ let nextTask = 100;
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
 const games = new GameService(path.join(process.cwd(), "data", "minesweeper.json"));
 const gomoku = new GomokuService(path.join(process.cwd(), "data", "gomoku.json"));
+/** 台词微调：连续回合不重复用同一个开场迟疑词（“唔……”） */
+const speechTidy = createSpeechTidy();
 function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -774,7 +777,7 @@ function applyOutput(ws, task, out) {
   if(task.planId&&session.ledger.get(task.planId)?.state==="processing")session.ledger.set(task.planId,{...session.ledger.get(task.planId),state:"done"});
   if (out.type === "finish_task") {
     // 自主回合允许完全沉默：没有值得说的就不发 public_reply
-    const speech = out.speech || "";
+    const speech = speechTidy.tidy(out.speech || "");
     if (speech) {
       send(ws, "public_reply", { taskId: task.id, speech });
       if(task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",speech));
@@ -814,14 +817,15 @@ function applyOutput(ws, task, out) {
   // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
   // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
   const digAuthId = issueDigAuth(task, out.plan);
-  if(out.speech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",out.speech));
+  const planSpeech = speechTidy.tidy(out.speech || "");
+  if(planSpeech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",planSpeech));
   send(ws, "execute_plan", {
     taskId: task.id,
     generation: task.generation,
     planId: task.planId,
     leaseEpoch: session.leaseEpoch,
     turnId: task.rounds,
-    speech: out.speech ?? "",
+    speech: planSpeech,
     digAuthId,
     stoneAuthId,
     plan: out.plan,
