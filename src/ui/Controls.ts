@@ -1,13 +1,12 @@
 import type { BrainClient } from '../brain/BrainClient';
 import { attachAudioAutostart, type PropAudio } from '../audio/PropAudio';
-export function mountControls(client:BrainClient,audio:PropAudio){
+export function mountControls(_client:BrainClient,audio:PropAudio){
   const box=document.createElement('div');box.className='world-controls';
-  const mode=document.createElement('button'),sound=document.createElement('button'),memory=document.createElement('button');
+  const sound=document.createElement('button'),memory=document.createElement('button');
   const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='1';volume.step='.05';volume.value=String(audio.volume);volume.title='音量';volume.setAttribute('aria-label','音量');
   const setPending=(count:number)=>{memory.textContent=count>0?`记忆 · ${count}待确认`:'记忆';};
-  setPending(0);sound.textContent='关闭声音';sound.title='声音默认开启；浏览器可能需要先点击页面';mode.textContent='活跃10分钟';box.append(mode,sound,volume,memory);document.body.append(box);
+  setPending(0);sound.textContent='关闭声音';sound.title='声音默认开启；浏览器可能需要先点击页面';box.append(sound,volume,memory);document.body.append(box);
   let current:{mode:string;expiresAt?:number;remainingMs?:number}={mode:'quiet'};
-  mode.onclick=()=>client.setMode(current.mode==='active'?'quiet':'active');
   // Best effort before interaction; browsers may keep the context suspended until a gesture.
   try { void audio.prepare().catch(() => {}); } catch { /* Retry after the first interaction. */ }
   attachAudioAutostart(audio);
@@ -18,7 +17,6 @@ export function mountControls(client:BrainClient,audio:PropAudio){
     if(!audio.muted)void audio.unlock().catch(()=>{sound.title='声音加载失败，点击页面重试';});
   };
   volume.oninput=()=>{audio.volume=Number(volume.value);};
-  setInterval(()=>{const remain=current.expiresAt?Math.max(0,current.expiresAt-Date.now()):0;mode.textContent=current.mode==='active'&&remain>0?`活跃 ${Math.ceil(remain/60000)}分钟 · 切回安静`:'活跃10分钟';},1000);
   const dialog=document.createElement('dialog');dialog.className='memory-dialog';document.body.append(dialog);
   const request=async(body?:unknown)=>{const r=await fetch('/api/memory',body?{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}:{});const data=await r.json();if(!r.ok)throw Error(data.error??'记忆操作失败');return data;};
   const render=async()=>{dialog.replaceChildren();const title=document.createElement('h2');title.textContent='记忆与聊天';dialog.append(title);
@@ -43,5 +41,5 @@ export function mountControls(client:BrainClient,audio:PropAudio){
   };
   memory.onclick=()=>{dialog.showModal();void render();};
   void request().then(data=>setPending(data.memories.filter((m:{status:string})=>m.status==='candidate').length)).catch(()=>{});
-  return {updatePending:setPending,updateMode(value:unknown){current=value as typeof current;},readOnly(value:boolean){mode.disabled=value;audio.allowed=!value;}};
+  return {updatePending:setPending,updateMode(value:unknown){current=value as typeof current;},readOnly(value:boolean){sound.disabled=value;memory.disabled=value;audio.allowed=!value;}};
 }

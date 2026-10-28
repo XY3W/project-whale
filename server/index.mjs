@@ -932,7 +932,9 @@ wss.on("connection", (ws, req) => {
         if(isLease(ws)&&epochOk(msg)&&session.task?.id===msg.taskId){applyClientSnapshot(msg.snapshot);session.task.ready=true;}break;
       case "mode_set":
         if(!isLease(ws)||!epochOk(msg))break;
-        changeMode(store.state,msg.mode);persist();store.flush();broadcastState();break;
+        // 活跃模式已取消：任何请求都落回安静模式
+        if(msg.mode==="active")console.log("[mode] 活跃模式已停用，忽略切换请求");
+        changeMode(store.state,"quiet");persist();store.flush();broadcastState();break;
       case "stop_ack":
         if(isLease(ws)&&epochOk(msg)&&session.task?.id===msg.taskId&&session.task?.stopping){applyClientSnapshot(msg.snapshot);endTask("stopped and reconciled");}break;
       case "timer_skip":
@@ -1412,9 +1414,8 @@ function claimAutoCall(){
   if(AUTO_MAX_CALLS_PER_HOUR>0&&autoplay.calls.length>=AUTO_MAX_CALLS_PER_HOUR)return false;
   autoplay.calls.push(Date.now());persist();return true;
 }
-let nextActiveAt=Date.now()+45000;
-let activeNoProgress=0;
 function tickActive(){
+  if(store.state.behaviorMode?.mode==="active"){store.state.behaviorMode={...store.state.behaviorMode,mode:"quiet",expiresAt:null};console.log("[mode] 积极模式已停用，重置为安静");}
   const before=store.state.behaviorMode?.mode;
   const mode=modeView(store.state);if(before!==mode.mode){persist();broadcastState();}
   if(session.lease&&!isLeaseAlive()){
@@ -1423,13 +1424,7 @@ function tickActive(){
     send(old,'session_state',statePayload(old));broadcastState();
   }
   scheduleEventTurn();
-  // 注意：不要用“有棋盘在进行”挡活跃模式——她平时几乎总有一局扫雷，
-  // 那样活跃模式永远不会触发。并发由 session.task 串行保证。
-  if(!mode.acceptingNewAutonomy||session.task||!hasKey()||!autonomousAllowed(true)||gameEvents.size()||Date.now()<nextActiveAt)return;
-  nextActiveAt=Date.now()+30000+Math.random()*30000;
-  if(activeNoProgress>=2){nextActiveAt=Date.now()+120000;activeNoProgress=0;return;}
-  const task=beginTask({text:'',messageId:null,origin:'active',ws:session.lease});
-  runPlanning(task,session.lease);
+  // 活跃模式已停用：不再自动起“活跃回合”，后续由其他触发方式接管。
 }
 function tickTimers() {
   const ws=session.lease;
