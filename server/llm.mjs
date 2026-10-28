@@ -57,8 +57,36 @@ export function renderSections(text, flags = {}) {
 }
 
 /** system 提示词：通用规则 + 人格 + 当前对局相关的部分 */
+/** 索引预算：100 条技能约 5–6k 字符，超过这个数才截断（正常不会触发） */
+const SKILL_INDEX_CHARS = 7000;
+
+/**
+ * 技能索引：只列「编号 · 名称 · 什么时候用」，正文不进提示词。
+ * 她按需 skill_tool{op:"read"} 取全文。
+ */
+function skillSection(index = []) {
+  if (!index.length) return "";
+  const lines = [];
+  let used = 0;
+  let hidden = 0;
+  for (const item of index) {
+    const line = `- ${item.id} ${item.title}${item.trigger ? ` · ${item.trigger}` : ""}`;
+    if (used + line.length > SKILL_INDEX_CHARS) { hidden += 1; continue; }
+    lines.push(line);
+    used += line.length;
+  }
+  const more = hidden ? `\n（还有 ${hidden} 条索引没列出，用 skill_tool {"operation":"list","includeDisabled":true} 查看。）` : "";
+  return `【我的经验（技能）】
+下面是你自己写的技能索引（只有名称和用途，正文不在提示词里）。觉得用得上就先 skill_tool {"operation":"read","skill_id":"…"} 读正文，下一轮照它做；不需要就直接做事。
+${lines.join("\n")}${more}
+你也能新建/修改/停用：{"operation":"create"|"revise"|"disable"|"enable", ...}；写完立即生效。
+`;
+}
+
 export function systemPrompt(flags = {}) {
-  return renderSections(`${readPrompt("system.txt")}\n\n${readPrompt("persona.txt")}`, flags);
+  const base = renderSections(`${readPrompt("system.txt")}\n\n${readPrompt("persona.txt")}`, flags);
+  const section = skillSection(flags.skillIndex ?? []);
+  return section ? `${base}\n\n${section}` : base;
 }
 
 /** 兼容旧调用：没有对局上下文的静态拼接 */
@@ -76,8 +104,10 @@ function contextBlock(ctx) {
 }
 
 function render(templateName, ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku };
-  const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...ctx, phase: ctx.phase ?? templateName.replace(".txt", "") }));
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, skillIndex: ctx.skills?.index ?? [] };
+  // 索引已经写进 system prompt，就别在上下文 JSON 里再付一遍
+  const contextForJson = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
+  const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...contextForJson, phase: ctx.phase ?? templateName.replace(".txt", "") }));
   return [
     { role: "system", content: systemPrompt(flags) },
     { role: "user", content: tpl + "\n\n" + OUTPUT_CONTRACT },

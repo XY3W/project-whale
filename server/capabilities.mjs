@@ -108,6 +108,15 @@ const byId = new Map(CAPABILITIES.map((c) => [c.id, c]));
 
 export function validatePlan(plan) {
   if (!plan || typeof plan !== "object") throw new ModelError("INVALID_SCHEMA", "输出不是对象", 0);
+  if (plan.type === "skill_tool") {
+    const ops = ["list", "read", "create", "revise", "disable", "enable"];
+    if (!ops.includes(plan.operation)) throw new ModelError("INVALID_SCHEMA", `技能操作无效（可用：${ops.join("/")}）`, 0);
+    if (["read", "revise", "disable", "enable"].includes(plan.operation)
+      && (typeof plan.skill_id !== "string" || !plan.skill_id)) {
+      throw new ModelError("INVALID_SCHEMA", `${plan.operation} 需要 skill_id`, 0);
+    }
+    return { type: "skill_tool", operation: plan.operation, skill_id: plan.skill_id, skill: plan.skill, filter: plan.filter };
+  }
   if (plan.type === "timer_tool") {
     if (!["create", "list", "cancel"].includes(plan.operation)) throw new ModelError("INVALID_SCHEMA", "定时器操作无效", 0);
     return {type:"timer_tool", operation:plan.operation, timer:plan.timer, timer_id:plan.timer_id};
@@ -320,6 +329,7 @@ export function outputContract() {
   return [
     'execute_plan: {"type":"execute_plan","speech":"string","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
     'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
+    'skill_tool: {"type":"skill_tool","operation":"list|read|create|revise|disable|enable","skill_id":"可选","skill":{"title":"≤24字","trigger":"≤40字","body":"≤600字","tags":["可选"]},"filter":"list 时的筛选词"}；list 看目录、read 读正文（下一轮就能用）、create 新建（立即可用）、revise 改版、disable/enable 启停。你没有删除权限。',
     'timer_tool: {"type":"timer_tool","operation":"create","timer":{"name":"任务名","first_at":"带时区的 ISO 8601 真实时间","interval_seconds":null或整数秒,"total_occurrences":null或整数,"display_message":"提醒文字","wake_note":"到期时交给自己的提醒任务"}}；list: {"type":"timer_tool","operation":"list"}；cancel: {"type":"timer_tool","operation":"cancel","timer_id":"任务ID"}。',
     "Step 只能取以下之一：",
     steps,

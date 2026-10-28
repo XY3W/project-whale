@@ -20,6 +20,7 @@ import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
 import { createSpeechTidy } from "./speech.mjs";
+import { SkillRegistry } from "./skills.mjs";
 import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE, STONE_TOLERANCE_M, cellCenter as gomokuCellCenter } from "./gomoku.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
@@ -113,6 +114,8 @@ const games = new GameService(path.join(process.cwd(), "data", "minesweeper.json
 const gomoku = new GomokuService(path.join(process.cwd(), "data", "gomoku.json"));
 /** 台词微调：连续回合不重复用同一个开场迟疑词（“唔……”） */
 const speechTidy = createSpeechTidy();
+/** 她自己写的经验（技能）；正文按需读取，不常驻提示词 */
+const skills = new SkillRegistry(path.join(process.cwd(), "data", "skills.json"));
 function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -447,6 +450,12 @@ function scheduleEventTurn() {
   }, EVENT_COALESCE_MS);
 }
 
+function broadcastSkills() {
+  const payload = { skills: skills.all(), stats: skills.stats() };
+  for (const client of wss.clients) send(client, "skills_state", payload);
+  broadcastState();
+}
+
 function broadcastState() {
   const payload = {
     sessionId: session.id,
@@ -472,6 +481,20 @@ function cancelCurrentPlan(reason) {
 
 function endTask(reason, opts = {}) {
   const finished = session.task;
+  // 用过技能的任务收尾时记一次结果，供自动停用参考
+  if (finished?.skillRead) {
+    const results = [...session.ledger].filter(([id]) => id.startsWith(finished.id + '-')).map(([, e]) => e.result).filter(Boolean);
+    if (results.length) {
+      const failed = results.some((r) => r.steps?.some((st) => st.status === "failed"));
+      skills.recordOutcome(finished.skillRead, !failed);
+    }
+    finished.skillRead = null;
+  }
+  // 宿主自动停用：读得多、但用了还是老失败
+  for (const bad of skills.autoDisableCandidates()) {
+    skills.disable(bad.id, "low-success");
+    console.log(`[skill] 自动停用 ${bad.id}「${bad.title}」：读取 ${bad.usage.injected} 次，失败 ${bad.usage.failed}/${bad.usage.success + bad.usage.failed}`);
+  }
   if(finished?.origin==="active"){
     const results=[...session.ledger].filter(([id])=>id.startsWith(finished.id+'-')).map(([,e])=>e.result).filter(Boolean);
     const progress=results.some(r=>r.steps?.some(s=>s.status==='succeeded'&&s.action!=='wait'));
@@ -633,6 +656,13 @@ function modelContext(task, phase, extra = {}) {
     characterState: characterContext(character),
     props: propsContext(props),
     board: boardContext(board, character),
+    skills: {
+      ...skills.stats(),
+      // 只进 system prompt 的索引：编号 + 名称 + 何时用
+      index: skills.catalog().map(({ id, title, trigger }) => ({ id, title, trigger })),
+      doc: task.skillDoc ?? null,
+      note: task.skillNote ?? null,
+    },
     gomoku: gomokuContext(gomoku.public(), character, GOMOKU_BLACK),
     ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: recent })),
     memory: selfPlay?[]:relevantMemory(store.state,task.ownerScope),
@@ -761,6 +791,49 @@ function absorbMemory(task,out){
 
 function applyOutput(ws, task, out) {
   if (!session.task || session.task.id !== task.id) return;
+  if (out.type === "skill_tool") {
+    const op = out.operation;
+    task.skillNote = null;
+    try {
+      if (op === "list") {
+        task.skillListing = skills.catalog({ includeDisabled: true, filter: out.filter ?? "" });
+        task.skillNote = `目录已取到：${task.skillListing.length} 条`;
+      } else if (op === "read") {
+        const doc = skills.read(out.skill_id);
+        if (!doc) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
+        task.skillDoc = { id: doc.id, title: doc.title, trigger: doc.trigger, body: doc.body, version: doc.version };
+        task.skillRead = doc.id;
+        task.skillNote = `已读到「${doc.title}」v${doc.version}`;
+        console.log(`[skill] ${task.id} read ${doc.id} ${doc.title}`);
+      } else if (op === "create") {
+        const { skill, duplicate } = skills.create(out.skill ?? {}, { taskId: task.id, turn: task.id });
+        task.skillNote = duplicate ? `已经有一条一样的「${skill.title}」，直接沿用` : `新技能已注册并启用：${skill.title}`;
+        console.log(`[skill] ${task.id} create ${skill.id} ${skill.title}${duplicate ? "（重复）" : ""}`);
+      } else if (op === "revise") {
+        const skill = skills.revise(out.skill_id, out.skill ?? {});
+        task.skillNote = `已更新「${skill.title}」到 v${skill.version}`;
+        console.log(`[skill] ${task.id} revise ${skill.id} v${skill.version}`);
+      } else if (op === "disable" || op === "enable") {
+        const skill = skills.setEnabled(out.skill_id, op === "enable");
+        task.skillNote = `${op === "enable" ? "已启用" : "已停用"}「${skill.title}」`;
+        console.log(`[skill] ${task.id} ${op} ${skill.id}`);
+      }
+    } catch (err) {
+      task.skillNote = `技能操作失败：${err.message}`;
+      console.log(`[skill] ${task.id} ${op} 失败 ${err.code ?? ""} ${err.message}`);
+    }
+    task.skillOps = (task.skillOps ?? 0) + 1;
+    const limit = 3;
+    if (task.skillOps >= limit || task.rounds >= MAX_ROUNDS) {
+      task.skillOps = 0;
+      endTask("skill op limit");
+      return;
+    }
+    broadcastState();
+    runPlanning(task, ws);
+    return;
+  }
+
   if (out.type === "timer_tool") {
     if (task.origin !== "user" || !ws.timerPage) { send(ws,"error",{code:"TIMER_UNAVAILABLE",message:"定时器需要当前网页会话和用户指令"}); endTask("timer unavailable"); return; }
     try {
@@ -1063,6 +1136,37 @@ wss.on("connection", (ws, req) => {
           console.log(result.cleared ? `[gomoku] 用户收起了 ${before}` : `[gomoku] 用户结束了 ${result.board?.gameId}`);
           if (!result.cleared) noteGameEvent("gomoku_finished", result.board, { result: "ended", trigger: "user_button" });
         }
+        break;
+      }
+
+      // ---- 技能管理（界面上用；模型走 skill_tool，没有删除权限） ----
+      case "skills_get": {
+        send(ws, "skills_state", { skills: skills.all(), stats: skills.stats() });
+        break;
+      }
+
+      case "skills_save": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能改技能" }); break; }
+        try {
+          if (msg.id) skills.revise(msg.id, { title: msg.title, trigger: msg.trigger, body: msg.body, tags: msg.tags });
+          else skills.create({ title: msg.title, trigger: msg.trigger, body: msg.body, tags: msg.tags }, { ui: true });
+          broadcastSkills();
+        } catch (err) {
+          send(ws, "error", { code: err.code ?? "SKILL_INVALID", message: err.message });
+        }
+        break;
+      }
+
+      case "skills_set": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能改技能" }); break; }
+        try { skills.setEnabled(msg.id, !!msg.enabled); broadcastSkills(); }
+        catch (err) { send(ws, "error", { code: err.code ?? "SKILL_INVALID", message: err.message }); }
+        break;
+      }
+
+      case "skills_delete": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能删技能" }); break; }
+        if (skills.remove(msg.id)) broadcastSkills();
         break;
       }
 

@@ -1,11 +1,12 @@
 import type { BrainClient } from '../brain/BrainClient';
 import { attachAudioAutostart, type PropAudio } from '../audio/PropAudio';
-export function mountControls(_client:BrainClient,audio:PropAudio){
+export function mountControls(client:BrainClient,audio:PropAudio){
   const box=document.createElement('div');box.className='world-controls';
-  const sound=document.createElement('button'),memory=document.createElement('button');
+  const sound=document.createElement('button'),memory=document.createElement('button'),skillBtn=document.createElement('button');
   const volume=document.createElement('input');volume.type='range';volume.min='0';volume.max='1';volume.step='.05';volume.value=String(audio.volume);volume.title='音量';volume.setAttribute('aria-label','音量');
   const setPending=(count:number)=>{memory.textContent=count>0?`记忆 · ${count}待确认`:'记忆';};
-  setPending(0);sound.textContent='关闭声音';sound.title='声音默认开启；浏览器可能需要先点击页面';box.append(sound,volume,memory);document.body.append(box);
+  skillBtn.textContent='技能';skillBtn.title='查看、编辑、启停大肥鱼自己写的经验';
+  setPending(0);sound.textContent='关闭声音';sound.title='声音默认开启；浏览器可能需要先点击页面';box.append(sound,volume,memory,skillBtn);document.body.append(box);
   let current:{mode:string;expiresAt?:number;remainingMs?:number}={mode:'quiet'};
   // Best effort before interaction; browsers may keep the context suspended until a gesture.
   try { void audio.prepare().catch(() => {}); } catch { /* Retry after the first interaction. */ }
@@ -39,7 +40,50 @@ export function mountControls(_client:BrainClient,audio:PropAudio){
       for(const [op,text]of [['clear_history','清空聊天记录'],['clear_memory','清空长期记忆']]){const b=document.createElement('button');b.textContent=text;b.onclick=async()=>{await request({op});if(op==='clear_history')document.querySelector('.chat-list')?.replaceChildren();await render();};dialog.append(b);}
     }catch(err){const error=document.createElement('p');error.textContent=String(err);dialog.append(error);}
   };
+  // ---- 技能管理：列表 / 新建 / 编辑 / 启停 / 删除（删除只在这里有） ----
+  type Skill = { id:string; title:string; trigger:string; body:string; status:string; version:number; usage?:{injected?:number;succeeded?:number;failed?:number} };
+  let skillCache: { skills: Skill[]; stats: { enabled:number; disabled:number; max:number } } = { skills: [], stats: { enabled:0, disabled:0, max:100 } };
+  const skillDialog=document.createElement('dialog');skillDialog.className='memory-dialog skill-dialog';document.body.append(skillDialog);
+  const el=(tag:string,cls?:string,text?:string)=>{const n=document.createElement(tag);if(cls)n.className=cls;if(text!==undefined)n.textContent=text;return n;};
+  const renderSkills=()=>{
+    skillDialog.replaceChildren();
+    const head=el('h2',undefined,`技能 · 启用 ${skillCache.stats.enabled}/${skillCache.stats.max}（停用 ${skillCache.stats.disabled}）`);
+    const close=el('button',undefined,'关闭');close.onclick=()=>skillDialog.close();
+    skillDialog.append(head,close);
+    skillDialog.append(el('p',undefined,'这些是她自己写的经验：标题和用途会进 system prompt，正文只在用到时读取。她可以自己新建/修改/停用；删除只在 here 由你操作。'));
+    for(const skill of skillCache.skills){
+      const row=el('div','skill-row');
+      const on=skill.status==='enabled';
+      const head2=el('div','skill-head',`${on?'🟢':'⚪'} ${skill.title}${on?'':'（已停用）'} · v${skill.version}`);
+      const trig=el('div','skill-trigger',`用途：${skill.trigger}`);
+      const use=skill.usage??{};
+      const stat=el('div','skill-stat',`读取 ${use.injected??0} 次 · 成功 ${use.succeeded??0} / 失败 ${use.failed??0}`);
+      const bodyEl=el('pre','skill-body',skill.body);
+      const actions=el('div','skill-actions');
+      const toggle=el('button',undefined,on?'停用':'启用');
+      toggle.onclick=()=>{client.setSkill(skill.id,!on);setTimeout(()=>client.getSkills(),200);};
+      const edit=el('button',undefined,'编辑');edit.onclick=()=>{bodyEl.style.display=bodyEl.style.display==='none'?'block':'none';};
+      const del=el('button',undefined,'删除');
+      del.onclick=()=>{if(!confirm(`确定删除「${skill.title}」？她以后不能再调用它。`))return;client.deleteSkill(skill.id);setTimeout(()=>client.getSkills(),200);};
+      actions.append(toggle,edit,del);
+      row.append(head2,trig,stat,bodyEl,actions);
+      skillDialog.append(row);
+    }
+    // 新建表单
+    const form=el('div','skill-new');
+    const t=document.createElement('input');t.placeholder='名称（≤24字）';t.maxLength=24;
+    const g=document.createElement('input');g.placeholder='什么时候用（≤40字）';g.maxLength=40;
+    const b=document.createElement('textarea');b.placeholder='正文：具体步骤、注意什么（≤600字）';b.maxLength=600;b.rows=4;
+    const add=el('button',undefined,'新建技能');
+    add.onclick=()=>{if(!t.value.trim()||!g.value.trim()||!b.value.trim()){alert('三项都要填');return;}client.saveSkill({title:t.value,trigger:g.value,body:b.value});t.value=g.value=b.value='';setTimeout(()=>client.getSkills(),250);};
+    form.append(el('h3',undefined,'新建一条'),t,g,b,add);
+    skillDialog.append(form);
+  };
+  skillBtn.onclick=()=>{skillDialog.showModal();renderSkills();client.getSkills();};
+  const onSkills=(payload:unknown)=>{const data=payload as {skills?:Skill[];stats?:typeof skillCache.stats}|undefined;if(!data?.skills)return;skillCache={skills:data.skills,stats:data.stats??skillCache.stats};if(skillDialog.open)renderSkills();};
+  client.onSkills(onSkills);
+
   memory.onclick=()=>{dialog.showModal();void render();};
   void request().then(data=>setPending(data.memories.filter((m:{status:string})=>m.status==='candidate').length)).catch(()=>{});
-  return {updatePending:setPending,updateMode(value:unknown){current=value as typeof current;},readOnly(value:boolean){sound.disabled=value;memory.disabled=value;audio.allowed=!value;}};
+  return {updatePending:setPending,updateMode(value:unknown){current=value as typeof current;},readOnly(value:boolean){sound.disabled=value;memory.disabled=value;skillBtn.disabled=value;audio.allowed=!value;}};
 }

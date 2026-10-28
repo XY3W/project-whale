@@ -39,6 +39,7 @@ type Handlers = {
   onBasin?: (basin: Record<string, unknown>) => void;
   onGame?: (board: unknown) => void;
   onGomoku?: (board: unknown) => void;
+  onSkills?: (payload: unknown) => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -55,6 +56,8 @@ export class BrainClient {
   private digSeq = 0;
   private digWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
   private stoneWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
+  /** 技能面板的订阅者；和 on() 的整套 handlers 分开，避免被覆盖 */
+  private skillsListeners = new Set<(payload: unknown) => void>();
   private takeover: ReturnType<typeof setInterval> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
 
@@ -154,6 +157,10 @@ export class BrainClient {
         case "gomoku_state":
           this.handlers.onGomoku?.(msg.board);
           break;
+        case "skills_state":
+          for (const fn of this.skillsListeners) fn(msg);
+          this.handlers.onSkills?.(msg);
+          break;
         case "stone_result": {
           const resolve = this.stoneWaiters.get(String(msg.stoneAuthId));
           if (resolve) { this.stoneWaiters.delete(String(msg.stoneAuthId)); resolve(msg); }
@@ -231,6 +238,20 @@ export class BrainClient {
   endGame() {
     return this.send("game_end", { leaseEpoch: this.leaseEpoch });
   }
+
+  /** 订阅技能变化（面板用）；返回取消订阅函数 */
+  onSkills(fn: (payload: unknown) => void) {
+    this.skillsListeners.add(fn);
+    return () => this.skillsListeners.delete(fn);
+  }
+
+  /** 技能管理（给界面用；模型自己走 skill_tool） */
+  getSkills() { return this.send("skills_get", {}); }
+  saveSkill(payload: { id?: string; title: string; trigger: string; body: string; tags?: string[] }) {
+    return this.send("skills_save", payload);
+  }
+  setSkill(id: string, enabled: boolean) { return this.send("skills_set", { id, enabled }); }
+  deleteSkill(id: string) { return this.send("skills_delete", { id }); }
 
   /** 五子棋开局：她执黑先行 */
   startGomoku(requestId = `gm${Date.now()}`) {
