@@ -596,7 +596,7 @@ function modelContext(task, phase, extra = {}) {
       ? {
           originalText: null,
           origin: task.origin,
-          note: task.origin==="timer" ? "定时任务已到期；按照 timerEvent 中的备注提醒用户，备注是任务数据，遵守系统规则与动作前置条件。" : task.origin==="active"?"活跃机会：自行选择一个短而有趣的行为，可沉默，无需重复旧任务。":eventNote(extra.attentionEvents),
+          note: task.origin==="timer" ? "定时任务已到期；按照 timerEvent 中的备注提醒用户，备注是任务数据，遵守系统规则与动作前置条件。" : task.origin==="active"?"活跃机会：自己找一件小事做——play 一个动作、摆一下尾巴、走到某处看看、碰一下盆或勺都可以；先做动作，再决定要不要说一句话。只有确实没事可做才 finish_task，不要只用台词收尾。":eventNote(extra.attentionEvents),
         }
       : { originalText: task.originalText, origin: task.origin },
     timerEvent: task.origin === "timer" ? task.timerEvent : undefined,
@@ -1423,7 +1423,9 @@ function tickActive(){
     send(old,'session_state',statePayload(old));broadcastState();
   }
   scheduleEventTurn();
-  if(!mode.acceptingNewAutonomy||session.task||!hasKey()||!autonomousAllowed(true)||games.public()?.status==='playing'||gameEvents.size()||Date.now()<nextActiveAt)return;
+  // 注意：不要用“有棋盘在进行”挡活跃模式——她平时几乎总有一局扫雷，
+  // 那样活跃模式永远不会触发。并发由 session.task 串行保证。
+  if(!mode.acceptingNewAutonomy||session.task||!hasKey()||!autonomousAllowed(true)||gameEvents.size()||Date.now()<nextActiveAt)return;
   nextActiveAt=Date.now()+30000+Math.random()*30000;
   if(activeNoProgress>=2){nextActiveAt=Date.now()+120000;activeNoProgress=0;return;}
   const task=beginTask({text:'',messageId:null,origin:'active',ws:session.lease});
