@@ -43,6 +43,14 @@ export const thinkingConfig = () => ({ type: THINKING_TYPE, effort: REASONING_EF
 export const hasKey = () => !!process.env.DEEPSEEK_API_KEY;
 
 /**
+ * 输出协议：
+ * - json（默认，现状）：模型只输出一个 JSON 对象，宿主逐条校验；
+ * - tools：原生 tool calling，消息追加成 transcript，模型自己决定下一步。
+ * 迁移期间用环境变量切换，两边行为保持可对比。
+ */
+export const PROTOCOL = (process.env.LLM_PROTOCOL ?? "json").trim() === "tools" ? "tools" : "json";
+
+/**
  * 条件段落：只有对应游戏在进行时才注入它的规则/玩法。
  *   {{#minesweeper}} ... {{/minesweeper}}
  *   {{#gomoku}} ... {{/gomoku}}
@@ -122,18 +130,50 @@ export function reviewMessages(ctx) {
   return render("review.txt", { ...ctx, phase: "review" });
 }
 
-export async function callModel(messages, signal, onReasoning) {
+/**
+ * 合并流式 tool_calls 增量：DeepSeek/OpenAI 按 index 分片下发 id、name 和 arguments 片段。
+ * 纯函数，方便单测。
+ */
+export function mergeToolDelta(acc, delta) {
+  if (!Array.isArray(delta)) return acc;
+  for (const part of delta) {
+    const index = Number.isInteger(part?.index) ? part.index : acc.length;
+    const slot = acc[index] ?? (acc[index] = { id: "", name: "", arguments: "" });
+    if (part.id) slot.id = part.id;
+    if (part.function?.name) slot.name = part.function.name;
+    if (typeof part.function?.arguments === "string") slot.arguments += part.function.arguments;
+  }
+  return acc;
+}
+
+/** 把累积的调用解析成 {id, name, args}，参数不是合法 JSON 时给 null 让上层报错 */
+export function finalizeToolCalls(acc) {
+  return (acc ?? []).filter(Boolean).map((call, i) => {
+    let args = null;
+    try { args = call.arguments ? JSON.parse(call.arguments) : {}; } catch { args = null; }
+    return { id: call.id || `call_${i}`, name: call.name, argumentsRaw: call.arguments, args };
+  });
+}
+
+export async function callModel(messages, signal, onReasoning, options = {}) {
   if (!hasKey()) throw new ModelError("NO_KEY", "服务端未配置 DEEPSEEK_API_KEY", 0);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   const abort=()=>ctl.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)ctl.abort();
   let content = "", finishReason = null, usage = null, completed = false;
+  const toolCalls = [];
+  let useTools = false;
   try {
+    useTools = options.tools?.length > 0;
     const res = await fetch(API, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}` },
       body: JSON.stringify({
-        model: MODEL, messages, response_format: { type: "json_object" },
+        model: MODEL,
+        messages,
+        ...(useTools
+          ? { tools: options.tools, tool_choice: "auto" }
+          : { response_format: { type: "json_object" } }),
         stream: true, stream_options: { include_usage: true },
         ...(THINKING ? { thinking: { type: THINKING_TYPE }, ...(REASONING_EFFORT ? { reasoning_effort: REASONING_EFFORT } : {}) } : { temperature: 0.6 }),
       }),
@@ -160,6 +200,7 @@ export async function callModel(messages, signal, onReasoning) {
       if (!choice) return;
       if (typeof choice.delta?.reasoning_content === "string" && choice.delta.reasoning_content) onReasoning?.(choice.delta.reasoning_content);
       if (typeof choice.delta?.content === "string") content += choice.delta.content;
+      if (choice.delta?.tool_calls) mergeToolDelta(toolCalls, choice.delta.tool_calls);
       if (choice.finish_reason) finishReason = choice.finish_reason;
     };
     for await (const bytes of res.body) {
@@ -184,6 +225,11 @@ export async function callModel(messages, signal, onReasoning) {
   if (Number.isFinite(usage?.prompt_tokens)) console.log(`[llm] prompt_tokens=${usage.prompt_tokens} completion_tokens=${usage.completion_tokens ?? 'unknown'}`);
   if (THINKING) console.log(`[llm] thinking ${THINKING_TYPE}${REASONING_EFFORT ? `/${REASONING_EFFORT}` : ""} · reasoning_tokens=${usage?.completion_tokens_details?.reasoning_tokens ?? 0}`);
   if (finishReason === "length") throw new ModelError("TRUNCATED", "模型输出被接口截断（思考与 JSON 共用输出预算）", 0);
+  if (useTools) {
+    const calls = finalizeToolCalls(toolCalls);
+    if (!content && !calls.length) throw new ModelError("EMPTY", "模型既没有内容也没有工具调用", 0);
+    return { mode: "tools", content, calls, usage };
+  }
   if (!content) throw new ModelError("EMPTY", "模型返回空内容", 0);
   let parsed;
   try {
