@@ -140,6 +140,10 @@ export function validatePlan(plan) {
   return {
     type: "execute_plan",
     speech: String(plan.speech ?? "").slice(0, 200),
+    // 可选：一句话说明“为什么这么安排”，写技能和排查时要用
+    decisionNote: typeof plan.decision_note === "string" && plan.decision_note.trim()
+      ? plan.decision_note.trim().slice(0, 60)
+      : null,
     plan: { steps: steps.map((s, i) => validateStep(s, `s${i + 1}`)) },
     memoryProposals: Array.isArray(plan.memory_proposals) ? plan.memory_proposals : [],
     summaryProposal: plan.summary_proposal ?? null,
@@ -327,7 +331,7 @@ export function outputContract() {
     })
     .join("\n");
   return [
-    'execute_plan: {"type":"execute_plan","speech":"string","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
+    'execute_plan: {"type":"execute_plan","speech":"string","decision_note":"可选≤60字：为什么这么安排","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
     'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
     'skill_tool: {"type":"skill_tool","operation":"list|read|create|revise|disable|enable","skill_id":"可选","skill":{"title":"≤24字","trigger":"≤40字","body":"≤600字","tags":["可选"]},"filter":"list 时的筛选词"}；list 看目录、read 读正文（下一轮就能用）、create 新建（立即可用）、revise 改版、disable/enable 启停。你没有删除权限。',
     'timer_tool: {"type":"timer_tool","operation":"create","timer":{"name":"任务名","first_at":"带时区的 ISO 8601 真实时间","interval_seconds":null或整数秒,"total_occurrences":null或整数,"display_message":"提醒文字","wake_note":"到期时交给自己的提醒任务"}}；list: {"type":"timer_tool","operation":"list"}；cancel: {"type":"timer_tool","operation":"cancel","timer_id":"任务ID"}。',

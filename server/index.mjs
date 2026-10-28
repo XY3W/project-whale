@@ -21,6 +21,7 @@ import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
 import { createSpeechTidy } from "./speech.mjs";
 import { SkillRegistry } from "./skills.mjs";
+import { createFailureLog, describeFailures } from "./failures.mjs";
 import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE, STONE_TOLERANCE_M, cellCenter as gomokuCellCenter } from "./gomoku.mjs";
 import { DIG_TOLERANCE_M, cellCenter } from "./minesweeper.mjs";
 import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS } from "./context.mjs";
@@ -116,6 +117,8 @@ const gomoku = new GomokuService(path.join(process.cwd(), "data", "gomoku.json")
 const speechTidy = createSpeechTidy();
 /** 她自己写的经验（技能）；正文按需读取，不常驻提示词 */
 const skills = new SkillRegistry(path.join(process.cwd(), "data", "skills.json"));
+/** 失败档案：给“写技能”提供结构化证据（不存思考链） */
+const failures = createFailureLog();
 function loadState() {
   try {
     const raw = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
@@ -516,6 +519,7 @@ function endTask(reason, opts = {}) {
         signature: c.signature,
         count: c.count,
         tasks: c.tasks,
+        samples: failures.forSignature(c.signature, 3),
       });
     }
   }
@@ -759,7 +763,8 @@ function eventNote(events) {
   const candidate = (events ?? []).find((e) => e.type === "skill_candidate");
   const head = types.length ? `本轮触发：${types.join(" / ")}。` : "";
   if (candidate) {
-    return `${head}最近你反复在同一个地方失败（${candidate.signature} ${candidate.count} 次）。如果你已经从失败里总结出做法，可以用 skill_tool {"operation":"create"} 把它写下来，下次直接 read；不想写就照常做事。没有新的用户指令，历史对话已省略。`;
+    const digest = describeFailures(candidate.signature, candidate.samples ?? []);
+    return `${head}你反复在同一个地方失败（${candidate.count} 次）。以下是记录到的事实：\n${digest}\n如果从中能总结出可复用的做法，用 skill_tool {"operation":"create"} 写下来（下次直接 read）；不想写就照常做事。没有新的用户指令，历史对话已省略。`;
   }
   return `${head}没有新的用户指令，这是你自己那一局扫雷的自主回合；历史对话已省略，不要引用旧对话里的目标。`;
 }
@@ -970,6 +975,7 @@ function applyOutput(ws, task, out) {
     send(ws,'error',{code:'RELOAD_REQUIRED',message:'请刷新页面后使用新动作'});endTask('old runtime');return;
   }
   task.plan = out.plan;
+  task.decisionNote = out.decisionNote ?? null;
   task.rounds += 1;
   task.planId = `${task.id}-p${task.rounds}-g${task.generation}`;
   session.ledger.set(task.planId, { state: "dispatched" });
@@ -1340,7 +1346,7 @@ wss.on("connection", (ws, req) => {
           break;
         }
         try {
-          const plan = validatePlan({ type: "execute_plan", speech: msg.speech ?? "", steps: msg.steps ?? [], memory_proposals: [] });
+          const plan = validatePlan({ type: "execute_plan", speech: msg.speech ?? "", decision_note: msg.decision_note, steps: msg.steps ?? [], memory_proposals: [] });
           const task = beginTask({ text: msg.text ?? "调试计划", messageId: null, origin: "user", events: [], ws });
           applyOutput(ws, task, plan);
         } catch (err) {
@@ -1488,6 +1494,24 @@ wss.on("connection", (ws, req) => {
         if (entry && entry.state === "processing") return; // 首次结果正在处理，忽略重复
         // 进入模型上下文前先瘦身：旧客户端可能把整张棋盘塞在 dig.actual 里
         msg.result = trimExecutionReport(msg.result);
+        for (const step of Array.isArray(msg.result?.steps) ? msg.result.steps : []) {
+          if (step?.status !== "failed") continue;
+          failures.record({
+            signature: `${step.reasonCode ?? "UNKNOWN"}:${step.action}`,
+            taskId: task.id,
+            action: step.action,
+            reasonCode: step.reasonCode ?? null,
+            requested: step.requested ?? null,
+            actual: step.actual ?? step.detail ?? null,
+            planSteps: (task.plan?.steps ?? []).map((st) => st.action),
+            note: task.decisionNote ?? null,
+            state: {
+              position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
+              boardRevision: games.public()?.revision ?? null,
+              gomokuRevision: gomoku.public()?.revision ?? null,
+            },
+          });
+        }
         // 五子棋：计划里要落子、但棋盘 revision 没变 → 落子其实没生效
         // （客户端可能没提交、被拒、或者版本过旧只点了头）。明确提醒她重来，
         // 否则她会以为已经下过了。
