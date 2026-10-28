@@ -111,6 +111,15 @@ export class ChatPanel {
     this.onSend?.(text);
   }
 
+  /** 系统提示行：技能新建/更新/停用这类事件，不占角色台词 */
+  addNote(text: string) {
+    const row = document.createElement("div");
+    row.className = "chat-msg chat-note";
+    row.textContent = text;
+    this.list.appendChild(row);
+    this.list.scrollTop = this.list.scrollHeight;
+  }
+
   addMessage(role: "user" | "whale", text: string) {
     const row = document.createElement("div");
     row.className = `chat-msg chat-${role}`;

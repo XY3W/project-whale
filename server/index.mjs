@@ -450,6 +450,13 @@ function scheduleEventTurn() {
   }, EVENT_COALESCE_MS);
 }
 
+/** 技能变化通知：界面弹一行、面板刷新 */
+function announceSkill(op, skill, note = "") {
+  const payload = { op, note, skill: { id: skill.id, title: skill.title, status: skill.status, version: skill.version }, stats: skills.stats() };
+  for (const client of wss.clients) send(client, "skill_event", payload);
+  broadcastSkills();
+}
+
 function broadcastSkills() {
   const payload = { skills: skills.all(), stats: skills.stats() };
   for (const client of wss.clients) send(client, "skills_state", payload);
@@ -490,9 +497,32 @@ function endTask(reason, opts = {}) {
     }
     finished.skillRead = null;
   }
+  // 失败签名：任务收尾时统计，供下一轮判断要不要提醒她写技能
+  if (finished) {
+    const results = [...session.ledger].filter(([id]) => id.startsWith(finished.id + '-')).map(([, e]) => e.result).filter(Boolean);
+    recordFailures(finished, results);
+    finished.skillCandidate = skillCandidate(finished);
+    if (finished.skillCandidate) {
+      const c = finished.skillCandidate;
+      console.log(`[skill] 候选：${c.signature} ×${c.count}`);
+      // 放进场地事件队列，下一轮由她自己决定写不写
+      gameEvents.push({
+        eventId: `ev${++eventSeq}`,
+        type: "skill_candidate",
+        gameId: "skill",
+        revision: Date.now(),
+        status: "candidate",
+        at: new Date().toISOString(),
+        signature: c.signature,
+        count: c.count,
+        tasks: c.tasks,
+      });
+    }
+  }
   // 宿主自动停用：读得多、但用了还是老失败
   for (const bad of skills.autoDisableCandidates()) {
     skills.disable(bad.id, "low-success");
+    announceSkill("auto-disable", bad, "连续使用但效果不好，已自动停用");
     console.log(`[skill] 自动停用 ${bad.id}「${bad.title}」：读取 ${bad.usage.injected} 次，失败 ${bad.usage.failed}/${bad.usage.success + bad.usage.failed}`);
   }
   if(finished?.origin==="active"){
@@ -584,6 +614,9 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     planId: null,
     originWs: ws,
     pendingEvents: events,
+    skillCandidate: (events ?? []).find((e) => e.type === "skill_candidate")
+      ? { signature: events.find((e) => e.type === "skill_candidate").signature, count: events.find((e) => e.type === "skill_candidate").count }
+      : null,
     snapshot,
     gameRevision: games.public()?.revision ?? null,
   };
@@ -671,9 +704,63 @@ function modelContext(task, phase, extra = {}) {
 }
 
 /** 自主回合的触发原因，写进 goal.note 让模型一眼看到这一轮为什么被叫醒 */
+/**
+ * 失败签名统计：同一个「原因码:动作」在最近若干任务里反复出现，就认为她在同一个坑里打转，
+ * 下一轮把证据放进 attentionEvents，让她自己决定要不要写一条技能。
+ */
+const failureLog = [];
+const skillNudged = new Map(); // signature -> 上次提醒时间
+const FAILURE_WINDOW = 10;     // 看最近 10 个任务
+const FAILURE_THRESHOLD = 3;   // 同一签名出现 3 次
+const NUDGE_COOLDOWN = 30 * 60 * 1000;
+
+function recordFailures(task, results) {
+  const failed = [];
+  for (const result of results) {
+    for (const step of result.steps ?? []) {
+      if (step.status !== "failed") continue;
+      const signature = `${step.reasonCode ?? "UNKNOWN"}:${step.action}`;
+      failed.push(signature);
+    }
+  }
+  if (!failed.length) return;
+  const now = Date.now();
+  for (const signature of [...new Set(failed)]) failureLog.push({ signature, at: now, taskId: task.id });
+  while (failureLog.length > 200) failureLog.shift();
+}
+
+function skillCandidate(task) {
+  const now = Date.now();
+  const recentTasks = new Map();
+  for (const item of failureLog) {
+    if (now - item.at > 60 * 60 * 1000) continue;
+    recentTasks.set(item.taskId, true);
+    if (recentTasks.size > FAILURE_WINDOW) break;
+  }
+  const counts = new Map();
+  for (const item of failureLog) {
+    if (!recentTasks.has(item.taskId)) continue;
+    counts.set(item.signature, (counts.get(item.signature) ?? 0) + 1);
+  }
+  for (const [signature, count] of counts) {
+    if (count < FAILURE_THRESHOLD) continue;
+    if (now - (skillNudged.get(signature) ?? 0) < NUDGE_COOLDOWN) continue;
+    // 已经有启用中的技能针对这个签名，就不再提醒
+    if (skills.all().some((sk) => sk.status === "enabled" && sk.source?.signature === signature)) continue;
+    skillNudged.set(signature, now);
+    const sample = failureLog.filter((i) => i.signature === signature).slice(-3).map((i) => i.taskId);
+    return { signature, count, tasks: sample };
+  }
+  return null;
+}
+
 function eventNote(events) {
   const types = [...new Set((events ?? []).map((e) => e.type))];
+  const candidate = (events ?? []).find((e) => e.type === "skill_candidate");
   const head = types.length ? `本轮触发：${types.join(" / ")}。` : "";
+  if (candidate) {
+    return `${head}最近你反复在同一个地方失败（${candidate.signature} ${candidate.count} 次）。如果你已经从失败里总结出做法，可以用 skill_tool {"operation":"create"} 把它写下来，下次直接 read；不想写就照常做事。没有新的用户指令，历史对话已省略。`;
+  }
   return `${head}没有新的用户指令，这是你自己那一局扫雷的自主回合；历史对话已省略，不要引用旧对话里的目标。`;
 }
 
@@ -806,16 +893,22 @@ function applyOutput(ws, task, out) {
         task.skillNote = `已读到「${doc.title}」v${doc.version}`;
         console.log(`[skill] ${task.id} read ${doc.id} ${doc.title}`);
       } else if (op === "create") {
-        const { skill, duplicate } = skills.create(out.skill ?? {}, { taskId: task.id, turn: task.id });
+        const { skill, duplicate } = skills.create(out.skill ?? {}, {
+          taskId: task.id,
+          signature: task.skillCandidate?.signature ?? null,
+        });
         task.skillNote = duplicate ? `已经有一条一样的「${skill.title}」，直接沿用` : `新技能已注册并启用：${skill.title}`;
+        if (!duplicate) announceSkill("create", skill);
         console.log(`[skill] ${task.id} create ${skill.id} ${skill.title}${duplicate ? "（重复）" : ""}`);
       } else if (op === "revise") {
         const skill = skills.revise(out.skill_id, out.skill ?? {});
         task.skillNote = `已更新「${skill.title}」到 v${skill.version}`;
+        announceSkill("revise", skill);
         console.log(`[skill] ${task.id} revise ${skill.id} v${skill.version}`);
       } else if (op === "disable" || op === "enable") {
         const skill = skills.setEnabled(out.skill_id, op === "enable");
         task.skillNote = `${op === "enable" ? "已启用" : "已停用"}「${skill.title}」`;
+        announceSkill(op, skill);
         console.log(`[skill] ${task.id} ${op} ${skill.id}`);
       }
     } catch (err) {

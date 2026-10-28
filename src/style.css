@@ -295,3 +295,6 @@ canvas { display: block; }
 .skill-actions{display:flex;gap:8px}
 .skill-new{display:flex;flex-direction:column;gap:8px;border-top:1px solid #e3eaf2;padding-top:14px;margin-top:16px}
 .skill-new input,.skill-new textarea{padding:8px;border:1px solid #ccd6e0;border-radius:6px;font:inherit}
+
+/* 系统提示行（技能事件等） */
+.chat-msg.chat-note{opacity:.62;font-size:12px;font-style:normal;color:#9fb3c8;padding-left:2px}

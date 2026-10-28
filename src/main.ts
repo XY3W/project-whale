@@ -1118,6 +1118,14 @@ async function boot() {
       if(msg.speech){chat.addMessage("whale", msg.speech);speak(msg.speech);}
     },
     onMode:value=>controls.updateMode(value),
+    onSkillEvent:(payload)=>{
+      const data = payload as { op?: string; note?: string; skill?: { title?: string }; stats?: { enabled?: number; max?: number } };
+      const label: Record<string, string> = { create: "技能 +1", revise: "技能已更新", disable: "技能已停用", enable: "技能已启用", "auto-disable": "技能自动停用" };
+      const head = label[data.op ?? ""] ?? "技能";
+      const title = data.skill?.title ? `「${data.skill.title}」` : "";
+      const count = data.stats ? `（启用 ${data.stats.enabled}/${data.stats.max}）` : "";
+      chat.addNote(`${head}${title}${data.note ? ` · ${data.note}` : ""}${count}`);
+    },
     onMemoryUpdated:count=>controls.updatePending(count),
     onTaskState: (phase,taskId) => {
       if((phase==='thinking'||phase==='checking')&&motionOwner==='roaming'){currentExecutor?.cancel();}

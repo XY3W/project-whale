@@ -40,6 +40,7 @@ type Handlers = {
   onGame?: (board: unknown) => void;
   onGomoku?: (board: unknown) => void;
   onSkills?: (payload: unknown) => void;
+  onSkillEvent?: (payload: unknown) => void;
   onError?: (code: string, message: string) => void;
   onConnection?: (connected: boolean) => void;
 };
@@ -156,6 +157,10 @@ export class BrainClient {
           break;
         case "gomoku_state":
           this.handlers.onGomoku?.(msg.board);
+          break;
+        case "skill_event":
+          for (const fn of this.skillsListeners) fn(msg);
+          this.handlers.onSkillEvent?.(msg);
           break;
         case "skills_state":
           for (const fn of this.skillsListeners) fn(msg);
