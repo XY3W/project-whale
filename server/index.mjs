@@ -901,7 +901,7 @@ function eventNote(events) {
   const head = types.length ? `本轮触发：${types.join(" / ")}。` : "";
   if (candidate) {
     const digest = describeFailures(candidate.signature, candidate.samples ?? []);
-    return `${head}你反复在同一个地方失败（${candidate.count} 次）。以下是记录到的事实：\n${digest}\n如果从中能总结出可复用的做法，用 skill_tool {"operation":"create"} 写下来（下次直接 read）；不想写就照常做事。没有新的用户指令，历史对话已省略。`;
+    return `${head}你反复在同一个地方失败（${candidate.count} 次）。以下是记录到的事实：\n${digest}\n如果证据能总结出可复用做法，先检查现有技能：主题相近则先 read 后用 revise 局部修补，否则用 create 新建；证据不足则保留待验证，不要编造。没有新的用户指令，历史对话已省略。`;
   }
   return `${head}没有新的用户指令，这是你自己那一局扫雷的自主回合；历史对话已省略，不要引用旧对话里的目标。`;
 }
