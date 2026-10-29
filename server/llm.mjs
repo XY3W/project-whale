@@ -18,7 +18,7 @@ export { ModelError };
 export { describeCapabilities, describeDisabled } from "./capabilities.mjs";
 
 const API = process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/chat/completions";
-const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-chat";
+const MODEL = process.env.DEEPSEEK_MODEL ?? "deepseek-flash";
 /**
  * 思考模式。DEEPSEEK_THINKING 取 enabled / adaptive / disabled（1|true|on|yes 等同 enabled）。
  * 思考强度用 DEEPSEEK_REASONING_EFFORT 调，默认 minimal；服务端接受的档位：
