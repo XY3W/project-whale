@@ -77,7 +77,7 @@ export function mountControls(client:BrainClient,audio:PropAudio){
     const form=el('div','skill-new');
     const t=document.createElement('input');t.placeholder='名称（≤24字）';t.maxLength=24;
     const g=document.createElement('input');g.placeholder='什么时候用（≤40字）';g.maxLength=40;
-    const b=document.createElement('textarea');b.placeholder='正文：具体步骤、注意什么（≤600字）';b.maxLength=600;b.rows=4;
+    const b=document.createElement('textarea');b.placeholder='正文：具体步骤、注意什么（≤2000字）';b.maxLength=2000;b.rows=4;
     const isScript=document.createElement('input');isScript.type='checkbox';
     const isScriptLabel=el('label','skill-kind','脚本型（可在沙箱里执行）');isScriptLabel.prepend(isScript);
     const scriptBox=document.createElement('textarea');scriptBox.placeholder='脚本：用 input 读入参，用 emit(value) 返回结果；没有文件/网络权限';scriptBox.rows=5;scriptBox.maxLength=3000;scriptBox.style.display='none';

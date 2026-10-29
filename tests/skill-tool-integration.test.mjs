@@ -12,7 +12,8 @@ test('原生工具：读取完整脚本、拒绝整段覆盖、按版本局部�
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-skill-tool-'));
  const registry=new SkillRegistry(path.join(dir,'data/skills.json'));
  const script='const data = "'+ 'x'.repeat(1800)+'";\nemit(data);';
- const sk=registry.create({title:'修补测试',trigger:'需要检查时',body:'第一条保留。第二条保留。',kind:'script',script}).skill;
+ const body='第一条保留。'.repeat(130)+'第二条保留。';
+ const sk=registry.create({title:'修补测试',trigger:'需要检查时',body,kind:'script',script}).skill;
  const calls=[];
  const model=http.createServer(async(req,res)=>{
   let raw='';for await(const chunk of req)raw+=chunk;calls.push(JSON.parse(raw));
@@ -34,5 +35,5 @@ test('原生工具：读取完整脚本、拒绝整段覆盖、按版本局部�
  const results=calls[4].messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content));
  assert.equal(results[0].code,'SKILL_READ_REQUIRED');assert.equal(results[1].doc.script,script);assert.equal(results[2].code,'SKILL_EDIT_INVALID');assert.equal(results[3].skill.version,2);
  const saved=new SkillRegistry(path.join(dir,'data/skills.json')).get(sk.id);
- assert.equal(saved.body,'第一条保留。第二条保留。\n第三条新增。');assert.equal(saved.script,script);assert.equal(saved.history[0].body,'第一条保留。第二条保留。');
+ assert.equal(saved.body,body+'\n第三条新增。');assert.equal(saved.script,script);assert.equal(saved.history[0].body,body);
 });

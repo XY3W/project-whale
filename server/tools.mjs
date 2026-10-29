@@ -87,7 +87,7 @@ export function toolDefinitions() {
               properties: {
                 title: { type: "string", maxLength: 24 },
                 trigger: { type: "string", maxLength: 40, description: "什么时候该用它" },
-                body: { type: "string", maxLength: 600, description: "做法说明；kind=script 时写用途" },
+                body: { type: "string", maxLength: 2000, description: "做法说明；kind=script 时写用途" },
                 kind: { type: "string", enum: ["text", "script"] },
                 script: { type: "string", maxLength: 3000, description: "kind=script 时执行的 JS 源码，必须调用 emit(...) 返回结果" },
                 tags: { type: "array", items: { type: "string" }, maxItems: 4 },

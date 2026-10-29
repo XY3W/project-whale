@@ -43,6 +43,7 @@ test("skill 工具：不允许 delete，脚本有长度上限", () => {
   assert.ok(!ops.includes("delete"));
   assert.ok(ops.includes("run"));
   assert.equal(skill.properties.skill.properties.script.maxLength, 3000);
+  assert.equal(skill.properties.skill.properties.body.maxLength, 2000);
 });
 
 test("流式 tool_calls 增量按 index 合并", () => {

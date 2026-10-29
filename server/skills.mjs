@@ -13,7 +13,7 @@ import path from "node:path";
 import { CAPABILITIES } from "./capabilities.mjs";
 
 export const MAX_ENABLED = 100;
-export const LIMITS = { title: 24, trigger: 40, body: 600, tags: 4, script: 3000 };
+export const LIMITS = { title: 24, trigger: 40, body: 2000, tags: 4, script: 3000 };
 export const KINDS = ["text", "script"];
 /** 越权/注入类词：技能正文不许出现，避免她自己改写系统规则 */
 const BLOCKED = [

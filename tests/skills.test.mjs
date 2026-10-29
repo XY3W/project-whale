@@ -91,7 +91,19 @@ test("校验：引用不存在的能力被拒", () => {
 });
 
 test("校验：超长直接报错，不截断", () => {
-  assert.throws(() => validateSkillInput({title:"标题",trigger:"场景",body:"步骤".repeat(301)}), {code:"SKILL_TOO_LONG"});
+  assert.throws(() => validateSkillInput({title:"标题",trigger:"场景",body:"步".repeat(2001)}), {code:"SKILL_TOO_LONG"});
+});
+
+test("正文可写到 2000 字，超过上限拒绝并保留原文", () => {
+  const r = new SkillRegistry(tmp());
+  const original = "原".repeat(1998);
+  const skill = r.create({title:"边界测试",trigger:"测试时用",body:original}).skill;
+  r.patch(skill.id, 1, [{field:"body",operation:"append",text:"新"}]);
+  assert.equal(skill.body.length, 2000); // append adds a newline
+  assert.equal(skill.body, original + "\n新");
+  assert.throws(() => r.patch(skill.id, 2, [{field:"body",operation:"append",text:"超"}]), {code:"SKILL_TOO_LONG"});
+  assert.equal(skill.body, original + "\n新");
+  assert.equal(skill.version,2);
 });
 
 test("局部编辑保留原有内容并保存历史版本", () => {
@@ -109,7 +121,7 @@ test("版本冲突、找不到原文、重复原文及超长均不改变任何�
   assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"replace",find:skill.body,text:"全量覆盖"}]),{code:"SKILL_EDIT_INVALID"});
   assert.throws(() => r.patch(skill.id, 2, [{field:"body",operation:"append",text:"增加"}]),{code:"SKILL_VERSION_CONFLICT"});
   for (const find of ["不存在", "相同内容"]) assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"replace",find,text:"替代"}]),{code:"SKILL_EDIT_MATCH"});
-  assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"append",text:"长".repeat(601)}]),{code:"SKILL_TOO_LONG"});
+  assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"append",text:"长".repeat(2001)}]),{code:"SKILL_TOO_LONG"});
   assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"append",text:"第一步"},{field:"body",operation:"replace",find:"不存在",text:"第二步"}]),{code:"SKILL_EDIT_MATCH"});
   assert.equal(JSON.stringify(skill),before);
 });

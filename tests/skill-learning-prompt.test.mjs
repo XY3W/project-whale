@@ -17,5 +17,9 @@ test('原生工具提示约束优先修补、不覆盖和证据不足不编造',
   assert.match(prompt,/先 read，再依据当前版本用 revise 的局部 edits/);
   assert.match(prompt,/保留其他正确内容/);
   assert.match(prompt,/不确定/);
-  assert.match(prompt,/正文达到长度上限/);
+  assert.match(prompt,/正文接近或达到字数上限/);
+  assert.match(prompt,/通读整篇/);
+  assert.match(prompt,/价值较低/);
+  assert.match(prompt,/保留仍然正确且有用的规则/);
+  assert.match(prompt,/不要整篇覆盖/);
 });
