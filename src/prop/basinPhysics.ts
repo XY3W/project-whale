@@ -6,8 +6,10 @@ export const FLOOR_Y = 0;
 export const ARENA_HALF = 4;
 const STEP = 1 / 120;
 const MAX_FRAME = 0.1;
-/** 兜底：飞行超过这个时间且已经贴地，就强制停下，避免无限缓慢滚动 */
-const MAX_FLIGHT_S = 6;
+/** 位姿变化在窗口内保持很小，才认为落地静止。 */
+const STILL_SECONDS = 0.8;
+const STILL_DISTANCE = 0.003;
+const STILL_ANGLE = 0.02;
 
 export interface Pose {
   position: THREE.Vector3;
@@ -59,14 +61,14 @@ export function stepPropWorld(dt:number){
         const velocity=(c:RAPIER.Collider)=>{const body=c.parent();const info=body?before.get(body.handle):null;if(!info)return new THREE.Vector3();const v=info.v.clone();if(hit)v.add(info.w.clone().cross(new THREE.Vector3(hit.x,hit.y,hit.z).sub(info.p)));return v;};
         speed=Math.max(speed,velocity(ca).sub(velocity(cb)).dot(normal));
       });
-      const key=[a,b].sort().join(':');if(speed<.18||s.time-(s.last.get(key)??-Infinity)<.075)return;
+      const key=pair.slice().sort().join(':');if(speed<.18||s.time-(s.last.get(key)??-Infinity)<.075)return;
       s.last.set(key,s.time);impactListener?.({id:`impact-${++s.sequence}`,pair,normalSpeed:speed,point});
     });
   }
 }
 
 /**
- * 投掷飞行用的刚体世界：一个静态地面 + 一个盆的凸包碰撞体。
+ * 投掷飞行用的刚体世界：静态地面和盆的组合碰撞体。
  * 只负责“脱手之后”的权威状态，动画期间盆由挂接/曲线驱动。
  */
 export class BasinPhysics {
@@ -80,11 +82,11 @@ export class BasinPhysics {
   private hull: Float32Array;
   private initialised = false;
   private flightTime = 0;
-  private readonly lastPosition = new THREE.Vector3();
-  private readonly lastQuaternion = new THREE.Quaternion();
-  private readonly shape: "cylinder" | "box";
+  private readonly stillAnchor = new THREE.Vector3();
+  private readonly stillRotation = new THREE.Quaternion();
+  private readonly shape: "cylinder" | "box" | "basin";
 
-  private constructor(hull: Float32Array, half: number, shape: "cylinder" | "box" = "cylinder", sharedId?:string) {
+  private constructor(hull: Float32Array, half: number, shape: "cylinder" | "box" | "basin" = "cylinder", sharedId?:string) {
     this.hull = hull;
     this.shape = shape;
     this.sharedId=sharedId;
@@ -115,8 +117,8 @@ export class BasinPhysics {
     }
   }
 
-  /** 碰撞体形状：盆用外接圆柱，饭勺这类细长物品用外接长方体 */
-  static async create(hull: Float32Array, half = ARENA_HALF, shape: "cylinder" | "box" = "cylinder", sharedId?:string): Promise<BasinPhysics> {
+  /** 碰撞体形状：盆用空心圆台近似，饭勺这类细长物品用外接长方体 */
+  static async create(hull: Float32Array, half = ARENA_HALF, shape: "cylinder" | "box" | "basin" = "cylinder", sharedId?:string): Promise<BasinPhysics> {
     await RAPIER.init();
     const physics = new BasinPhysics(hull, half, shape,sharedId);
     physics.initialised = true;
@@ -141,34 +143,59 @@ export class BasinPhysics {
         .setLinvel(init.velocity.x, init.velocity.y, init.velocity.z)
         .setAngvel({ x: init.angularVelocity.x, y: init.angularVelocity.y, z: init.angularVelocity.z })
         .setLinearDamping(0.12)
-        .setAngularDamping(0.9)
+        .setAngularDamping(this.shape === "box" ? 0.9 : 3.0)
         .setCanSleep(true),
     );
     body.enableCcd(true);
-    const collider=this.world.createCollider(this.colliderDesc().setRestitution(0.15).setFriction(0.9).setDensity(this.sharedId==='rice_scoop'?400:180).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
-    if(this.sharedId&&shared)shared.ids.set(collider.handle,this.sharedId);
+    this.attachColliders(body, true);
     this.body = body;
     this.accumulator = 0;
     this.calmFor = 0;
     this.flightTime = 0;
-    this.lastPosition.set(init.position.x, init.position.y, init.position.z);
-    this.lastQuaternion.copy(init.quaternion);
+    this.stillAnchor.copy(init.position);
+    this.stillRotation.copy(init.quaternion);
   }
 
-  /**
-   * 碰撞体：用贴合外接尺寸的圆柱，而不是整个凸包。
-   * 261 点的凸包落在平面上时接触流形会持续抖动（贴地后线速度一直在 5 cm/s 上下，
-   * 画面表现为“抽搐”），圆柱的平面/直线接触稳定得多，且外接圆柱不会让视觉穿地。
-   */
-  private colliderDesc(): RAPIER.ColliderDesc {
+  /** Compound hollow frustum: a bottom disk and separate sloped wall segments. */
+  private colliderDescs(): RAPIER.ColliderDesc[] {
     if (this.shape === "box") {
       const bounds = boxFromHull(this.hull);
-      return RAPIER.ColliderDesc.cuboid(bounds.halfExtents.x, bounds.halfExtents.y, bounds.halfExtents.z)
-        .setTranslation(bounds.center.x, bounds.center.y, bounds.center.z);
+      return [RAPIER.ColliderDesc.cuboid(bounds.halfExtents.x, bounds.halfExtents.y, bounds.halfExtents.z)
+        .setTranslation(bounds.center.x, bounds.center.y, bounds.center.z)];
     }
     const shape = cylinderFromHull(this.hull);
-    const desc = RAPIER.ColliderDesc.cylinder(shape.halfHeight, shape.radius);
-    return desc.setTranslation(shape.center.x, shape.center.y, shape.center.z);
+    if (this.shape === "cylinder") return [RAPIER.ColliderDesc.cylinder(shape.halfHeight, shape.radius).setTranslation(shape.center.x, shape.center.y, shape.center.z)];
+    const height = shape.halfHeight * 2;
+    const y0 = shape.center.y - shape.halfHeight, y1 = shape.center.y + shape.halfHeight;
+    // The actual asset widens towards +Y. Sample the bottom to avoid the lip/handles inflating the base.
+    let baseRadius = 0;
+    for (let i = 0; i < this.hull.length; i += 3) if (this.hull[i + 1] <= y0 + height * 0.14)
+      baseRadius = Math.max(baseRadius, Math.hypot(this.hull[i] - shape.center.x, this.hull[i + 2] - shape.center.z));
+    baseRadius = Math.max(shape.radius * 0.5, Math.min(baseRadius || shape.radius * 0.7, shape.radius * 0.9));
+    const thickness = Math.max(0.006, Math.min(0.012, height * 0.045));
+    const descs = [RAPIER.ColliderDesc.cylinder(thickness / 2, baseRadius).setTranslation(shape.center.x, y0 + thickness / 2, shape.center.z)];
+    const sides = 16;
+    for (let i = 0; i < sides; i++) {
+      const vertices: number[] = [];
+      for (const [y, radius] of [[y0, baseRadius], [y1, shape.radius]]) {
+        for (const a of [2 * Math.PI * i / sides, 2 * Math.PI * (i + 1) / sides]) {
+          for (const rad of [radius - thickness, radius]) vertices.push(shape.center.x + rad * Math.cos(a), y, shape.center.z + rad * Math.sin(a));
+        }
+      }
+      const wall = RAPIER.ColliderDesc.convexHull(new Float32Array(vertices));
+      if (!wall) throw new Error("Cannot build basin collision wall");
+      descs.push(wall);
+    }
+    return descs;
+  }
+
+  private attachColliders(body: RAPIER.RigidBody, dynamic: boolean) {
+    for (const desc of this.colliderDescs()) {
+      desc.setRestitution(0.15).setFriction(0.9).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS);
+      if (dynamic) desc.setDensity(this.sharedId === "rice_scoop" ? 400 : 180);
+      const collider = this.world.createCollider(desc, body);
+      if (this.sharedId && shared) shared.ids.set(collider.handle, this.sharedId);
+    }
   }
 
   /** 推进物理并返回权威姿态；未启动时返回 null。 */
@@ -191,21 +218,24 @@ export class BasinPhysics {
       position: new THREE.Vector3(t.x, t.y, t.z),
       quaternion: new THREE.Quaternion(r.x, r.y, r.z, r.w),
     };
-    // 静止判定同时看速度与“实际位移”：贴着地面缓慢打转时速度不为 0，但画面已经不动了
-    const moved = pose.position.distanceTo(this.lastPosition);
-    const dot = Math.min(1, Math.abs(pose.quaternion.dot(this.lastQuaternion)));
+    // Measure displacement from a fixed anchor across time, not instantaneous velocity.
+    // Both translation and rotation matter: a basin can roll in place without moving its centre.
+    const moved = pose.position.distanceTo(this.stillAnchor);
+    const dot = Math.min(1, Math.abs(pose.quaternion.dot(this.stillRotation)));
     const turned = 2 * Math.acos(dot);
-    const slow = speed < 0.06 && spin < 0.9;
-    const visuallyStill = moved < 0.0004 && turned < 0.002;
-    this.calmFor = slow || visuallyStill ? this.calmFor + dt : 0;
-    this.lastPosition.copy(pose.position);
-    this.lastQuaternion.copy(pose.quaternion);
-    const onFloor = t.y < 0.6;
-    const forced = this.flightTime > MAX_FLIGHT_S && onFloor;
+    let lowest = Infinity;
+    const point = new THREE.Vector3();
+    for (let i = 0; i < this.hull.length; i += 3) {
+      point.set(this.hull[i], this.hull[i + 1], this.hull[i + 2]).applyQuaternion(pose.quaternion).add(pose.position);
+      lowest = Math.min(lowest, point.y);
+    }
+    const onFloor = lowest <= FLOOR_Y + 0.025;
+    if (onFloor && moved <= STILL_DISTANCE && turned <= STILL_ANGLE) this.calmFor += dt;
+    else { this.calmFor = 0; this.stillAnchor.copy(pose.position); this.stillRotation.copy(pose.quaternion); }
     return {
       pose,
       calm: this.calmFor,
-      resting: onFloor && (this.calmFor > 0.45 || forced),
+      resting: onFloor && this.calmFor >= STILL_SECONDS,
       speed: Math.round(speed * 1000) / 1000,
       spin: Math.round(spin * 1000) / 1000,
       flightTime: Math.round(this.flightTime * 100) / 100,
@@ -218,8 +248,8 @@ export class BasinPhysics {
     const key=[...pose.position.toArray(),...pose.quaternion.toArray()].map(n=>n.toFixed(4)).join(',');
     if(key===this.staticKey)return;this.syncStatic(null);this.staticKey=key;
     const b=this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(pose.position.x,pose.position.y,pose.position.z).setRotation(pose.quaternion));
-    const c=this.world.createCollider(this.colliderDesc().setRestitution(.15).setFriction(.9).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),b);
-    this.staticBody=b;shared?.ids.set(c.handle,this.sharedId);
+    this.attachColliders(b, false);
+    this.staticBody=b;
   }
 
   stop(): void {

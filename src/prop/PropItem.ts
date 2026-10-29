@@ -142,7 +142,7 @@ export class PropItem {
 
   static async create(opts: PropItemOptions): Promise<PropItem> {
     const hull = hullPoints(opts.scene);
-    const physics = await BasinPhysics.create(hull, 4, opts.id === "basin" ? "cylinder" : "box",opts.id);
+    const physics = await BasinPhysics.create(hull, 4, opts.id === "basin" ? "basin" : "box",opts.id);
     return new PropItem(opts, physics);
   }
 

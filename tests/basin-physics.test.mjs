@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { BasinPhysics, hullPoints, cylinderFromHull, ARENA_HALF } from "../src/prop/basinPhysics.ts";
+import { BasinPhysics, hullPoints, cylinderFromHull, ARENA_HALF, stepPropWorld } from "../src/prop/basinPhysics.ts";
 
 globalThis.self ??= globalThis;
 const BASE = new URL("../public/models/basin-v2/", import.meta.url);
@@ -12,7 +12,7 @@ const gltf = await new GLTFLoader().parseAsync(buf.buffer.slice(buf.byteOffset, 
 const hull = hullPoints(gltf.scene);
 
 const run = async ({ tilt = 0, velocity = [0.2, 1.2, 2.4], angular = [0, 3.1, 0], from = [0, 0.42, 0], maxSeconds = 12 }) => {
-  const physics = await BasinPhysics.create(hull);
+  const physics = await BasinPhysics.create(hull, ARENA_HALF, "basin");
   physics.launch({
     position: new THREE.Vector3(...from),
     quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt, 0.4, tilt * 0.5)),
@@ -69,8 +69,59 @@ test("空气墙：斜向高速也不会穿出对角", async () => {
   assert.ok(Math.abs(out.pose.position.z) < ARENA_HALF + 0.6);
 });
 
-test("兜底：贴地后最迟 6 秒强制静止", async () => {
+test("轻抛后依据位姿变化自然停止", async () => {
   const out = await run({ velocity: [0.05, 0.5, 0.05], angular: [0, 0.2, 0], from: [0, 0.2, 0], maxSeconds: 12 });
   assert.ok(out.resting);
-  assert.ok(out.flightTime <= 6.2, `飞行时间 ${out.flightTime}`);
+  assert.ok(out.calm >= 0.8, `连续静止时间 ${out.calm}`);
+});
+
+
+test("空心盆：中心空腔可进入，底部仍然阻挡", async () => {
+  const physics = await BasinPhysics.create(hull, ARENA_HALF, "basin", "basin-cavity-test");
+  physics.syncStatic({position:new THREE.Vector3(0,1,0), quaternion:new THREE.Quaternion()});
+  stepPropWorld(1/60);
+  const world = physics.world;
+  const ray = new (await import("@dimforge/rapier3d-compat")).default.Ray({x:0,y:1.2,z:0},{x:0,y:-1,z:0});
+  assert.equal(world.castRay(ray, .1, true), null, "盆口中心应为空腔");
+  assert.ok(world.castRay(ray, .5, true), "盆底应能挡住物体");
+  physics.syncStatic(null);
+});
+
+test("侧面落地：自然倾倒而不是保持圆柱侧卧", async () => {
+  const physics = await BasinPhysics.create(hull, ARENA_HALF, "basin");
+  physics.launch({position:new THREE.Vector3(0,.5,0), quaternion:new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1), Math.PI/2), velocity:new THREE.Vector3(), angularVelocity:new THREE.Vector3()});
+  let out;
+  for (let i=0; i<900; i++) { out=physics.step(1/60); if(out.resting) break; }
+  assert.ok(out.resting, "盆应该自然停下");
+  const up = new THREE.Vector3(0,1,0).applyQuaternion(out.pose.quaternion);
+  assert.ok(Math.abs(up.y) > .9, `盆应倒向底面或口沿，当前 up.y=${up.y}`);
+  physics.stop();
+});
+
+
+test("微小高频抖动：位移范围很小时可以静止", async () => {
+  const physics = await BasinPhysics.create(hull, ARENA_HALF, "basin");
+  const y = cylinderFromHull(hull).halfHeight - cylinderFromHull(hull).center.y;
+  physics.launch({position:new THREE.Vector3(0,y,0),quaternion:new THREE.Quaternion(),velocity:new THREE.Vector3(),angularVelocity:new THREE.Vector3()});
+  let out;
+  for (let i=0;i<180;i++) {
+    physics.body.setTranslation({x:i%2 ? .0005 : -.0005,y,z:0}, true);
+    physics.body.setLinvel({x:0,y:0,z:0},true);
+    out=physics.step(1/60);if(out.resting)break;
+  }
+  assert.ok(out.resting,"小范围往复抖动应该停止");physics.stop();
+});
+
+test("持续位移：超过6秒也不能强制静止", async () => {
+  const physics = await BasinPhysics.create(hull, ARENA_HALF, "basin");
+  const y = cylinderFromHull(hull).halfHeight - cylinderFromHull(hull).center.y;
+  physics.launch({position:new THREE.Vector3(0,y,0),quaternion:new THREE.Quaternion(),velocity:new THREE.Vector3(),angularVelocity:new THREE.Vector3()});
+  let out;
+  for (let i=0;i<480;i++) {
+    physics.body.setTranslation({x:(i%60)*.001,y,z:0},true);
+    physics.body.setLinvel({x:0,y:0,z:0},true);
+    out=physics.step(1/60);
+    assert.equal(out.resting,false,`运动中的盆不应在 ${i/60}s 冻结`);
+  }
+  assert.ok(out.flightTime>6);physics.stop();
 });
