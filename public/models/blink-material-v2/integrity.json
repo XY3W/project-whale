@@ -1,0 +1,36 @@
+{
+  "sourceSha256": "6d2e12549bfa1056216482631203c5f7cc3aa5569f8226e02824b776cfc4c640",
+  "outputSha256": "673ff7b1b3e53e9af954d0d000460666e81fdfd860576d7e0e34cc6afc2d8538",
+  "originalBinaryIdentical": true,
+  "originalMeshesPreservedExceptPartTag": true,
+  "positionsNormalsUVSkinsAnimationsUnchanged": true,
+  "deformationAttributes": false,
+  "animations": 45,
+  "nativeRidgeVertices": 519,
+  "retiredHelperVertices": 1356,
+  "lowerHelperVertices": 580,
+  "helperComponentsRuntimeCounts": {
+    "105586": 98,
+    "104850": 290,
+    "104531": 290,
+    "900": 261,
+    "823": 258,
+    "105499": 290,
+    "104908": 98,
+    "105006": 290
+  },
+  "lowerHelperBounds": {
+    "min": [
+      -0.17599999904632568,
+      0.5299999713897705,
+      -0.11068835109472275
+    ],
+    "max": [
+      0.17599999904632568,
+      0.5301799774169922,
+      0.02867869660258293
+    ]
+  },
+  "helperTag": 2,
+  "nativeRidgeTag": 1
+}

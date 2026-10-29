@@ -8,6 +8,7 @@ import { Stage } from "./core/Stage";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
+import { CHARACTER_MODEL } from "./character/assets";
 import { ChatPanel } from "./ui/ChatPanel";
 import { TimerPanel } from "./ui/TimerPanel";
 import { BrainClient } from "./brain/BrainClient";
@@ -25,7 +26,7 @@ import { MinesweeperBoard } from "./game/MinesweeperBoard";
 import { GomokuBoard, gomokuCellAt, gomokuCellCenter } from "./game/GomokuBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
-const MODEL = "/models/blink-v1/character_blink_v1.glb";
+const MODEL = CHARACTER_MODEL;
 const BASIN_ASSET_DIR = "/models/playful-v2";
 const BASIN_MODEL = "/models/playful-v2/steel_basin_v2.glb";
 const SCOOP_MODEL = "/models/playful-v2/rice_scoop_straight_v3.glb";

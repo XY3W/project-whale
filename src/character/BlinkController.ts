@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MaterialEyelids } from './MaterialEyelids.ts';
 
 /** Eyelid poses have four fitted samples so they follow the curved eye without clipping it. */
 export function blinkWeights(value: number): number[] {
@@ -17,6 +18,7 @@ export function blinkAmount(time: number): number {
 
 export class BlinkController {
   private readonly targets: {mesh:THREE.Mesh;side:'Left'|'Right';indices:number[]}[]=[];
+  private readonly material:MaterialEyelids|null;
   private wait = 2;
   private elapsed:number|null=null;
   private manual:{left:number;right:number}|null=null;
@@ -25,16 +27,20 @@ export class BlinkController {
   private readonly random:()=>number;
   constructor(root:THREE.Object3D, random:()=>number=Math.random) {
     this.random=random;
+    const materialMeshes:THREE.SkinnedMesh[]=[];
     root.traverse(object=>{
       const mesh=object as THREE.Mesh;
+      if((mesh as THREE.SkinnedMesh).isSkinnedMesh&&mesh.geometry?.getAttribute('_eyepart'))materialMeshes.push(mesh as THREE.SkinnedMesh);
       if(!mesh.isMesh||!mesh.name.startsWith('Blink_')||!mesh.morphTargetDictionary)return;
       const side=mesh.name.includes('_Left_')?'Left':'Right';
       const indices=[25,50,75,100].map(n=>mesh.morphTargetDictionary![`Blink${side}_${n}`]);
       if(indices.every(Number.isInteger))this.targets.push({mesh,side,indices});
     });
+    this.material=materialMeshes.length?new MaterialEyelids(materialMeshes):null;
     this.wait=this.nextInterval();this.apply(0,0);
   }
-  get available(){return this.targets.length>0;}
+  get available(){return !!this.material||this.targets.length>0;}
+  get mode(){return this.material?'material':this.targets.length?'morph':'none';}
   private nextInterval(){return 2.8+this.random()*3.6;}
   setManual(left:number|null,right=left){
     this.manual=left===null?null:{left:THREE.MathUtils.clamp(left,0,1),right:THREE.MathUtils.clamp(right??left,0,1)};
@@ -42,6 +48,7 @@ export class BlinkController {
   }
   trigger(){this.manual=null;this.elapsed=0;this.doubleBlink=false;}
   private apply(left:number,right:number){
+    this.material?.setClosure(left,right);
     for(const target of this.targets){const weights=blinkWeights(target.side==='Left'?left:right);for(let i=0;i<4;i++)target.mesh.morphTargetInfluences![target.indices[i]]=weights[i];}
   }
   update(dt:number){
