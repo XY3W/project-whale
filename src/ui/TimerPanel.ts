@@ -7,15 +7,18 @@ export class TimerPanel {
   private banner:HTMLDivElement;
   constructor(private readonly skip:(id:string,at:number)=>void){
     const style=document.createElement('style');style.textContent=`
-    .timer-panel{position:fixed;left:16px;top:290px;width:min(420px,calc(100vw - 32px));z-index:24;color:#f4f7ff;font:16px/1.5 system-ui,sans-serif;pointer-events:none}
-    .timer-toggle,.timer-skip{pointer-events:auto;border:0;border-radius:14px;background:#3d62ad;color:white;padding:8px 12px;font:inherit;cursor:pointer}
-    .timer-list{pointer-events:auto;max-height:35vh;overflow:auto;margin-top:8px;padding:10px;border-radius:16px;background:rgba(20,30,48,.92)}
-    .timer-list[hidden]{display:none}.timer-entry{padding:6px 0;border-bottom:1px solid rgba(255,255,255,.12);overflow-wrap:anywhere}.timer-entry:last-child{border:0}.timer-meta{font-size:13px;color:#b6c7e5}
-    .timer-banner{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:101;max-width:min(650px,calc(100vw - 24px));max-height:30vh;overflow:auto;display:flex;flex-direction:column;gap:5px;color:white;font:15px/1.4 system-ui,sans-serif}.timer-alert{display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:14px;background:#704326;box-shadow:0 2px 12px #0008}.timer-alert span{flex:1}.timer-alert button{white-space:nowrap}
-    @media(max-width:819px){.timer-panel{top:290px}}
+    .timer-panel{position:relative;width:100%;color:#edf4ff;font:14px/1.5 system-ui,sans-serif;pointer-events:auto}
+    .timer-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid rgba(136,181,239,.24);border-radius:12px;background:rgba(94,143,207,.12);color:#d8e9ff;padding:10px 11px;font:600 13px/1.2 system-ui,sans-serif;cursor:pointer}
+    .timer-toggle:hover{background:rgba(109,164,232,.23);border-color:rgba(161,205,255,.5)}
+    .timer-toggle:focus-visible,.timer-skip:focus-visible{outline:2px solid #a4d4ff;outline-offset:2px}
+    .timer-chevron{width:23px;height:23px;border-radius:7px;background:rgba(125,174,234,.18);display:grid;place-items:center;font-size:15px;transition:transform .2s}
+    .timer-toggle[aria-expanded="true"] .timer-chevron{transform:rotate(180deg)}
+    .timer-list{max-height:28vh;overflow:auto;margin-top:8px;padding:10px 12px;border:1px solid rgba(144,185,235,.14);border-radius:12px;background:rgba(7,19,37,.55);color:#a8bdd8}
+    .timer-list[hidden]{display:none}.timer-entry{padding:8px 0;border-bottom:1px solid rgba(255,255,255,.1);overflow-wrap:anywhere;color:#edf4ff}.timer-entry:last-child{border:0}.timer-meta{font-size:12px;color:#a7bedb}
+    .timer-banner{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:101;max-width:min(650px,calc(100vw - 24px));max-height:30vh;overflow:auto;display:flex;flex-direction:column;gap:5px;color:white;font:15px/1.4 system-ui,sans-serif}.timer-alert{display:flex;gap:10px;align-items:center;padding:10px 14px;border:1px solid #d6a36d;border-radius:14px;background:#704326;box-shadow:0 2px 12px #0008}.timer-alert span{flex:1}.timer-alert button{white-space:nowrap}.timer-skip{border:0;border-radius:10px;background:#f4dfc4;color:#4e2c18;padding:8px 12px;font:inherit;cursor:pointer}
     `;document.head.append(style);
     this.panel=document.createElement('div');this.panel.className='timer-panel';const toggle=document.createElement('button');toggle.className='timer-toggle';this.list=document.createElement('div');this.list.className='timer-list';this.list.hidden=window.innerWidth<820;
-    const label=()=>{toggle.textContent=this.list.hidden?'展开定时任务':'收起定时任务'};toggle.onclick=()=>{this.list.hidden=!this.list.hidden;label()};label();this.panel.append(toggle,this.list);document.body.append(this.panel);this.banner=document.createElement('div');this.banner.className='timer-banner';document.body.append(this.banner);setInterval(()=>this.render(),250);this.render();
+    this.list.id='timer-task-list';toggle.setAttribute('aria-controls',this.list.id);const label=()=>{const open=!this.list.hidden;toggle.setAttribute('aria-expanded',String(open));toggle.innerHTML=`<span>◷ &nbsp;定时任务</span><span class="timer-chevron" aria-hidden="true">⌄</span>`;toggle.setAttribute('aria-label',open?'收起定时任务':'展开定时任务')};toggle.onclick=()=>{this.list.hidden=!this.list.hidden;label()};label();this.panel.append(toggle,this.list);(document.querySelector('.left-dock')??document.body).append(this.panel);this.banner=document.createElement('div');this.banner.className='timer-banner';document.body.append(this.banner);setInterval(()=>this.render(),250);this.render();
   }
   update(raw:unknown[], serverNow:number){this.clockOffset=serverNow-Date.now();this.timers=raw.filter((x):x is Timer=>!!x&&typeof x==='object'&&typeof (x as Timer).id==='string'&&Number.isFinite((x as Timer).next_at));this.render()}
   private render(){

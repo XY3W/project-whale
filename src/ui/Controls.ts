@@ -64,7 +64,7 @@ export function mountControls(client:BrainClient,audio:PropAudio){
       const actions=el('div','skill-actions');
       const toggle=el('button',undefined,on?'停用':'启用');
       toggle.onclick=()=>{client.setSkill(skill.id,!on);setTimeout(()=>client.getSkills(),200);};
-      const edit=el('button',undefined,'查看');edit.onclick=()=>{const hide=bodyEl.style.display!=='none';bodyEl.style.display=hide?'none':'block';if(scriptEl)scriptEl.style.display=hide?'none':'block';};
+      const edit=el('button','disclosure-btn','收起详情 ⌃');edit.setAttribute('aria-expanded','true');edit.onclick=()=>{const hide=bodyEl.style.display!=='none';bodyEl.style.display=hide?'none':'block';if(scriptEl)scriptEl.style.display=hide?'none':'block';edit.textContent=hide?'展开详情 ⌄':'收起详情 ⌃';edit.setAttribute('aria-expanded',String(!hide));};
       const del=el('button',undefined,'删除');
       del.onclick=()=>{if(!confirm(`确定删除「${skill.title}」？她以后不能再调用它。`))return;client.deleteSkill(skill.id);setTimeout(()=>client.getSkills(),200);};
       actions.append(toggle,edit,del);

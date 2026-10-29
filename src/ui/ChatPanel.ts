@@ -20,7 +20,7 @@ export class ChatPanel {
     this.root.className = "chat-panel";
     this.root.innerHTML = `
       <div class="chat-head">
-        <span>和鲸鱼娘说话</span>
+        <span class="chat-title"><span class="chat-title-icon" aria-hidden="true">✦</span> 和鲸鱼娘说话</span>
         <label class="chat-reasoning-toggle"><input type="checkbox" data-reasoning>显示思考</label>
         <span class="chat-state" data-state>未连接</span>
       </div>
@@ -148,13 +148,13 @@ export class ChatPanel {
 const CSS = `
 .chat-panel{position:fixed;right:16px;top:68px;bottom:16px;width:min(420px,calc(100vw - 32px));display:flex;flex-direction:column;
   background:transparent;border:0;color:#e7efff;font:17px/1.55 system-ui,sans-serif;z-index:25;pointer-events:none}
-.chat-head{display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:16px;color:#b6c7e5;text-shadow:0 1px 4px #05070b}
+.chat-head{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:16px;background:rgba(12,26,45,.76);border:1px solid rgba(147,187,240,.2);backdrop-filter:blur(14px);font-size:15px;color:#c7d9ef;text-shadow:0 1px 4px #05070b}.chat-title{font-weight:650;color:#f3f8ff;white-space:nowrap}.chat-title-icon{color:#8cc8ff}
 .chat-reasoning-toggle{pointer-events:auto;display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:14px;cursor:pointer}
 .chat-state{color:#a8bad6;margin-left:auto;font-size:14px}
 .chat-list{flex:1;min-height:0;overflow-y:auto;padding:10px 4px;display:flex;flex-direction:column;gap:12px;pointer-events:none;overscroll-behavior:contain}
 .chat-msg{max-width:90%;padding:12px 16px;border-radius:20px;font-size:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word;pointer-events:auto}
-.chat-user{align-self:flex-end;background:rgba(70,110,190,.88);color:#fff}
-.chat-whale{align-self:flex-start;background:rgba(25,39,62,.93);color:#f4f7ff}
+.chat-user{align-self:flex-end;background:linear-gradient(135deg,rgba(72,125,198,.96),rgba(61,92,166,.96));color:#fff;box-shadow:0 4px 18px #07142644}
+.chat-whale{align-self:flex-start;background:rgba(20,38,62,.93);border:1px solid rgba(153,191,239,.14);color:#f4f7ff;box-shadow:0 4px 18px #07142644}
 .chat-reasoning{align-self:flex-start;background:rgba(25,39,62,.85);color:#b8c8df;font-size:15px;line-height:1.55;height:calc(9.3em + 24px);box-sizing:border-box;flex-shrink:0;overflow-y:auto;overscroll-behavior:contain}
 .chat-status{display:none;padding:8px 12px;color:#ffd4d4;background:rgba(105,35,45,.9);border-radius:16px;font-size:15px;pointer-events:auto}
 .chat-status.show{display:block}
@@ -165,7 +165,7 @@ const CSS = `
 .chat-form button{background:rgba(70,110,190,.94);border:0;color:#fff;
   border-radius:20px;padding:0 18px;cursor:pointer;font:17px system-ui,sans-serif}
 .chat-form button:disabled{opacity:.5;cursor:default}
-@media (max-width:819px){.chat-panel{top:112px;bottom:8px;width:min(390px,calc(100vw - 32px))}}
+@media (max-width:819px){.chat-panel{top:auto;bottom:max(8px,env(safe-area-inset-bottom));right:8px;width:min(390px,calc(100vw - 16px));height:min(42vh,380px)}.chat-head{padding:8px 10px;gap:6px;font-size:13px}.chat-reasoning-toggle,.chat-state{font-size:12px}.chat-msg{font-size:16px;padding:9px 13px}.chat-form textarea,.chat-form button{font-size:16px}}
 
 .speech-bubble{position:fixed;left:0;top:0;max-width:320px;padding:10px 14px;border-radius:18px;
   background:rgba(14,22,36,.94);border:1px solid rgba(120,160,230,.35);color:#e6efff;
