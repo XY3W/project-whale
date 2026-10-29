@@ -33,6 +33,16 @@ Mac 仓库与服务器仓库是两份独立的本地仓库，通过 GitHub 同�
 - 不要将未推送的本地源代码或临时实验目录直接复制到服务器作为正式发布；有紧急修复时先与用户确认是否需要临时偏离流程，之后再同步回标准流程。
 - 回滚也需要核对代码版本、构建产物和运行数据兼容性；不要对用户数据进行盲目回滚。
 
+## Mac 的 GitHub SSH 授权
+
+- 此 Mac 当前使用的项目远程是 `git@github.com:XY3W/project-whale.git`。可使用已有的 `~/.ssh/id_ed25519.pub` 公钥；不要上传、粘贴或复制同名但不带 `.pub` 后缀的私钥。
+- 在 Mac 终端执行 `pbcopy < ~/.ssh/id_ed25519.pub`，将公钥复制到剪贴板。在 GitHub 的 **Settings → SSH and GPG keys → New SSH key** 中，选择 **Authentication Key**，粘贴公钥并保存。登录、双重验证及最终授权由用户完成；如果账户没有目标仓库的写权限，还需要仓库所有者授予写权限。
+- 公钥指纹可用 `ssh-keygen -lf ~/.ssh/id_ed25519.pub` 查看；它用于确认添加的是哪把钥匙，不是 GitHub 服务器的主机指纹。
+- 首次连接若提示确认 GitHub 主机身份，应与 GitHub 官方公布的主机指纹核对，不要关闭 SSH 主机密钥验证。参考：https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+- 执行 `ssh -T git@github.com` 检查认证：显示 GitHub 用户名并提示认证成功即可；GitHub 不提供 shell，因此该命令常以状态码 1 退出。认证成功仅说明身份可用，不代表对项目一定有写权限；仓库写权限以账户授权和实际推送结果为准。
+- 正常开发应在 Mac 项目目录直接执行 `git fetch`、提交和 `git push origin master`。不能连接时先诊断主机密钥、SSH 身份和仓库权限；不要复制服务器私钥到 Mac、关闭安全校验，或把凭证提交到仓库。授权未完成时保留本地提交并明确报告，不宣称已推送或部署。
+- GitHub 官方授权说明：https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account
+
 ## 密钥与隐私
 
 - API key、token、私钥、密码、`.env` 及其备份永不提交或粘贴到文档、日志、终端输出、提交说明或截图。服务器 `.env` 应保持私有权限并被 Git 忽略。
