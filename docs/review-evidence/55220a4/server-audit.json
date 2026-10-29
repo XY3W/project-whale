@@ -1,0 +1,152 @@
+[
+  {
+    "name": "expired_lease_accepts_result",
+    "leaseIdleMs": 8200,
+    "epochAfterHello": 2,
+    "reply": "做好了（1 个动作）。",
+    "accepted": true
+  },
+  {
+    "name": "reconcile_without_evidence_discards_task",
+    "planId": "t100-p1-g1",
+    "before": {
+      "phase": "unknown",
+      "needsReconcile": true
+    },
+    "after": "idle",
+    "savedTask": null,
+    "ledger": {
+      "state": "dispatched"
+    }
+  },
+  {
+    "name": "restart_reuses_task_and_plan_ids",
+    "newPlanId": "t100-p1-g1",
+    "collides": true,
+    "savedEntry": {
+      "state": "dispatched"
+    }
+  },
+  {
+    "name": "round_four_skips_final_review",
+    "modelCalls": 4,
+    "expected": 5,
+    "reply": "已经到最大执行轮数，需要新的指示。"
+  },
+  {
+    "name": "budget_ends_without_cancelling_execution",
+    "acceleratedBudgetMs": 1400,
+    "plan": "t100-p1-g1",
+    "reply": "这个任务超过时间预算了，先停在这里。",
+    "cancelMessages": 0,
+    "phase": "idle"
+  },
+  {
+    "name": "empty_speech_is_replaced",
+    "requested": "",
+    "actual": "好了。"
+  },
+  {
+    "name": "done_ledger_loses_execution_result",
+    "entry": {
+      "state": "done",
+      "reply": "你好"
+    },
+    "publicTexts": [
+      "你好",
+      "你好"
+    ],
+    "reviewContext": true
+  },
+  {
+    "name": "basin_stable_restore_and_transient_staleness",
+    "stable": {
+      "object_id": "basin",
+      "type": "basin",
+      "state": "worn",
+      "position": [
+        1,
+        0.914,
+        2
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "upright": false,
+      "variant": null,
+      "holder": "head",
+      "revision": 10,
+      "updatedAt": 1793026973318,
+      "objects": [
+        {
+          "object_id": "basin",
+          "type": "basin",
+          "state": "worn",
+          "position": [
+            1,
+            0.914,
+            2
+          ],
+          "quaternion": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "upright": false,
+          "variant": null,
+          "holder": "head",
+          "revision": 10,
+          "updatedAt": 1793026973318
+        }
+      ]
+    },
+    "afterFlying": {
+      "object_id": "basin",
+      "type": "basin",
+      "state": "worn",
+      "position": [
+        1,
+        0.914,
+        2
+      ],
+      "quaternion": [
+        0,
+        0,
+        0,
+        1
+      ],
+      "upright": false,
+      "variant": null,
+      "holder": "head",
+      "revision": 10,
+      "updatedAt": 1793026973478,
+      "objects": [
+        {
+          "object_id": "basin",
+          "type": "basin",
+          "state": "worn",
+          "position": [
+            1,
+            0.914,
+            2
+          ],
+          "quaternion": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "upright": false,
+          "variant": null,
+          "holder": "head",
+          "revision": 10,
+          "updatedAt": 1793026973478
+        }
+      ]
+    }
+  }
+]

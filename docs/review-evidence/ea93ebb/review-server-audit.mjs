@@ -1,0 +1,36 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import net from 'node:net';
+import {spawn} from 'node:child_process';
+import WebSocket from 'ws';
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const reports=[];
+async function port(){const s=net.createServer();await new Promise(r=>s.listen(0,'127.0.0.1',r));const p=s.address().port;await new Promise(r=>s.close(r));return p;}
+async function until(fn,ms=5000){const t=Date.now();while(Date.now()-t<ms){const x=fn();if(x)return x;await sleep(20);}throw new Error('audit wait timed out');}
+async function setup({model,seed,fastBudget=false}={}){
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'whale-review-'));const sockets=[];const requests=[];
+ if(seed){fs.mkdirSync(path.join(dir,'data'));fs.writeFileSync(path.join(dir,'data/brain-state.json'),JSON.stringify(seed));}
+ let stub;
+ if(model){stub=http.createServer(async(req,res)=>{let raw='';for await(const x of req)raw+=x;const body=JSON.parse(raw);requests.push(body);const output=await model(body,requests.length);res.setHeader('content-type','application/json');res.end(JSON.stringify({choices:[{message:{content:JSON.stringify(output)}}]}));});await new Promise(r=>stub.listen(0,'127.0.0.1',r));}
+ const p=await port();const env={...process.env,BRAIN_PORT:String(p),DEEPSEEK_API_KEY:model?'audit-only-local-stub':'',DEEPSEEK_BASE_URL:stub?`http://127.0.0.1:${stub.address().port}/chat`:''};
+ const args=[];if(fastBudget){const clock=path.join(dir,'clock.mjs');fs.writeFileSync(clock,'const original=globalThis.setTimeout;globalThis.setTimeout=(fn,ms,...a)=>original(fn,ms===180000?1400:ms,...a);');args.push('--import',clock);}
+ args.push(path.resolve('server/index.mjs'));const proc=spawn(process.execPath,args,{cwd:dir,env,stdio:['ignore','pipe','pipe']});let logs='';proc.stdout.on('data',b=>logs+=b);proc.stderr.on('data',b=>logs+=b);await until(()=>logs.includes('whale brain on'));
+ async function connect(){const ws=new WebSocket(`ws://127.0.0.1:${p}/ws`);const inbox=[];ws.on('message',b=>inbox.push(JSON.parse(b)));sockets.push(ws);await new Promise((r,j)=>{ws.once('open',r);ws.once('error',j)});await until(()=>inbox.some(m=>m.type==='session_state'));return{ws,inbox,send:(type,payload={})=>ws.send(JSON.stringify({protocolVersion:1,type,...payload})),state:()=>inbox.filter(m=>m.type==='session_state').at(-1)};}
+ return{connect,requests,dir,get logs(){return logs},read:()=>JSON.parse(fs.readFileSync(path.join(dir,'data/brain-state.json'),'utf8')),async close(){for(const s of sockets)s.terminate();await sleep(20);proc.kill();await sleep(80);if(stub)await new Promise(r=>stub.close(r));fs.rmSync(dir,{recursive:true,force:true});}};
+}
+async function scenario(name,fn){try{const result=await fn();reports.push({name,...result});console.log(name,JSON.stringify(result));}catch(err){reports.push({name,auditError:err.message});console.log(name,'AUDIT ERROR',err.stack);}}
+async function begin(s,text='挥挥手'){const c=await s.connect();c.send('chat_opened');c.send('user_message',{text,leaseEpoch:c.state().leaseEpoch});return c;}
+async function plan(c){return until(()=>c.inbox.find(m=>m.type==='execute_plan'));}
+function result(c,p){c.send('plan_result',{taskId:p.taskId,generation:p.generation,planId:p.planId,leaseEpoch:c.state().leaseEpoch,result:{status:'completed',stopped:true,steps:[{status:'succeeded',actual:{distance_m:.09}}]},snapshot:{x:0,z:.09,yawDeg:0}});}
+
+await scenario('expired_lease_accepts_result',async()=>{const s=await setup();try{const c=await begin(s);const p=await plan(c);await sleep(8200);c.send('hello');await sleep(80);const epochAfterHello=c.state().leaseEpoch; // hello explicitly reacquires; test a second lapse
+ await sleep(8200);result(c,p);const reply=await until(()=>c.inbox.find(m=>m.type==='public_reply'));return{leaseIdleMs:8200,epochAfterHello,reply:reply.speech,accepted:!!reply};}finally{await s.close();}});
+await scenario('reconcile_without_evidence_discards_task',async()=>{const s=await setup();try{const a=await begin(s);const p=await plan(a);a.ws.terminate();await sleep(100);const b=await s.connect();const before=b.state();b.send('state_snapshot',{reconciled:true,snapshot:{x:0,z:0,yawDeg:0}});await until(()=>b.state().phase==='idle');await sleep(350);const disk=s.read();return{planId:p.planId,before:{phase:before.phase,needsReconcile:before.needsReconcile},after:b.state().phase,savedTask:disk.task,ledger:disk.ledger[p.planId]};}finally{await s.close();}});
+await scenario('restart_reuses_task_and_plan_ids',async()=>{const id='t100-p1-g1';const s=await setup({seed:{session:{phase:'idle'},history:[],ledger:{[id]:{state:'done',result:{oldEvidence:true},reply:'old'}}}});try{const c=await begin(s);const p=await plan(c);await sleep(350);return{newPlanId:p.planId,collides:p.planId===id,savedEntry:s.read().ledger[id]};}finally{await s.close();}});
+await scenario('round_four_skips_final_review',async()=>{const s=await setup({model:(_b,i)=>i<=4?{type:'execute_plan',speech:'',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'最终检查完成'}});try{const c=await begin(s,'审查轮数');for(let round=1;round<=4;round++){const p=await until(()=>c.inbox.find(m=>m.type==='execute_plan'&&m.turnId===round));result(c,p);}const reply=await until(()=>c.inbox.find(m=>m.type==='public_reply'));return{modelCalls:s.requests.length,expected:5,reply:reply.speech};}finally{await s.close();}});
+await scenario('budget_ends_without_cancelling_execution',async()=>{const s=await setup({fastBudget:true});try{const c=await begin(s);const p=await plan(c);const reply=await until(()=>c.inbox.find(m=>m.type==='public_reply'));return{acceleratedBudgetMs:1400,plan:p.planId,reply:reply.speech,cancelMessages:c.inbox.filter(m=>m.type==='cancel_plan').length,phase:c.state().phase};}finally{await s.close();}});
+await scenario('empty_speech_is_replaced',async()=>{const s=await setup({model:()=>({type:'finish_task',outcome:'completed',speech:''})});try{const c=await begin(s,'安静地结束');const reply=await until(()=>c.inbox.find(m=>m.type==='public_reply'));return{requested:'',actual:reply.speech};}finally{await s.close();}});
+await scenario('done_ledger_loses_execution_result',async()=>{const s=await setup({model:(_b,i)=>i===1?{type:'execute_plan',speech:'你好',steps:[{action:'wait',duration_s:0}]}:{type:'finish_task',outcome:'completed',speech:'你好'}});try{const c=await begin(s,'请打招呼');const p=await plan(c);result(c,p);await until(()=>c.inbox.find(m=>m.type==='public_reply'));await sleep(400);return{entry:s.read().ledger[p.planId],publicTexts:c.inbox.filter(m=>m.type==='execute_plan'||m.type==='public_reply').map(m=>m.speech),reviewContext:s.requests[1].messages[1].content.includes('userMessage')};}finally{await s.close();}});
+fs.writeFileSync('../server-audit.json',JSON.stringify(reports,null,2));if(reports.some(x=>x.auditError))process.exitCode=1;

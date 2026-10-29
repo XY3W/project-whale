@@ -1,0 +1,42 @@
+[
+  {
+    "name": "dig_without_task_scoop_or_revision",
+    "noTask": true,
+    "noScoop": true,
+    "noExpectedRevision": true,
+    "first": {
+      "ok": true,
+      "revision": 1
+    },
+    "replay": {
+      "ok": false,
+      "reason": "ALREADY_REVEALED"
+    },
+    "earlyError": {
+      "reason": "NOT_ON_BOARD",
+      "actionInstanceId": null
+    }
+  },
+  {
+    "name": "manual_end_pause_overwritten",
+    "old": "gmvpe08aq",
+    "next": "gmvpe0fzb",
+    "reopenedAfterMs": 9354,
+    "configuredPauseMs": 1800000
+  },
+  {
+    "name": "parallel_motion_and_wrong_heading",
+    "conflictingCalls": [
+      "run",
+      "turn"
+    ],
+    "wrongHeadingStatus": "succeeded",
+    "adjustPastMargin": {
+      "status": "succeeded",
+      "position": {
+        "x": 0,
+        "z": 3.77
+      }
+    }
+  }
+]

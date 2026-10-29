@@ -1,0 +1,43 @@
+{
+  "commit": "ea93ebb9ad430f816ffd59fd8eca8bf0151e8cde",
+  "branch": "feat/llm-loop",
+  "existingTests": {
+    "passed": 79,
+    "failed": 0
+  },
+  "tsc": "pass",
+  "build": "pass",
+  "productionModified": false,
+  "realModelCalls": 0,
+  "sourceFiles": {
+    "src/animationDemo.ts": "a93195e4a85f84d78332987bebeee3f5af991d4fc24405acc0ecb7eb7a10e552",
+    "src/lab.ts": "2c0605ec5b229843e6ec4a72a9f309746cc3113725fa96bd431b2944803ddea1",
+    "src/main.ts": "dfda8cafba7f12454b4dd5a767988fb7f18af536b4a809dcedd290204765404f",
+    "src/style.css": "2119cf5d31cd6df6b9dd0dec62bc7fc49f93555f16553b60bf51f6e208a66f1b",
+    "src/basin.ts": "3c35aa2b106f8af6d431d8848d755971599b6ec29e56796c7723a233d57331e6",
+    "src/behavior/progress.ts": "da9fdba8c452927668309e7a96df08c61414269c9bf05b99df3261f962673e9c",
+    "src/behavior/ActionExecutor.ts": "a279ba4b1330e551e625da1ccc32357c41361db055c0fc9e5b03f2ac449fbb69",
+    "src/behavior/protocol.ts": "210f770da35c09a5ff0d85a3032aeb7cab6f49023d9bc5c29454c478ae54fb16",
+    "src/behavior/distances.ts": "4a92acb1b3c3c5faacf46c696ca1857c1a87a9c47ff6583d5d9339b8fc772e55",
+    "src/behavior/roam.ts": "d22b444dac0e6243aa89c04589e8aab58021957c76cc25932aaa78cb045d5d6a",
+    "src/ui/ChatPanel.ts": "c83284878b7983042497357688bfef27aac7b57fdfb91f4fcf4ae8e2070de111",
+    "src/ui/Hud.ts": "42ca3b7b1b5f751bae6815c777d362fe1a96811972ff89e765df908ae7d60ee7",
+    "src/prop/basinPhysics.ts": "74feb5d1de488fadcaa4ac200a93399923be4fe0548971404731713d617d4bc0",
+    "src/prop/BasinProp.ts": "7ca9c978693eb8db34851b6fe4d73a969b5d43736f04e04010e6e3ff1a9769b3",
+    "src/prop/align.ts": "571d7c84bcb692056158a2c27cba420d1f9b8559e86605da149df8307ecc1520",
+    "src/prop/catalog.ts": "87db4b279acce9aab58d22990fdcaeaf8e07b19384848e610a66128a021cd122",
+    "src/core/Stage.ts": "a09f0e31d7d9e791e206377b01f549929ac3a27cca4093f5b37e93a8bf59ae02",
+    "src/character/multiWeight.ts": "e9c633638fc9875679d39d693abfdb9d5be864c84201ae82d00a62b66a0c11cf",
+    "src/character/LayeredMotionPlayer.ts": "b0cab3a948a42870069524c7d551cc8088a265d5b8b794fff5a0008748b59b57",
+    "src/character/Character.ts": "2a800f6263e27749cfff8ccc51f48519dc0f58bfb7519647af30614d7793a40d",
+    "src/character/PoseOverlay.ts": "77b498a258fa136df61969456d250835362cff532ceb3184957bbfc1b1f0ea3c",
+    "src/character/Gaze.ts": "8fd90f1d7383d59d7d434fc6c552a9e70f5e17b3c3674f4a28c920cc96caf8be",
+    "src/character/V8Character.ts": "dabcd08a5121d1fb948fabb58022fb781a40a61e65899d9ddf5ce70bb63d0498",
+    "src/character/Gesture.ts": "b5b067a9f89c235698f22bd6beae0799411371c94ff0d9efe73cd59a0b7816a3",
+    "src/character/Idle.ts": "6ca7b6271f605a1677400575805f448b61f0a3a937e6b27f94b2ceac790190ff",
+    "src/character/TailController.ts": "8ec5780f9ea125f3572d0ad0793a3a1903faf9084040b64dabd1418e0373305a",
+    "src/brain/Director.ts": "9bce8312bb544948cc73d50850c87b69237057b92ff822af9a5990524edc6a5f",
+    "src/brain/FakeBrain.ts": "c5dcab11e9369f6ab94df981890ab9a317665ec282d9d52997523f7daa963447",
+    "src/brain/BrainClient.ts": "f8006e609b9de8e23e3604dd7f946f79a81939217ef306e632a6cebeb1f4e021"
+  }
+}

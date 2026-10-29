@@ -1,0 +1,11 @@
+HEAD 93ed3eb; clean worktree; no production mutation
+node --test tests/*.test.mjs: 35 pass, 0 fail
+pnpm exec tsc --noEmit: exit 0
+Isolated server: temporary cwd, random port, no API key
+initial_leases: firstReadonly=false secondReadonly=true
+readonly_snapshot_accepted=true
+readonly_opened_owner_chat=true
+readonly_result_accepted_without_fencing=true
+persisted session fields: id, phase=executing, taskId (no task body)
+restart: phase=unknown taskId=null needsReconcile=false
+All audit subprocesses/sockets stopped and temp data removed.

@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Whale Brain Output v1 (draft capability template)",
+  "$defs": {
+    "atomicAction": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "turn"
+            },
+            "angle_deg": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
+          },
+          "required": [
+            "action",
+            "angle_deg"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "walk"
+            },
+            "distance_m": {
+              "type": "number",
+              "enum": [
+                0.09,
+                0.27,
+                0.45,
+                0.63,
+                0.81,
+                0.99,
+                1.17,
+                1.35,
+                1.53,
+                1.71,
+                1.89
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "distance_m"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "play"
+            },
+            "action_id": {
+              "enum": [
+                "greet",
+                "notice",
+                "nod",
+                "look_left",
+                "look_right"
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "action_id"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "play"
+            },
+            "action_id": {
+              "const": "think"
+            },
+            "duration_s": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 6
+            }
+          },
+          "required": [
+            "action",
+            "action_id",
+            "duration_s"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "tail"
+            },
+            "style": {
+              "enum": [
+                "tail_idle",
+                "tail_swish"
+              ]
+            },
+            "duration_s": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10
+            }
+          },
+          "required": [
+            "action",
+            "style",
+            "duration_s"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "wait"
+            },
+            "duration_s": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            }
+          },
+          "required": [
+            "action",
+            "duration_s"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "step": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/atomicAction"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "parallel"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 3,
+              "items": {
+                "$ref": "#/$defs/atomicAction"
+              }
+            }
+          },
+          "required": [
+            "action",
+            "items"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "memoryProposal": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "upsert"
+            },
+            "key": {
+              "enum": [
+                "preferred_name",
+                "response_language",
+                "response_style",
+                "ordinary_interest"
+              ]
+            },
+            "source_message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "source_quote": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            }
+          },
+          "required": [
+            "op",
+            "key",
+            "source_message_id",
+            "source_quote",
+            "value"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "op": {
+              "const": "delete"
+            },
+            "key": {
+              "enum": [
+                "preferred_name",
+                "response_language",
+                "response_style",
+                "ordinary_interest"
+              ]
+            },
+            "source_message_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "source_quote": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "op",
+            "key",
+            "source_message_id",
+            "source_quote"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "execute_plan"
+        },
+        "speech": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "$ref": "#/$defs/step"
+          }
+        },
+        "memory_proposals": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/memoryProposal"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "speech",
+        "steps"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "finish_task"
+        },
+        "outcome": {
+          "enum": [
+            "completed",
+            "cannot_complete",
+            "cancelled"
+          ]
+        },
+        "speech": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "memory_proposals": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/memoryProposal"
+          }
+        }
+      },
+      "required": [
+        "type",
+        "outcome",
+        "speech"
+      ],
+      "additionalProperties": false
+    }
+  ]
+}

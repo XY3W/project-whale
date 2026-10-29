@@ -1,0 +1,70 @@
+{
+  "digAtSeconds": 0.7166666666666667,
+  "heldVsAuthored": [
+    {
+      "name": "handr",
+      "degrees": 36.191729470603654
+    },
+    {
+      "name": "arm_stretchr",
+      "degrees": 34.95224437942943
+    },
+    {
+      "name": "c_arm_twist_offsetr",
+      "degrees": 32.097812794659504
+    },
+    {
+      "name": "forearm_stretchr",
+      "degrees": 19.749157118758102
+    },
+    {
+      "name": "arm_twist_2r",
+      "degrees": 6.783928374538618
+    },
+    {
+      "name": "forearm_twistr",
+      "degrees": 4.598934747116218
+    },
+    {
+      "name": "forearm_twist_2r",
+      "degrees": 2.2992368407164827
+    },
+    {
+      "name": "WhaleTail_Root",
+      "degrees": 0.04204316205506409
+    },
+    {
+      "name": "Hair_Front_R_00",
+      "degrees": 0.0357225431325721
+    },
+    {
+      "name": "Ahoge_Spring_01",
+      "degrees": 0.029878252943026574
+    },
+    {
+      "name": "Hair_Back_02_00",
+      "degrees": 0.02447456166723942
+    },
+    {
+      "name": "Skirt_Physics_05_01l_00",
+      "degrees": 0.022595519723995084
+    },
+    {
+      "name": "Hair_Back_02_02",
+      "degrees": 0.022443615030723188
+    },
+    {
+      "name": "WhaleTail_01",
+      "degrees": 0.016995969552944527
+    },
+    {
+      "name": "footr",
+      "degrees": 0.014962553549566443
+    },
+    {
+      "name": "Skirt_Physics_04_01l_00",
+      "degrees": 0.01185479831452255
+    }
+  ],
+  "thinkAfter40s": "think"
+}

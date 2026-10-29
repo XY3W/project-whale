@@ -1,0 +1,36 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {registerHooks} from 'node:module';
+import ts from 'typescript';
+registerHooks({resolve(s,c,next){try{return next(s,c)}catch(e){if(s.startsWith('.')&&!s.match(/\.[a-z]+$/i))return next(s+'.ts',c);throw e}},load(url,c,next){if(url.endsWith('.ts'))return{format:'module',source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText,shortCircuit:true};return next(url,c)}});
+const THREE=await import('three');
+const {GLTFLoader}=await import('three/addons/loaders/GLTFLoader.js');
+const {BasinProp}=await import('./src/prop/BasinProp.ts');
+const {LayeredMotionPlayer}=await import('./src/character/LayeredMotionPlayer.ts');
+const {ActionExecutor}=await import('./src/behavior/ActionExecutor.ts');
+const {planApproach,signedDeltaDeg}=await import('./src/prop/align.ts');
+const catalog=JSON.parse(readFileSync('public/models/basin-v2/catalog.json'));const propMotion=JSON.parse(readFileSync('public/models/basin-v2/prop_motion.json'));const reports={};
+async function load(name){const raw=readFileSync('public/models/basin-v2/'+name);const n=raw.readUInt32LE(12);const g=JSON.parse(raw.subarray(20,20+n));
+ // Geometry/animation test only: remove image-backed materials to avoid DOM image loading in Node.
+ g.materials=(g.materials??[]).map(()=>({}));const j=Buffer.from(JSON.stringify(g));const pad=Buffer.alloc((4-j.length%4)%4,32);const bin=raw.subarray(20+n);const header=Buffer.alloc(20);header.writeUInt32LE(0x46546c67);header.writeUInt32LE(2,4);header.writeUInt32LE(20+j.length+pad.length+bin.length,8);header.writeUInt32LE(j.length+pad.length,12);header.writeUInt32LE(0x4e4f534a,16);const b=Buffer.concat([header,j,pad,bin]);return new GLTFLoader().parseAsync(b.buffer.slice(b.byteOffset,b.byteOffset+b.length),'');}
+async function rig(){const gltf=await load('character_basin_actions.glb');const bg=await load('steel_basin_v2.glb');const world=new THREE.Scene(),root=new THREE.Group();root.add(gltf.scene);world.add(root);const bones=new Map();root.traverse(o=>{if(o.isBone)bones.set(o.name.replace(/[^A-Za-z0-9_]/g,''),o)});const prop=await BasinProp.create({catalog,propMotion,charRoot:root,scene:bg.scene,bones,parent:world});prop.placeAt(BasinProp.toWorld(root,catalog.pickupReference.position,catalog.pickupReference.quaternion));const player=new LayeredMotionPlayer(root,gltf.animations);player.setHoldClip(gltf.animations.find(c=>c.name==='hold_basin'));return{root,prop,player};}
+async function clip(r,name,spec){const {player,prop,root}=r;const events=catalog.actions.find(a=>a.id===name).events??[];if(!prop.begin(name,spec))throw new Error('cannot begin '+name);const promise=player.perform(name,events,t=>prop.handleEvent(t));let firstRest=null;for(let i=0;i<400;i++){player.update(1/120);root.updateMatrixWorld(true);prop.update(1/120,player.performanceTime);player.setHoldEnabled(prop.mode==='hand'&&(!player.performing||player.performanceEnding));if(name==='throw_basin'&&prop.state==='resting'&&firstRest===null)firstRest=i/120;if(!player.performing)break;}
+ const before={state:prop.state,mode:prop.mode,position:prop.snapshot().position};const ok=await promise;prop.finish(ok);return{firstRest,completed:ok,beforeFinish:before,afterFinish:{state:prop.state,mode:prop.mode,position:prop.snapshot().position}};}
+reports.throwFinish=[];
+for(const spec of [{directionDeg:0,speed:1,spin:180,elevationDeg:0},{directionDeg:0,speed:1,spin:180,elevationDeg:45},{directionDeg:0,speed:3.2,spin:180,elevationDeg:12}]){const r=await rig();await clip(r,'pickup_basin');const x=await clip(r,'throw_basin',spec);reports.throwFinish.push({spec,...x});console.log('THROW',JSON.stringify(reports.throwFinish.at(-1)));}
+const soloRig=await rig();const tail=soloRig.player.actions.get('tail_idle');reports.debugSolo={before:tail.isScheduled()};soloRig.player.soloClip('tail_idle');soloRig.player.update(.3);soloRig.player.stopSolo();soloRig.player.update(.3);reports.debugSolo.after=tail.isScheduled();reports.debugSolo.weight=tail.getEffectiveWeight();console.log('SOLO_RESTORE',JSON.stringify(reports.debugSolo));
+const pr=await rig();reports.debugProp={before:pr.prop.snapshot()};pr.player.soloClip('wear_basin');pr.player.setSoloTime(2);pr.root.updateMatrixWorld(true);pr.prop.previewAt('wear_basin',2);pr.player.stopSolo();pr.prop.previewAt(null,0);pr.prop.update(1/60,0);reports.debugProp.after=pr.prop.snapshot();console.log('PREVIEW_PROP_RESTORE',JSON.stringify(reports.debugProp));
+
+reports.normalizedHalfTurns=[];
+for(const [start,angle]of[[10,180],[-10,-180],[170,180],[-170,-180]]){let yaw=start*Math.PI/180;const loco={yaw:()=>yaw,position:()=>({x:0,z:0}),turn:async d=>{yaw+=d*Math.PI/180;yaw=Math.atan2(Math.sin(yaw),Math.cos(yaw))},isMoving:()=>false};const r=await new ActionExecutor(loco,{half:4}).run({steps:[{action:'turn',angle_deg:angle}]});reports.normalizedHalfTurns.push({start,requested:angle,result:r.steps[0]});}
+console.log('HALF_TURNS',JSON.stringify(reports.normalizedHalfTurns.map(x=>({start:x.start,requested:x.requested,status:x.result.status,actual:x.result.actual}))));
+
+// Run the exact align closure from main.ts with controlled async locomotion.
+const source=readFileSync('src/main.ts','utf8');const body=source.split('    align: async () => {')[1].split('\n    perform: async')[0].replace(/\},\s*$/,'');const root=new THREE.Group();let cancelled=false;const moves=[];const basin={position:new THREE.Vector3(1,0,1)};
+const delay=ms=>new Promise(r=>setTimeout(r,ms));const loco={position:()=>({x:root.position.x,z:root.position.z}),yaw:()=>root.rotation.y,turn:async d=>{moves.push({action:'turn',afterCancel:cancelled});await delay(30);root.rotation.y+=d*Math.PI/180},walk:async d=>{moves.push({action:'walk',afterCancel:cancelled});root.position.x+=Math.sin(root.rotation.y)*d;root.position.z+=Math.cos(root.rotation.y)*d}};
+const alignInfo=()=>({ok:true,distanceError:0,yawErrorDeg:0});const degYaw=()=>root.rotation.y*180/Math.PI;
+const align=new Function('root','basin','basinCatalog','planApproach','signedDeltaDeg','loco','degYaw','alignInfo','AREA_HALF',`return async()=>{${body}}`)(root,basin,catalog,planApproach,signedDeltaDeg,loco,degYaw,alignInfo,3.7);
+loco.basin={snapshot:()=>({state:'resting'}),align,alignment:alignInfo};const ex=new ActionExecutor(loco,{half:4});ex.onCancel(()=>{cancelled=true});const p=ex.run({steps:[{action:'walk_to_basin'}]});setTimeout(()=>ex.cancel(),5);const result=await p;reports.cancelApproach={moves,finalPosition:loco.position(),reported:result.status};console.log('CANCEL_APPROACH',JSON.stringify(reports.cancelApproach));
+
+let pos={x:0,z:0};reports.wrongDirectionWalk=await new ActionExecutor({yaw:()=>0,position:()=>({...pos}),walk:async d=>{pos.x+=d},isMoving:()=>false},{half:4}).run({steps:[{action:'walk',distance_m:.45}]});console.log('WRONG_DIRECTION',JSON.stringify(reports.wrongDirectionWalk));
+const tr=await rig();tr.player.gesture('think');for(let i=0;i<2400;i++)tr.player.update(1/60);reports.thinkPlayback={simulatedSeconds:40,upper:tr.player.state.upper,clipLoop:tr.player.actions.get('think').loop};console.log('THINK_PLAYBACK',JSON.stringify(reports.thinkPlayback));
+writeFileSync('../prop-audit.json',JSON.stringify(reports,null,2));

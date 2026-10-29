@@ -1,0 +1,24 @@
+{
+  "commit": "810ebf4a59895927713d9591acfcbb485f8e91dc",
+  "tests": {
+    "pass": 80,
+    "fail": 0
+  },
+  "tsc": "pass",
+  "build": "pass",
+  "productionModified": false,
+  "realModelCalls": 0,
+  "trackedEnvironmentBackup": {
+    "filename": ".env.bak.1792948342",
+    "variable": "DEEPSEEK_API_KEY",
+    "nonempty": true,
+    "valueCopied": false
+  },
+  "postCleanup": {
+    "protectedHashes": 60,
+    "activeDocumentsChecked": 24,
+    "brokenLinks": 0,
+    "relatedTestsPassed": 46,
+    "tsc": "pass"
+  }
+}

@@ -1,0 +1,10 @@
+[
+  {
+    "name": "observer_ignores_cleared_board",
+    "callbackCount": 1,
+    "lastBoard": {
+      "gameId": "old",
+      "status": "playing"
+    }
+  }
+]

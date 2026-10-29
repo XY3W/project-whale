@@ -1,0 +1,313 @@
+{
+  "throwFinish": [
+    {
+      "spec": {
+        "directionDeg": 0,
+        "speed": 1,
+        "spin": 180,
+        "elevationDeg": 0
+      },
+      "firstRest": null,
+      "completed": true,
+      "beforeFinish": {
+        "state": "flying",
+        "mode": "physics",
+        "position": [
+          -0.825,
+          0.374,
+          1.438
+        ]
+      },
+      "afterFinish": {
+        "state": "flying",
+        "mode": "physics",
+        "position": [
+          -0.825,
+          0.374,
+          1.438
+        ]
+      }
+    },
+    {
+      "spec": {
+        "directionDeg": 0,
+        "speed": 1,
+        "spin": 180,
+        "elevationDeg": 45
+      },
+      "firstRest": null,
+      "completed": true,
+      "beforeFinish": {
+        "state": "flying",
+        "mode": "physics",
+        "position": [
+          -0.693,
+          0.372,
+          1.261
+        ]
+      },
+      "afterFinish": {
+        "state": "flying",
+        "mode": "physics",
+        "position": [
+          -0.693,
+          0.372,
+          1.261
+        ]
+      }
+    },
+    {
+      "spec": {
+        "directionDeg": 0,
+        "speed": 3.2,
+        "spin": 180,
+        "elevationDeg": 12
+      },
+      "firstRest": null,
+      "completed": true,
+      "beforeFinish": {
+        "state": "flying",
+        "mode": "physics",
+        "position": [
+          -0.557,
+          0.386,
+          3.454
+        ]
+      },
+      "afterFinish": {
+        "state": "flying",
+        "mode": "physics",
+        "position": [
+          -0.557,
+          0.386,
+          3.454
+        ]
+      }
+    }
+  ],
+  "debugSolo": {
+    "before": true,
+    "after": false,
+    "weight": 1
+  },
+  "debugProp": {
+    "before": {
+      "id": "basin",
+      "object_id": "basin",
+      "revision": 1,
+      "holder": null,
+      "state": "resting",
+      "position": [
+        -0.546,
+        0.134,
+        0.21
+      ],
+      "quaternion": [
+        0,
+        0.2164,
+        0,
+        0.9763
+      ],
+      "upright": true,
+      "stationary": true,
+      "available": true
+    },
+    "after": {
+      "id": "basin",
+      "object_id": "basin",
+      "revision": 1,
+      "holder": null,
+      "state": "resting",
+      "position": [
+        0.002,
+        0.914,
+        -0.065
+      ],
+      "quaternion": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "upright": false,
+      "stationary": true,
+      "available": true
+    }
+  },
+  "normalizedHalfTurns": [
+    {
+      "start": 10,
+      "requested": 180,
+      "result": {
+        "stepId": "s1",
+        "action": "turn",
+        "requested": {
+          "action": "turn",
+          "angle_deg": 180
+        },
+        "startState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": 10
+        },
+        "endState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": -170
+        },
+        "status": "failed",
+        "actual": {
+          "requested_deg": 180,
+          "angle_deg": -180
+        },
+        "reasonCode": "ANGLE_MISMATCH",
+        "durationMs": 0
+      }
+    },
+    {
+      "start": -10,
+      "requested": -180,
+      "result": {
+        "stepId": "s1",
+        "action": "turn",
+        "requested": {
+          "action": "turn",
+          "angle_deg": -180
+        },
+        "startState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": -10
+        },
+        "endState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": 170
+        },
+        "status": "failed",
+        "actual": {
+          "requested_deg": -180,
+          "angle_deg": 180
+        },
+        "reasonCode": "ANGLE_MISMATCH",
+        "durationMs": 0
+      }
+    },
+    {
+      "start": 170,
+      "requested": 180,
+      "result": {
+        "stepId": "s1",
+        "action": "turn",
+        "requested": {
+          "action": "turn",
+          "angle_deg": 180
+        },
+        "startState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": 170
+        },
+        "endState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": -10
+        },
+        "status": "failed",
+        "actual": {
+          "requested_deg": 180,
+          "angle_deg": -180
+        },
+        "reasonCode": "ANGLE_MISMATCH",
+        "durationMs": 0
+      }
+    },
+    {
+      "start": -170,
+      "requested": -180,
+      "result": {
+        "stepId": "s1",
+        "action": "turn",
+        "requested": {
+          "action": "turn",
+          "angle_deg": -180
+        },
+        "startState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": -170
+        },
+        "endState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": 10
+        },
+        "status": "failed",
+        "actual": {
+          "requested_deg": -180,
+          "angle_deg": 180
+        },
+        "reasonCode": "ANGLE_MISMATCH",
+        "durationMs": 0
+      }
+    }
+  ],
+  "cancelApproach": {
+    "moves": [
+      {
+        "action": "turn",
+        "afterCancel": false
+      },
+      {
+        "action": "walk",
+        "afterCancel": true
+      },
+      {
+        "action": "turn",
+        "afterCancel": true
+      }
+    ],
+    "finalPosition": {
+      "x": 1.0912064153435928,
+      "z": 0.4221001766322613
+    },
+    "reported": "cancelled"
+  },
+  "wrongDirectionWalk": {
+    "status": "completed",
+    "steps": [
+      {
+        "stepId": "s1",
+        "action": "walk",
+        "requested": {
+          "action": "walk",
+          "distance_m": 0.45
+        },
+        "startState": {
+          "x": 0,
+          "z": 0,
+          "yawDeg": 0
+        },
+        "endState": {
+          "x": 0.45,
+          "z": 0,
+          "yawDeg": 0
+        },
+        "status": "succeeded",
+        "actual": {
+          "distance_m": 0.45,
+          "dx": 0.45,
+          "dz": 0
+        },
+        "reasonCode": "OK",
+        "durationMs": 1
+      }
+    ],
+    "stopped": true
+  },
+  "thinkPlayback": {
+    "simulatedSeconds": 40,
+    "upper": "think",
+    "clipLoop": 2201
+  }
+}

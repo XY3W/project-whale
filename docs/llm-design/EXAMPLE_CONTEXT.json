@@ -1,0 +1,346 @@
+{
+  "exampleOnly": true,
+  "phase": "planning",
+  "protocolVersion": "whale-brain-v1",
+  "taskId": "example-task-1",
+  "turnId": "example-turn-1",
+  "requestId": "example-request-1",
+  "trigger": {
+    "type": "user_message",
+    "message": {
+      "id": "example-message-1",
+      "text": "向右转45度，往前走45厘米，然后挥挥手。"
+    }
+  },
+  "world_snapshot": {
+    "snapshotId": "example-snapshot-1",
+    "capturedAt": "2026-10-25T12:00:00+08:00",
+    "stateRevision": 1,
+    "sceneId": "example-empty-room",
+    "coordinateSystem": {
+      "distanceUnit": "metre",
+      "angleUnit": "degree",
+      "up": "+Y",
+      "yawZeroForward": "+Z",
+      "positiveYawToward": "+X",
+      "relativeTurnPositive": "character_left"
+    },
+    "walkableArea": {
+      "shape": "rectangle",
+      "xMin": -4,
+      "xMax": 4,
+      "zMin": -4,
+      "zMax": 4
+    },
+    "clearance": {
+      "status": "example_only_unvalidated",
+      "note": "实际部署必须根据身体与尾巴占用验证；此字段未就绪时移动能力不启用"
+    },
+    "obstacles": [],
+    "objects": [],
+    "objectsTruncated": false,
+    "omittedCount": 0,
+    "events": []
+  },
+  "character_state": {
+    "position": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "yawDeg": 0,
+    "forward": {
+      "x": 0,
+      "y": 0,
+      "z": 1
+    },
+    "motionPhase": "idle",
+    "activeChannels": {
+      "base": "idle_stand",
+      "upper": "think",
+      "tail": "tail_idle"
+    },
+    "heldObjectIds": [],
+    "stateStable": true
+  },
+  "interaction": {
+    "chatState": "open",
+    "controlOwner": "llm_task",
+    "pendingUserMessage": false
+  },
+  "capabilities": {
+    "version": "example-v1",
+    "assetVersion": "v9",
+    "rigVersion": "v9-anatomical-baked-1",
+    "note": "以下是假设M2验收通过后的工具声明示例，不能据此直接启用当前未实现的执行器",
+    "enabled": [
+      {
+        "id": "turn",
+        "category": "locomotion",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "turn"
+            },
+            "angle_deg": {
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180
+            }
+          },
+          "required": [
+            "action",
+            "angle_deg"
+          ],
+          "additionalProperties": false
+        },
+        "changesPosition": false,
+        "channels": [
+          "locomotion"
+        ],
+        "preconditions": [
+          "body_stopped"
+        ],
+        "completionEvidence": "executor_actual_result",
+        "enabled": true,
+        "changesOrientation": true
+      },
+      {
+        "id": "walk",
+        "category": "locomotion",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "walk"
+            },
+            "distance_m": {
+              "type": "number",
+              "enum": [
+                0.09,
+                0.27,
+                0.45,
+                0.63,
+                0.81,
+                0.99,
+                1.17,
+                1.35,
+                1.53,
+                1.71,
+                1.89
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "distance_m"
+          ],
+          "additionalProperties": false
+        },
+        "changesPosition": true,
+        "channels": [
+          "locomotion"
+        ],
+        "preconditions": [
+          "distance_supported",
+          "path_and_stopping_clearance_verified"
+        ],
+        "completionEvidence": "executor_actual_result",
+        "enabled": true,
+        "changesOrientation": false
+      },
+      {
+        "id": "play",
+        "category": "expression",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "play"
+            },
+            "action_id": {
+              "enum": [
+                "greet",
+                "notice",
+                "nod",
+                "look_left",
+                "look_right"
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "action_id"
+          ],
+          "additionalProperties": false
+        },
+        "changesPosition": false,
+        "channels": [
+          "upper"
+        ],
+        "preconditions": [],
+        "completionEvidence": "executor_actual_result",
+        "enabled": true,
+        "changesOrientation": false
+      },
+      {
+        "id": "think",
+        "category": "expression",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "play"
+            },
+            "action_id": {
+              "const": "think"
+            },
+            "duration_s": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 6
+            }
+          },
+          "required": [
+            "action",
+            "action_id",
+            "duration_s"
+          ],
+          "additionalProperties": false
+        },
+        "changesPosition": false,
+        "channels": [
+          "upper"
+        ],
+        "preconditions": [],
+        "completionEvidence": "executor_actual_result",
+        "enabled": true,
+        "changesOrientation": false
+      },
+      {
+        "id": "tail",
+        "category": "expression",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "tail"
+            },
+            "style": {
+              "enum": [
+                "tail_idle",
+                "tail_swish"
+              ]
+            },
+            "duration_s": {
+              "type": "number",
+              "minimum": 1,
+              "maximum": 10
+            }
+          },
+          "required": [
+            "action",
+            "style",
+            "duration_s"
+          ],
+          "additionalProperties": false
+        },
+        "changesPosition": false,
+        "channels": [
+          "tail"
+        ],
+        "preconditions": [],
+        "completionEvidence": "executor_actual_result",
+        "enabled": true,
+        "changesOrientation": false
+      },
+      {
+        "id": "wait",
+        "category": "expression",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "const": "wait"
+            },
+            "duration_s": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 5
+            }
+          },
+          "required": [
+            "action",
+            "duration_s"
+          ],
+          "additionalProperties": false
+        },
+        "changesPosition": false,
+        "channels": [
+          "none"
+        ],
+        "preconditions": [],
+        "completionEvidence": "executor_actual_result",
+        "enabled": true,
+        "changesOrientation": false
+      }
+    ],
+    "disabled": [
+      {
+        "id": "pickup",
+        "enabled": false,
+        "reason": "缺少经验证的动作与执行器"
+      },
+      {
+        "id": "put_down",
+        "enabled": false,
+        "reason": "缺少经验证的动作与执行器"
+      },
+      {
+        "id": "carry",
+        "enabled": false,
+        "reason": "缺少经验证的动作与执行器"
+      },
+      {
+        "id": "push",
+        "enabled": false,
+        "reason": "缺少经验证的动作与执行器"
+      },
+      {
+        "id": "use",
+        "enabled": false,
+        "reason": "缺少经验证的动作与执行器"
+      },
+      {
+        "id": "blink",
+        "enabled": false,
+        "reason": "形态键尚未修复"
+      }
+    ]
+  },
+  "runtime_constraints": {
+    "maxSequentialSteps": 6,
+    "maxParallelItems": 3,
+    "parallelNesting": false,
+    "maxSpeechCharacters": 120,
+    "maxPlanRounds": 4,
+    "remainingPlanRounds": 4,
+    "remainingTaskSeconds": 180
+  },
+  "conversation": {
+    "recentMessages": [],
+    "summary": null,
+    "historyTruncated": false
+  },
+  "memory": {
+    "confirmed": [],
+    "candidatesExcluded": true
+  },
+  "task": {
+    "goal": "右转45度、前进0.45米、挥手",
+    "completedSteps": [],
+    "interruptedTask": null
+  },
+  "execution_report": null
+}
