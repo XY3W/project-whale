@@ -43,6 +43,11 @@ Mac 仓库与服务器仓库是两份独立的本地仓库，通过 GitHub 同�
 - 正常开发应在 Mac 项目目录直接执行 `git fetch`、提交和 `git push origin master`。不能连接时先诊断主机密钥、SSH 身份和仓库权限；不要复制服务器私钥到 Mac、关闭安全校验，或把凭证提交到仓库。授权未完成时保留本地提交并明确报告，不宣称已推送或部署。
 - GitHub 官方授权说明：https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account
 
+## 模型调用约定
+
+- 大肥鱼的模型请求必须明确使用 `deepseek-flash`。代码固定该模型，`DEEPSEEK_MODEL` 等环境变量不能覆盖成 Pro 或其他型号；如需改变，先取得用户明确同意。
+- 发布前验证真实请求参数和自动化测试；当平台用量或计费显示不同型号时，按 API Key 和时间核对记录，不能仅凭别名推断实际账单。
+
 ## 密钥与隐私
 
 - API key、token、私钥、密码、`.env` 及其备份永不提交或粘贴到文档、日志、终端输出、提交说明或截图。服务器 `.env` 应保持私有权限并被 Git 忽略。
