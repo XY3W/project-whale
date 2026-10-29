@@ -15,3 +15,11 @@ test('does not accept an incomplete stream as a valid action',async()=>{
   globalThis.fetch=async()=>response('data: {"choices":[{"delta":{"content":"{\\"type\\":\\"finish_task\\",\\"outcome\\":\\"completed\\"}"},"finish_reason":"stop"}]}\n\n');
   try {await assert.rejects(callModel([]),{code:'INCOMPLETE_STREAM'});} finally {globalThis.fetch=originalFetch;}
 });
+test("tool responses preserve streamed reasoning for the next request", async () => {
+  globalThis.fetch = async () => response("data: " + JSON.stringify({choices:[{delta:{reasoning_content:"先判断",tool_calls:[{index:0,id:"call1",type:"function",function:{name:"finish",arguments:JSON.stringify({outcome:"completed"})}}]},finish_reason:"tool_calls"}]}) + "\n\ndata: [DONE]\n\n");
+  try {
+    const out = await callModel([], undefined, undefined, {tools:[{type:"function",function:{name:"finish"}}]});
+    assert.equal(out.reasoningContent, "先判断");
+    assert.equal(out.calls[0].name, "finish");
+  } finally {globalThis.fetch = originalFetch;}
+});

@@ -137,6 +137,8 @@ export function toolDefinitions() {
           type: "object",
           properties: {
             outcome: { type: "string", enum: ["completed", "cannot_complete", "cancelled"] },
+            memory_proposals: { type: "array", maxItems: 2, items: { type: "object", properties: { key: {type:"string"}, value: {type:"string"}, sourceMessageId: {type:"string"}, sourceQuote: {type:"string"} }, required: ["key", "value", "sourceMessageId", "sourceQuote"] } },
+            summary_proposal: { type: "object", properties: { text: {type:"string"}, sourceMessageIds: {type:"array", items:{type:"string"}} }, required: ["text", "sourceMessageIds"] },
             speech: { type: "string", description: "对用户说的最后一句话，可以为空" },
           },
           required: ["outcome"],

@@ -482,6 +482,8 @@ async function boot() {
      * 落点不止五子棋——任何“先站到某个位置”的需求都能用。
      */
     walkTo: async (x, z, toleranceM = 0.1) => {
+      const epoch = bridgeEpoch;
+      const checkCancelled = () => { if (epoch !== bridgeEpoch) throw new Error("CANCELLED"); };
       const from = { x: root.position.x, z: root.position.z };
       const dx = x - from.x;
       const dz = z - from.z;
@@ -493,6 +495,7 @@ async function boot() {
       // atan2 返回弧度，turn 用度：这里必须换算，否则只会转一点点
       const targetDeg = (Math.atan2(dx, dz) * 180) / Math.PI;
       await loco.turn!(signedDeltaDeg(degYaw(), targetDeg));
+      checkCancelled();
       // 目标距离取容差的一半：步长是 0.18/0.02 的量化档位，留足余量才不会“差一点”判失败
       let rest = Math.max(0, distance - tolerance * 0.5);
       let moved = 0;
@@ -500,6 +503,7 @@ async function boot() {
         const stepM = nearestSupported(rest).below;
         if (!Number.isFinite(stepM) || stepM <= 0) break;
         await loco.walk!(stepM);
+        checkCancelled();
         rest -= stepM;
         moved += stepM;
         if (rest < 0.09) break;
@@ -508,6 +512,7 @@ async function boot() {
         const adj = loco.adjust ? Math.min(0.08, Math.floor(rest / 0.02) * 0.02) : 0;
         if (!adj) break;
         await loco.adjust!(adj);
+        checkCancelled();
         rest -= adj;
         moved += adj;
       }

@@ -180,7 +180,7 @@ export async function callModel(messages, signal, onReasoning, options = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), TIMEOUT_MS);
   const abort=()=>ctl.abort();signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)ctl.abort();
-  let content = "", finishReason = null, usage = null, completed = false;
+  let reasoningContent = "", content = "", finishReason = null, usage = null, completed = false;
   const toolCalls = [];
   let useTools = false;
   try {
@@ -218,7 +218,7 @@ export async function callModel(messages, signal, onReasoning, options = {}) {
       if (chunk.usage) usage = chunk.usage;
       const choice = chunk.choices?.[0];
       if (!choice) return;
-      if (typeof choice.delta?.reasoning_content === "string" && choice.delta.reasoning_content) onReasoning?.(choice.delta.reasoning_content);
+      if (typeof choice.delta?.reasoning_content === "string" && choice.delta.reasoning_content) { reasoningContent += choice.delta.reasoning_content; onReasoning?.(choice.delta.reasoning_content); }
       if (typeof choice.delta?.content === "string") content += choice.delta.content;
       if (choice.delta?.tool_calls) mergeToolDelta(toolCalls, choice.delta.tool_calls);
       if (choice.finish_reason) finishReason = choice.finish_reason;
@@ -248,7 +248,7 @@ export async function callModel(messages, signal, onReasoning, options = {}) {
   if (useTools) {
     const calls = finalizeToolCalls(toolCalls);
     if (!content && !calls.length) throw new ModelError("EMPTY", "模型既没有内容也没有工具调用", 0);
-    return { mode: "tools", content, calls, usage };
+    return { mode: "tools", content, reasoningContent, calls, usage };
   }
   if (!content) throw new ModelError("EMPTY", "模型返回空内容", 0);
   let parsed;

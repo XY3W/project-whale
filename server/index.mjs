@@ -502,13 +502,13 @@ function cancelCurrentPlan(reason) {
 function endTask(reason, opts = {}) {
   const finished = session.task;
   // 用过技能的任务收尾时记一次结果，供自动停用参考
-  if (finished?.skillRead) {
+  if (finished?.skillReads?.size) {
     const results = [...session.ledger].filter(([id]) => id.startsWith(finished.id + '-')).map(([, e]) => e.result).filter(Boolean);
     if (results.length) {
-      const failed = results.some((r) => r.steps?.some((st) => st.status === "failed"));
-      skills.recordOutcome(finished.skillRead, !failed);
+      const failed = results.some((r) => r.status !== "completed" || r.steps?.some((st) => st.status !== "succeeded"));
+      for (const id of finished.skillReads) skills.recordOutcome(id, !failed);
     }
-    finished.skillRead = null;
+    finished.skillReads = null;
   }
   // 失败签名：任务收尾时统计，供下一轮判断要不要提醒她写技能
   if (finished) {
@@ -743,7 +743,7 @@ async function skillOp(task, ws, out = {}) {
       const doc = skills.read(out.skill_id);
       if (!doc) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
       task.skillDoc = { id: doc.id, title: doc.title, trigger: doc.trigger, body: doc.body, version: doc.version, kind: doc.kind ?? "text", script: doc.kind === "script" ? String(doc.script ?? "").slice(0, 1500) : null };
-      task.skillRead = doc.id;
+      (task.skillReads ??= new Set()).add(doc.id);
       task.skillNote = `已读到「${doc.title}」v${doc.version}`;
       console.log(`[skill] ${task.id} read ${doc.id} ${doc.title}`);
       return { ok: true, note: task.skillNote, doc: task.skillDoc };
@@ -768,6 +768,7 @@ async function skillOp(task, ws, out = {}) {
     if (op === "run") {
       const skill = skills.get(out.skill_id);
       if (!skill) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
+      if (skill.status !== "enabled") throw Object.assign(new Error("技能已停用"), { code: "SKILL_DISABLED" });
       if ((skill.kind ?? "text") !== "script") throw Object.assign(new Error("这条技能不是脚本，读正文照做就行"), { code: "SKILL_NOT_SCRIPT" });
       console.log(`[skill] ${task.id} run ${skill.id} ${skill.title}`);
       const res = await runScript(skill.script, { input: out.input ?? null });
@@ -775,7 +776,7 @@ async function skillOp(task, ws, out = {}) {
       skill.usage.injected += 1;
       skill.usage.lastUsedAt = Date.now();
       skills.save();
-      task.skillRead = skill.id;
+      skills.recordOutcome(skill.id, res.ok);
       task.skillRun = { id: skill.id, title: skill.title, ok: res.ok, value: res.value ?? null, logs: res.logs ?? [], ms: res.ms, error: res.error ?? null };
       task.skillNote = res.ok ? `脚本「${skill.title}」跑完了（${res.ms}ms）` : `脚本「${skill.title}」失败：${res.error}`;
       return { ok: res.ok, note: task.skillNote, run: task.skillRun };
@@ -819,7 +820,7 @@ async function timerOp(task, ws, out = {}) {
     send(ws, "timer_state", { timers: timers.list(ws.ownerScope, ws.timerPage), serverNow: Date.now() });
     send(ws, "public_reply", { taskId: task.id, speech });
     store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
-    return { ok: true, speech };
+    return { ok: true, speech, timers: timers.list(ws.ownerScope, ws.timerPage) };
   } catch (err) {
     send(ws, "error", { code: "TIMER_INVALID", message: err.message });
     return { ok: false, error: err.message };
@@ -858,8 +859,8 @@ function recordFailures(task, results) {
       failed.push(signature);
     }
   }
-  if (!failed.length) return;
   const now = Date.now();
+  if (!failed.length) failureLog.push({ signature: null, at: now, taskId: task.id });
   for (const signature of [...new Set(failed)]) failureLog.push({ signature, at: now, taskId: task.id });
   while (failureLog.length > 200) failureLog.shift();
 }
@@ -867,14 +868,14 @@ function recordFailures(task, results) {
 function skillCandidate(task) {
   const now = Date.now();
   const recentTasks = new Map();
-  for (const item of failureLog) {
+  for (const item of [...failureLog].reverse()) {
     if (now - item.at > 60 * 60 * 1000) continue;
+    if (!recentTasks.has(item.taskId) && recentTasks.size >= FAILURE_WINDOW) break;
     recentTasks.set(item.taskId, true);
-    if (recentTasks.size > FAILURE_WINDOW) break;
   }
   const counts = new Map();
   for (const item of failureLog) {
-    if (!recentTasks.has(item.taskId)) continue;
+    if (!recentTasks.has(item.taskId) || !item.signature) continue;
     counts.set(item.signature, (counts.get(item.signature) ?? 0) + 1);
   }
   for (const [signature, count] of counts) {
@@ -989,8 +990,10 @@ function worldSnapshot() {
   const board = games.public();
   const g = gomoku.public();
   return {
-    board: board ? { gameId: board.gameId, revision: board.revision, status: board.status, revealedSafe: board.revealedSafe, remainingSafe: board.remainingSafe } : null,
-    gomoku: g ? { gameId: g.gameId, revision: g.revision, status: g.status, turn: g.turn, moves: g.moves, lastMove: g.lastMove } : null,
+    board: boardContext(board, character),
+    gomoku: gomokuContext(g, character, GOMOKU_BLACK),
+    characterState: characterContext(character),
+    props: propsContext(props),
     position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
   };
 }
@@ -1021,6 +1024,7 @@ async function executeToolCall(task, ws, call) {
   if (call.name === "finish") {
     const outcome = ["completed", "cannot_complete", "cancelled"].includes(call.args.outcome) ? call.args.outcome : "completed";
     const speech = speechTidy.tidy(String(call.args.speech ?? ""));
+    absorbMemory(task, { memoryProposals: call.args.memory_proposals ?? [], summaryProposal: call.args.summary_proposal ?? null });
     if (speech) {
       send(ws, "public_reply", { taskId: task.id, speech });
       if (task.origin === "user") store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
@@ -1054,18 +1058,21 @@ async function runToolLoop(task, ws) {
       task.skillIndexSnapshot = ctx.skills?.index ?? [];
     }
     task.toolsMode = true;
-    for (let turn = 0; turn < MAX_TOOL_TURNS; turn++) {
+    for (let turn = 0; turn <= MAX_TOOL_TURNS; turn++) {
       if (session.task !== task || task.abort?.signal.aborted) return;
       if (Date.now() - task.startedAt > BUDGET_MS) {
         send(ws, "public_reply", { taskId: task.id, speech: "这个任务超过时间预算了，先停在这里。" });
         endTask("budget exceeded");
         return;
       }
+      const budget = estimateRequest({messages: [...task.messages, {role: "system", content: JSON.stringify(TOOLS)}], maxInputTokens: MAX_INPUT_TOKENS});
+      if (!budget.ok) throw new ModelError("CONTEXT_TOO_LARGE", "请求超过输入预算", 0);
+      if (task.origin === "event" && !claimAutoCall()) { endTask("autonomous call budget"); return; }
+      if (turn === MAX_TOOL_TURNS) task.messages.push({role:"user", content:"已达到动作次数上限，请根据最后结果结束并说明情况，不要再执行动作。"});
       send(ws, "reasoning_start", { taskId: task.id });
       const out = await callModel(task.messages, task.abort?.signal, (text) => {
         if (session.task === task && !task.abort?.signal.aborted) send(ws, "reasoning_delta", { taskId: task.id, text });
       }, { tools: TOOLS });
-      if (task.origin === "event") autoplay.calls.push(Date.now());
       noteLlmActivity();
       if (!out.calls.length) {
         // 模型只给了话 → 按正常收尾处理
@@ -1080,17 +1087,20 @@ async function runToolLoop(task, ws) {
       task.messages.push({
         role: "assistant",
         content: out.content || null,
+        ...(out.reasoningContent ? { reasoning_content: out.reasoningContent } : {}),
         tool_calls: out.calls.map((c) => ({ id: c.id, type: "function", function: { name: c.name, arguments: c.argumentsRaw ?? "{}" } })),
       });
       for (const call of out.calls) {
         if (session.task !== task) return;
-        const result = await executeToolCall(task, ws, call);
-        task.messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 4000) });
+        const result = (turn === MAX_TOOL_TURNS && call.name === "run_plan") || (out.calls.length > 1 && out.calls.some(c => c.name === "run_plan"))
+          ? {ok: false, error: "动作计划必须单独调用，收到结果后才能继续或结束"}
+          : await executeToolCall(task, ws, call);
+        task.messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
         if (result.done) return;
       }
-      compactTranscript(task);
       persist();
     }
+    if (task.origin === "user") send(ws, "public_reply", {taskId: task.id, speech: "这次任务达到处理上限，最后的结果还需要检查。"});
     endTask("tool loop limit");
   } catch (err) {
     if (err instanceof ModelError) fail(ws, task, err);
