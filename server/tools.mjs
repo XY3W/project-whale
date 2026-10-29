@@ -71,17 +71,19 @@ export function toolDefinitions() {
       function: {
         name: "skill",
         description:
-          "管理你自己写的经验（技能）。目录和正文分开：list 看标题+用途，read 读正文（下一轮可用），create 新建（立即启用），revise 改版，disable/enable 启停，run 执行 kind=script 的技能并拿到返回值。你不能删除。",
+          "管理你自己写的经验（技能）。目录和正文分开：list 看标题+用途，read 读正文（下一轮可用），create 新建（立即启用），revise 局部修补（先 read，再用 expected_version 和 edits；保留未修改内容），disable/enable 启停，run 执行 kind=script 的技能并拿到返回值。你不能删除。",
         parameters: {
           type: "object",
           properties: {
             operation: { type: "string", enum: ["list", "read", "create", "revise", "disable", "enable", "run"] },
             skill_id: { type: "string", description: "read/revise/disable/enable/run 时的技能 id" },
+            expected_version: { type: "integer", minimum: 1, description: "revise 时填写本任务 read 返回的版本号" },
+            edits: { type: "array", minItems: 1, maxItems: 10, description: "revise 的局部编辑；append 追加内容，replace 将恰好出现一次的 find 替换为 text；其他内容保留。", items: { type: "object", properties: { field: {type:"string",enum:["title","trigger","body","script"]}, operation: {type:"string",enum:["append","replace"]}, find: {type:"string",description:"replace 要匹配的完整原文，必须唯一"}, text: {type:"string",description:"追加内容或替换后的内容"} }, required:["field","operation","text"], additionalProperties:false } },
             filter: { type: "string", description: "list 的关键词过滤" },
             input: { description: "run 时传给脚本的参数（脚本里用 input 读取），任意 JSON 值" },
             skill: {
               type: "object",
-              description: "create/revise 的技能内容",
+              description: "create 的技能内容；revise 使用 expected_version 和 edits，不传 skill。",
               properties: {
                 title: { type: "string", maxLength: 24 },
                 trigger: { type: "string", maxLength: 40, description: "什么时候该用它" },

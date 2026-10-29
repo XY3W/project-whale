@@ -742,8 +742,9 @@ async function skillOp(task, ws, out = {}) {
     if (op === "read") {
       const doc = skills.read(out.skill_id);
       if (!doc) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
-      task.skillDoc = { id: doc.id, title: doc.title, trigger: doc.trigger, body: doc.body, version: doc.version, kind: doc.kind ?? "text", script: doc.kind === "script" ? String(doc.script ?? "").slice(0, 1500) : null };
+      task.skillDoc = { id: doc.id, title: doc.title, trigger: doc.trigger, body: doc.body, version: doc.version, kind: doc.kind ?? "text", script: doc.kind === "script" ? String(doc.script ?? "") : null };
       (task.skillReads ??= new Set()).add(doc.id);
+      (task.skillVersions ??= new Map()).set(doc.id, doc.version);
       task.skillNote = `已读到「${doc.title}」v${doc.version}`;
       console.log(`[skill] ${task.id} read ${doc.id} ${doc.title}`);
       return { ok: true, note: task.skillNote, doc: task.skillDoc };
@@ -759,7 +760,11 @@ async function skillOp(task, ws, out = {}) {
       return { ok: true, note: task.skillNote, skill: { id: skill.id, title: skill.title, kind: skill.kind ?? "text" }, duplicate };
     }
     if (op === "revise") {
-      const skill = skills.revise(out.skill_id, args);
+      if (out.skill !== undefined) throw Object.assign(new Error("修改时不能提交整段技能，请先读取并用 edits 局部修改"), {code:"SKILL_EDIT_INVALID"});
+      if (!Number.isInteger(out.expected_version) || task.skillVersions?.get(out.skill_id) !== out.expected_version)
+        throw Object.assign(new Error("请先在本任务读取技能并使用读取到的版本号"), {code:"SKILL_READ_REQUIRED"});
+      const skill = skills.patch(out.skill_id, out.expected_version, out.edits);
+      task.skillVersions.delete(out.skill_id);
       task.skillNote = `已更新「${skill.title}」到 v${skill.version}`;
       announceSkill("revise", skill);
       console.log(`[skill] ${task.id} revise ${skill.id} v${skill.version}`);
@@ -1094,7 +1099,9 @@ async function runToolLoop(task, ws) {
         if (session.task !== task) return;
         const result = (turn === MAX_TOOL_TURNS && call.name === "run_plan") || (out.calls.length > 1 && out.calls.some(c => c.name === "run_plan"))
           ? {ok: false, error: "动作计划必须单独调用，收到结果后才能继续或结束"}
-          : await executeToolCall(task, ws, call);
+          : call.name === "skill" && call.args?.operation === "revise" && out.calls.some(c => c.name === "skill" && c.args?.operation === "read" && c.args?.skill_id === call.args?.skill_id)
+            ? {ok: false, code: "SKILL_READ_REQUIRED", error: "先接收读取结果，再在下一轮提交修改"}
+            : await executeToolCall(task, ws, call);
         task.messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
         if (result.done) return;
       }

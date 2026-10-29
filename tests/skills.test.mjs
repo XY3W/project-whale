@@ -90,11 +90,43 @@ test("校验：引用不存在的能力被拒", () => {
   assert.doesNotThrow(() => validateSkillInput({ title: "走路", trigger: "要靠近", body: '用 {"action":"walk"} 或者 walk_to。' }));
 });
 
-test("校验：长度上限会截断而不是报错", () => {
-  const out = validateSkillInput({ title: "标题".repeat(40), trigger: "场景".repeat(40), body: "步骤".repeat(400) });
-  assert.equal(out.title.length, 24);
-  assert.equal(out.trigger.length, 40);
-  assert.equal(out.body.length, 600);
+test("校验：超长直接报错，不截断", () => {
+  assert.throws(() => validateSkillInput({title:"标题",trigger:"场景",body:"步骤".repeat(301)}), {code:"SKILL_TOO_LONG"});
+});
+
+test("局部编辑保留原有内容并保存历史版本", () => {
+  const r = new SkillRegistry(tmp());
+  const skill = r.create({title:"测试技能",trigger:"测试时候",body:"第一条：保留。\n第二条：需要修补。\n第三条：保留。"}).skill;
+  r.patch(skill.id, 1, [{field:"body",operation:"replace",find:"第二条：需要修补。",text:"第二条：已经修好。"},{field:"body",operation:"append",text:"第四条：新增。"}]);
+  assert.equal(skill.body,"第一条：保留。\n第二条：已经修好。\n第三条：保留。\n第四条：新增。");
+  assert.equal(skill.history[0].body,"第一条：保留。\n第二条：需要修补。\n第三条：保留。");
+});
+
+test("版本冲突、找不到原文、重复原文及超长均不改变任何内容", () => {
+  const r = new SkillRegistry(tmp());
+  const skill = r.create({title:"测试技能",trigger:"测试时候",body:"相同内容。相同内容。原始规则。"}).skill;
+  const before = JSON.stringify(skill);
+  assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"replace",find:skill.body,text:"全量覆盖"}]),{code:"SKILL_EDIT_INVALID"});
+  assert.throws(() => r.patch(skill.id, 2, [{field:"body",operation:"append",text:"增加"}]),{code:"SKILL_VERSION_CONFLICT"});
+  for (const find of ["不存在", "相同内容"]) assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"replace",find,text:"替代"}]),{code:"SKILL_EDIT_MATCH"});
+  assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"append",text:"长".repeat(601)}]),{code:"SKILL_TOO_LONG"});
+  assert.throws(() => r.patch(skill.id, 1, [{field:"body",operation:"append",text:"第一步"},{field:"body",operation:"replace",find:"不存在",text:"第二步"}]),{code:"SKILL_EDIT_MATCH"});
+  assert.equal(JSON.stringify(skill),before);
+});
+
+test("脚本局部修改保留前后内容及旧版本", () => {
+  const r = new SkillRegistry(tmp());
+  const skill = r.create({title:"脚本技能",trigger:"需要计算",body:"运行并返回计算结果",kind:"script",script:'const x = 1;\nemit(x);'}).skill;
+  r.patch(skill.id,1,[{field:"script",operation:"replace",find:"const x = 1;",text:"const x = 2;"}]);
+  assert.equal(skill.script,'const x = 2;\nemit(x);');
+  assert.equal(skill.history[0].script,'const x = 1;\nemit(x);');
+});
+
+test("多次修改仍保留早期版本并允许回滚", () => {
+  const r = new SkillRegistry(tmp()), skill = r.create(sample()).skill;
+  for(let v=1;v<=7;v++) r.patch(skill.id,v,[{field:"body",operation:"append",text:`规则${v}`}]);
+  assert.equal(skill.history.length,7);
+  assert.equal(r.revert(skill.id,1).body,sample().body);
 });
 
 test("自动停用候选：读得多且失败率高才算", () => {

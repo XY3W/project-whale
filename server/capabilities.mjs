@@ -115,7 +115,7 @@ export function validatePlan(plan) {
       && (typeof plan.skill_id !== "string" || !plan.skill_id)) {
       throw new ModelError("INVALID_SCHEMA", `${plan.operation} 需要 skill_id`, 0);
     }
-    return { type: "skill_tool", operation: plan.operation, skill_id: plan.skill_id, skill: plan.skill, filter: plan.filter };
+    return { type: "skill_tool", operation: plan.operation, skill_id: plan.skill_id, skill: plan.skill, filter: plan.filter, expected_version: plan.expected_version, edits: plan.edits };
   }
   if (plan.type === "timer_tool") {
     if (!["create", "list", "cancel"].includes(plan.operation)) throw new ModelError("INVALID_SCHEMA", "定时器操作无效", 0);
@@ -333,7 +333,7 @@ export function outputContract() {
   return [
     'execute_plan: {"type":"execute_plan","speech":"string","decision_note":"可选≤60字：为什么这么安排","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
     'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
-    'skill_tool: {"type":"skill_tool","operation":"list|read|create|revise|disable|enable","skill_id":"可选","skill":{"title":"≤24字","trigger":"≤40字","body":"≤600字","tags":["可选"]},"filter":"list 时的筛选词"}；list 看目录、read 读正文（下一轮就能用）、create 新建（立即可用）、revise 改版、disable/enable 启停。你没有删除权限。',
+    'skill_tool: list/read/create/revise/disable/enable；revise 必须先 read，在 expected_version 中填写读到的版本，以 edits 数组局部修改：每项包含 field=title|trigger|body|script、operation=append|replace、text，replace 还需唯一匹配的 find。未修改的内容保留；create 使用 skill。你没有删除权限。',
     'timer_tool: {"type":"timer_tool","operation":"create","timer":{"name":"任务名","first_at":"带时区的 ISO 8601 真实时间","interval_seconds":null或整数秒,"total_occurrences":null或整数,"display_message":"提醒文字","wake_note":"到期时交给自己的提醒任务"}}；list: {"type":"timer_tool","operation":"list"}；cancel: {"type":"timer_tool","operation":"cancel","timer_id":"任务ID"}。',
     "Step 只能取以下之一：",
     steps,

@@ -32,7 +32,11 @@ const KNOWN_ACTIONS = new Set(CAPABILITIES.map((c) => c.id));
 
 const now = () => Date.now();
 const id = () => `sk_${Math.random().toString(36).slice(2, 8)}`;
-const clamp = (s, n) => String(s ?? "").trim().slice(0, n);
+const clamp = (s, n) => {
+  const value = String(s ?? "").trim();
+  if (value.length > n) throw Object.assign(new Error(`内容超过 ${n} 字，未保存`), {code:"SKILL_TOO_LONG"});
+  return value;
+};
 
 export function validateSkillInput(input = {}) {
   const title = clamp(input.title, LIMITS.title);
@@ -58,7 +62,8 @@ export function validateSkillInput(input = {}) {
     .filter(Boolean)
     .slice(0, LIMITS.tags);
   const kind = KINDS.includes(input.kind) ? input.kind : "text";
-  const script = kind === "script" ? String(input.script ?? "").slice(0, LIMITS.script) : null;
+  const script = kind === "script" ? String(input.script ?? "") : null;
+  if (script !== null && script.length > LIMITS.script) throw Object.assign(new Error(`脚本超过 ${LIMITS.script} 字，未保存`), {code:"SKILL_TOO_LONG"});
   if (kind === "script" && script.trim().length < 5) {
     throw Object.assign(new Error("脚本型技能需要提供 script 源码"), { code: "SKILL_SCRIPT" });
   }
@@ -190,11 +195,44 @@ export class SkillRegistry {
     });
     // 历史里存的是**改之前**的内容，否则回滚会滚回新版本
     const previous = { title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags, kind: skill.kind ?? "text", script: skill.script ?? null };
-    skill.history = [...(skill.history ?? []), { version: skill.version, ...previous, at: skill.updatedAt }].slice(-5);
+    skill.history = [...(skill.history ?? []), { version: skill.version, ...previous, at: skill.updatedAt }];
     skill.version += 1;
     Object.assign(skill, merged, { updatedAt: now() });
     this.bump();
     return skill;
+  }
+
+  /** Apply exact, versioned edits atomically; never infer a replacement for the whole document. */
+  patch(skillId, expectedVersion, edits) {
+    const skill = this.get(skillId);
+    if (!skill) throw Object.assign(new Error("没有这条技能"), {code:"SKILL_NOT_FOUND"});
+    if (!Number.isInteger(expectedVersion) || skill.version !== expectedVersion)
+      throw Object.assign(new Error("技能版本已变化或缺少版本号，请重新读取"), {code:"SKILL_VERSION_CONFLICT"});
+    if (!Array.isArray(edits) || edits.length < 1 || edits.length > 10)
+      throw Object.assign(new Error("请提供 1 至 10 条局部修改"), {code:"SKILL_EDIT_INVALID"});
+    const patch = {title:skill.title, trigger:skill.trigger, body:skill.body, script:skill.script};
+    for (const edit of edits) {
+      if (!edit || !["title", "trigger", "body", "script"].includes(edit.field) || !["append", "replace"].includes(edit.operation) || typeof edit.text !== "string")
+        throw Object.assign(new Error("修改参数无效"), {code:"SKILL_EDIT_INVALID"});
+      if (edit.field === "script" && skill.kind !== "script")
+        throw Object.assign(new Error("文字技能没有脚本"), {code:"SKILL_EDIT_INVALID"});
+      const before = patch[edit.field] ?? "";
+      if (edit.operation === "append" && ["title", "trigger"].includes(edit.field))
+        throw Object.assign(new Error("名称和用途只能精确替换"), {code:"SKILL_EDIT_INVALID"});
+      if (edit.operation === "append") {
+        if (!edit.text.trim()) throw Object.assign(new Error("追加内容不能为空"), {code:"SKILL_EDIT_INVALID"});
+        patch[edit.field] = before + (before && edit.field === "body" ? "\n" : "") + edit.text;
+      } else {
+        if (["body", "script"].includes(edit.field) && edit.find === before)
+          throw Object.assign(new Error("不能整体替换正文或脚本，请只修改必要的局部"), {code:"SKILL_EDIT_INVALID"});
+        if (typeof edit.find !== "string" || !edit.find || !before.includes(edit.find) || before.indexOf(edit.find) !== before.lastIndexOf(edit.find))
+          throw Object.assign(new Error("待替换原文必须恰好出现一次，请重新读取并提供更精确的原文"), {code:"SKILL_EDIT_MATCH"});
+        patch[edit.field] = before.replace(edit.find, () => edit.text);
+      }
+    }
+    if (patch.title === skill.title && patch.trigger === skill.trigger && patch.body === skill.body && patch.script === skill.script)
+      throw Object.assign(new Error("修改没有产生变化"), {code:"SKILL_EDIT_INVALID"});
+    return this.revise(skillId, patch);
   }
 
   /** 回滚到历史版本（历史条目的 version 是它当时的版本号） */
@@ -203,7 +241,7 @@ export class SkillRegistry {
     if (!skill) throw Object.assign(new Error("没有这条技能"), { code: "SKILL_NOT_FOUND" });
     const entry = (skill.history ?? []).find((h) => h.version === version);
     if (!entry) throw Object.assign(new Error("没有这个历史版本"), { code: "SKILL_NO_VERSION" });
-    skill.history = [...(skill.history ?? []), { version: skill.version, title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags, kind: skill.kind ?? "text", script: skill.script ?? null, at: skill.updatedAt }].slice(-5);
+    skill.history = [...(skill.history ?? []), { version: skill.version, title: skill.title, trigger: skill.trigger, body: skill.body, tags: skill.tags, kind: skill.kind ?? "text", script: skill.script ?? null, at: skill.updatedAt }];
     skill.version += 1;
     Object.assign(skill, { title: entry.title, trigger: entry.trigger, body: entry.body, tags: entry.tags, kind: entry.kind ?? "text", script: entry.script ?? null, updatedAt: now() });
     this.bump();

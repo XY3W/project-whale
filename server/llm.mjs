@@ -90,7 +90,7 @@ function skillSection(index = []) {
 下面是你自己写的技能索引（只有名称和用途，正文不在提示词里）。觉得用得上就先 skill_tool {"operation":"read","skill_id":"…"} 读正文，下一轮照它做；不需要就直接做事。
 ${lines.join("\n")}${more}
 需要结果就 skill_tool {"operation":"run","skill_id":"…","input":…}（只对 [脚本] 技能有效，在沙箱里跑，读不到文件也上不了网）。
-你也能新建/修改/停用：{"operation":"create"|"revise"|"disable"|"enable", ...}；写完立即生效。
+你也能新建/修改/停用：修改前先 read，使用读到的版本号 expected_version 和 edits 局部追加或精确替换，保留其他正确内容；不确定先别删除，写完立即生效。
 `;
 }
 
