@@ -1,0 +1,772 @@
+{
+  "baseline": "0289367",
+  "backgroundThreat": {
+    "expected": "Do not classify unchanged rook threat as newly created chase",
+    "plies": 8,
+    "verdict": {
+      "threefold": true,
+      "reason": "perpetual_chase",
+      "winner": "black",
+      "loser": "red",
+      "victim": "bh-target"
+    },
+    "moves": [
+      {
+        "pieceId": "rh",
+        "from": {
+          "row": 9,
+          "col": 1
+        },
+        "to": {
+          "row": 7,
+          "col": 2
+        },
+        "captured": null,
+        "revision": 1,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bh-target"
+        ]
+      },
+      {
+        "pieceId": "bh",
+        "from": {
+          "row": 0,
+          "col": 7
+        },
+        "to": {
+          "row": 2,
+          "col": 6
+        },
+        "captured": null,
+        "revision": 2,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rh",
+        "from": {
+          "row": 7,
+          "col": 2
+        },
+        "to": {
+          "row": 9,
+          "col": 1
+        },
+        "captured": null,
+        "revision": 3,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bh-target"
+        ]
+      },
+      {
+        "pieceId": "bh",
+        "from": {
+          "row": 2,
+          "col": 6
+        },
+        "to": {
+          "row": 0,
+          "col": 7
+        },
+        "captured": null,
+        "revision": 4,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rh",
+        "from": {
+          "row": 9,
+          "col": 1
+        },
+        "to": {
+          "row": 7,
+          "col": 2
+        },
+        "captured": null,
+        "revision": 5,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bh-target"
+        ]
+      },
+      {
+        "pieceId": "bh",
+        "from": {
+          "row": 0,
+          "col": 7
+        },
+        "to": {
+          "row": 2,
+          "col": 6
+        },
+        "captured": null,
+        "revision": 6,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rh",
+        "from": {
+          "row": 7,
+          "col": 2
+        },
+        "to": {
+          "row": 9,
+          "col": 1
+        },
+        "captured": null,
+        "revision": 7,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bh-target"
+        ]
+      },
+      {
+        "pieceId": "bh",
+        "from": {
+          "row": 2,
+          "col": 6
+        },
+        "to": {
+          "row": 0,
+          "col": 7
+        },
+        "captured": null,
+        "revision": 8,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      }
+    ]
+  },
+  "generalChase": {
+    "expected": "General-only chase is permitted under 26.1; red must not lose for perpetual chase",
+    "plies": 8,
+    "verdict": {
+      "threefold": true,
+      "reason": "perpetual_chase",
+      "winner": "black",
+      "loser": "red",
+      "victim": "bc"
+    },
+    "moves": [
+      {
+        "pieceId": "bc",
+        "from": {
+          "row": 7,
+          "col": 3
+        },
+        "to": {
+          "row": 7,
+          "col": 4
+        },
+        "captured": null,
+        "revision": 1,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rg",
+        "from": {
+          "row": 8,
+          "col": 3
+        },
+        "to": {
+          "row": 8,
+          "col": 4
+        },
+        "captured": null,
+        "revision": 2,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bc"
+        ]
+      },
+      {
+        "pieceId": "bc",
+        "from": {
+          "row": 7,
+          "col": 4
+        },
+        "to": {
+          "row": 7,
+          "col": 3
+        },
+        "captured": null,
+        "revision": 3,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rg",
+        "from": {
+          "row": 8,
+          "col": 4
+        },
+        "to": {
+          "row": 8,
+          "col": 3
+        },
+        "captured": null,
+        "revision": 4,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bc"
+        ]
+      },
+      {
+        "pieceId": "bc",
+        "from": {
+          "row": 7,
+          "col": 3
+        },
+        "to": {
+          "row": 7,
+          "col": 4
+        },
+        "captured": null,
+        "revision": 5,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rg",
+        "from": {
+          "row": 8,
+          "col": 3
+        },
+        "to": {
+          "row": 8,
+          "col": 4
+        },
+        "captured": null,
+        "revision": 6,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bc"
+        ]
+      },
+      {
+        "pieceId": "bc",
+        "from": {
+          "row": 7,
+          "col": 4
+        },
+        "to": {
+          "row": 7,
+          "col": 3
+        },
+        "captured": null,
+        "revision": 7,
+        "side": "black",
+        "check": false,
+        "attacks": []
+      },
+      {
+        "pieceId": "rg",
+        "from": {
+          "row": 8,
+          "col": 4
+        },
+        "to": {
+          "row": 8,
+          "col": 3
+        },
+        "captured": null,
+        "revision": 8,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "bc"
+        ]
+      }
+    ]
+  },
+  "chasePhaseDependence": {
+    "expected": "Classify the chase from the historical attack positions, not the final evasion position",
+    "afterEvasion": {
+      "plies": 8,
+      "verdict": {
+        "threefold": true,
+        "reason": "repetition",
+        "winner": null
+      },
+      "moves": [
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 0
+          },
+          "to": {
+            "row": 2,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 1,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 1
+          },
+          "to": {
+            "row": 5,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 2,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 1
+          },
+          "to": {
+            "row": 2,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 3,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 0
+          },
+          "to": {
+            "row": 5,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 4,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 0
+          },
+          "to": {
+            "row": 2,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 5,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 1
+          },
+          "to": {
+            "row": 5,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 6,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 1
+          },
+          "to": {
+            "row": 2,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 7,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 0
+          },
+          "to": {
+            "row": 5,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 8,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        }
+      ]
+    },
+    "afterAttack": {
+      "plies": 8,
+      "verdict": {
+        "threefold": true,
+        "reason": "perpetual_chase",
+        "winner": "black",
+        "loser": "red",
+        "victim": "bc"
+      },
+      "moves": [
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 1
+          },
+          "to": {
+            "row": 5,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 1,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 1
+          },
+          "to": {
+            "row": 2,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 2,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 0
+          },
+          "to": {
+            "row": 5,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 3,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 0
+          },
+          "to": {
+            "row": 2,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 4,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 1
+          },
+          "to": {
+            "row": 5,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 5,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 1
+          },
+          "to": {
+            "row": 2,
+            "col": 0
+          },
+          "captured": null,
+          "revision": 6,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        },
+        {
+          "pieceId": "bc",
+          "from": {
+            "row": 5,
+            "col": 0
+          },
+          "to": {
+            "row": 5,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 7,
+          "side": "black",
+          "check": false,
+          "attacks": []
+        },
+        {
+          "pieceId": "rr",
+          "from": {
+            "row": 2,
+            "col": 0
+          },
+          "to": {
+            "row": 2,
+            "col": 1
+          },
+          "captured": null,
+          "revision": 8,
+          "side": "red",
+          "check": false,
+          "attacks": [
+            "bc"
+          ]
+        }
+      ]
+    }
+  },
+  "earlyQuietRepeat": {
+    "expected": "Apply 4.3 red-side change requirement within 25 rounds, not unconditional draw",
+    "plies": 8,
+    "verdict": {
+      "threefold": true,
+      "reason": "repetition",
+      "winner": null
+    },
+    "moves": [
+      {
+        "pieceId": "red_horse_1",
+        "from": {
+          "row": 9,
+          "col": 1
+        },
+        "to": {
+          "row": 7,
+          "col": 2
+        },
+        "captured": null,
+        "revision": 1,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "black_horse_1",
+          "black_horse_2"
+        ]
+      },
+      {
+        "pieceId": "black_horse_1",
+        "from": {
+          "row": 0,
+          "col": 1
+        },
+        "to": {
+          "row": 2,
+          "col": 2
+        },
+        "captured": null,
+        "revision": 2,
+        "side": "black",
+        "check": false,
+        "attacks": [
+          "red_horse_2"
+        ]
+      },
+      {
+        "pieceId": "red_horse_1",
+        "from": {
+          "row": 7,
+          "col": 2
+        },
+        "to": {
+          "row": 9,
+          "col": 1
+        },
+        "captured": null,
+        "revision": 3,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "black_horse_2"
+        ]
+      },
+      {
+        "pieceId": "black_horse_1",
+        "from": {
+          "row": 2,
+          "col": 2
+        },
+        "to": {
+          "row": 0,
+          "col": 1
+        },
+        "captured": null,
+        "revision": 4,
+        "side": "black",
+        "check": false,
+        "attacks": [
+          "red_horse_1",
+          "red_horse_2"
+        ]
+      },
+      {
+        "pieceId": "red_horse_1",
+        "from": {
+          "row": 9,
+          "col": 1
+        },
+        "to": {
+          "row": 7,
+          "col": 2
+        },
+        "captured": null,
+        "revision": 5,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "black_horse_1",
+          "black_horse_2"
+        ]
+      },
+      {
+        "pieceId": "black_horse_1",
+        "from": {
+          "row": 0,
+          "col": 1
+        },
+        "to": {
+          "row": 2,
+          "col": 2
+        },
+        "captured": null,
+        "revision": 6,
+        "side": "black",
+        "check": false,
+        "attacks": [
+          "red_horse_2"
+        ]
+      },
+      {
+        "pieceId": "red_horse_1",
+        "from": {
+          "row": 7,
+          "col": 2
+        },
+        "to": {
+          "row": 9,
+          "col": 1
+        },
+        "captured": null,
+        "revision": 7,
+        "side": "red",
+        "check": false,
+        "attacks": [
+          "black_horse_2"
+        ]
+      },
+      {
+        "pieceId": "black_horse_1",
+        "from": {
+          "row": 2,
+          "col": 2
+        },
+        "to": {
+          "row": 0,
+          "col": 1
+        },
+        "captured": null,
+        "revision": 8,
+        "side": "black",
+        "check": false,
+        "attacks": [
+          "red_horse_1",
+          "red_horse_2"
+        ]
+      }
+    ]
+  },
+  "bareGenerals": {
+    "expected": "Recognize simple position with neither side able to win, 4.2.2",
+    "actualStatus": "playing"
+  },
+  "identicalTypePositions": {
+    "sameVisiblePosition": true,
+    "engineSignatureEqual": false,
+    "note": "Representation probe, not a played swap sequence"
+  },
+  "naturalLimitCounting": {
+    "checksByRed": 12,
+    "plies": 120,
+    "actualDraw": true,
+    "note": "Counting-only probe; 22.2 counts at most 10 checks by claimant"
+  }
+}
