@@ -505,8 +505,10 @@ function endTask(reason, opts = {}) {
   if (finished?.skillReads?.size) {
     const results = [...session.ledger].filter(([id]) => id.startsWith(finished.id + '-')).map(([, e]) => e.result).filter(Boolean);
     if (results.length) {
-      const failed = results.some((r) => r.status !== "completed" || r.steps?.some((st) => st.status !== "succeeded"));
-      for (const id of finished.skillReads) skills.recordOutcome(id, !failed);
+      // 以任务最终结果为准：中间某一步失败但被救回来，仍然算这条技能帮上了忙。
+      const anyStepFailed = results.some((r) => r.steps?.some((st) => st.status !== "succeeded"));
+      const ok = finished.outcome ? finished.outcome === "completed" : !anyStepFailed;
+      for (const id of finished.skillReads) skills.recordOutcome(id, ok);
     }
     finished.skillReads = null;
   }
@@ -1034,6 +1036,7 @@ async function executeToolCall(task, ws, call) {
       send(ws, "public_reply", { taskId: task.id, speech });
       if (task.origin === "user") store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
     }
+    task.outcome = outcome;
     endTask(`finish:${outcome}`);
     return { ok: true, done: true, outcome };
   }
@@ -1195,6 +1198,7 @@ function applyOutput(ws, task, out) {
   if(task.planId&&session.ledger.get(task.planId)?.state==="processing")session.ledger.set(task.planId,{...session.ledger.get(task.planId),state:"done"});
   if (out.type === "finish_task") {
     // 自主回合允许完全沉默：没有值得说的就不发 public_reply
+    task.outcome = out.outcome ?? "completed";
     const speech = speechTidy.tidy(out.speech || "");
     if (speech) {
       send(ws, "public_reply", { taskId: task.id, speech });
