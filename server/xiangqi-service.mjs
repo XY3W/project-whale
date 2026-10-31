@@ -138,9 +138,8 @@ export class XiangqiService {
       used: false,
       response: null,
     });
-    // 只保留未使用 + 最近少量已用 token
-    const unused = [...this.tokens.values()].filter((t) => !t.used);
-    for (const t of unused.slice(0, -1)) this.tokens.delete(t.token);
+    // 新授权签发即作废旧授权：抢占/重来之后，上一轮的 token 不能再把棋子落下去
+    for (const t of this.tokens.values()) if (!t.used && t.token !== token) t.superseded = true;
     const used = [...this.tokens.values()].filter((t) => t.used);
     for (const t of used.slice(0, Math.max(0, used.length - 8))) this.tokens.delete(t.token);
     return { ok: true, token, from: { row: piece.row, col: piece.col }, to: { row: toRow, col: toCol }, revision: this.game.revision };
@@ -151,6 +150,7 @@ export class XiangqiService {
     const auth = this.tokens.get(String(token ?? ""));
     if (!auth) return { ok: false, reason: "NO_AUTH" };
     if (auth.used) return { ...(auth.response ?? { ok: false, reason: "ALREADY_COMMITTED" }), replay: true, board: this.public() };
+    if (auth.superseded) return { ok: false, reason: "SUPERSEDED" };
     if (!this.game) return { ok: false, reason: "NO_GAME" };
     if (this.game.gameId !== auth.gameId) return { ok: false, reason: "STALE_GAME" };
     if (auth.issuedAt && Date.now() - auth.issuedAt > TOKEN_TTL_MS) return { ok: false, reason: "EXPIRED" };

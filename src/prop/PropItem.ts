@@ -52,7 +52,7 @@ const norm = (name: string) => name.replace(/[^A-Za-z0-9_]/g, "");
 const UPRIGHT_MIN_Y = Math.cos((32 * Math.PI) / 180);
 const VARIANT_TOLERANCE_DEG = 25;
 
-type Mode = "world" | "hand" | "head" | "curve" | "physics" | "uprighting";
+type Mode = "world" | "hand" | "head" | "waist" | "curve" | "physics" | "uprighting";
 type Variant = { bodyClip: string; motionClip: string; reference: { position: number[]; quaternion: number[] } };
 
 interface PropDef {
@@ -81,6 +81,9 @@ export class PropItem {
   private readonly slot: PropSlot;
   private readonly bone?: THREE.Bone;
   private readonly headBone?: THREE.Bone;
+  /** 右腰挂点（象棋目录的 bindings.rightWaist，进象棋装备时才装上） */
+  private waistBone?: THREE.Bone;
+  private waistAttach?: THREE.Matrix4;
   private readonly attach: THREE.Matrix4;
   private readonly headAttach?: THREE.Matrix4;
   private readonly setMorph: (value: number) => void;
@@ -285,6 +288,17 @@ export class PropItem {
         this.mode = "head";
         this.setMorph(1);
         break;
+      // 饭勺挂到右腰：挂在身上但不在手里，dig/throw 的前置条件自然不再满足
+      case "waist_attach":
+        if (!this.waistAttach) { console.warn(`[prop:${this.id}] 没有腰挂绑定，忽略 waist_attach`); return; }
+        this.state = "worn";
+        this.mode = "waist";
+        break;
+      case "hand_attach":
+        this.state = "held";
+        this.grip = "inward";
+        this.mode = "hand";
+        break;
       case "release":
         this.launch();
         break;
@@ -294,6 +308,9 @@ export class PropItem {
   }
 
   setGrip(grip:"inward"|"outward"){this.grip=grip;this.bump();}
+  /** 装上右腰挂点（bone + 相对矩阵），来自象棋目录 bindings.rightWaist */
+  setWaistTarget(bone: THREE.Bone, matrix: THREE.Matrix4) { this.waistBone = bone; this.waistAttach = matrix.clone(); }
+  get waistReady(): boolean { return !!this.waistAttach; }
 
   cancel(){
     if(this.actionId)this.finish(false);
@@ -345,6 +362,7 @@ export class PropItem {
     this.physics.syncStatic(this.state==="resting"?{position:this.object.position,quaternion:this.object.quaternion}:null);
     if (this.mode === "hand") { this.followBone(this.bone, this.attach); return; }
     if (this.mode === "head") { this.followBone(this.headBone, this.headAttach ?? this.attach); return; }
+    if (this.mode === "waist") { if (this.waistAttach) this.followBone(this.waistBone, this.waistAttach); return; }
     if (this.mode === "curve") {
       const clip = this.curveClip();
       if (clip) this.followCurve(clip, actionTime);

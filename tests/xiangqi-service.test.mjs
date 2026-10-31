@@ -116,3 +116,20 @@ test("公开快照：含合法着法与终局事实，不含内部 token", () =>
   svc.userMove({ moveId: "u1", gameId: g.gameId, pieceId: "red_cannon_1", toRow: 6, toCol: 1, expectedRevision: 0 });
   assert.equal(svc.facts().turn, "black");
 });
+
+test('新授权签发后，旧 token 立刻作废（抢占/重来不能把旧棋落下去）', () => {
+  const svc = new XiangqiService(tmp());
+  const g = svc.start({ requestId: "r1", userSide: "black" });
+  const game = { revision: () => svc.public().revision };
+  const a = svc.beginMove({ pieceId: 'red_cannon_1', toRow: 6, toCol: 1, expectedRevision: game.revision(), generation: 1 });
+  assert.equal(a.ok, true);
+  const b = svc.beginMove({ pieceId: 'red_horse_1', toRow: 7, toCol: 2, expectedRevision: game.revision(), generation: 2 });
+  assert.equal(b.ok, true);
+  const stale = svc.commitMove({ token: a.token, revision: a.revision });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.reason, 'SUPERSEDED');
+  assert.equal(svc.public().revision, game.revision(), '作废的 token 不能改盘面');
+  const fresh = svc.commitMove({ token: b.token, revision: b.revision });
+  assert.equal(fresh.ok, true);
+  assert.equal(fresh.committed, true);
+});

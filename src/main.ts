@@ -268,7 +268,12 @@ async function boot() {
     timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     heldObjectId: basin.state === "held" ? "basin" : scoop.state === "held" ? "rice_scoop" : null,
     headObjectId: basin.state === "worn" ? "basin" : null,
-    slots: { left_hand: basin.state === "held" ? "basin" : null, right_hand: scoop.state === "held" ? "rice_scoop" : null, head: basin.state === "worn" ? "basin" : null },
+    slots: {
+      left_hand: basin.state === "held" ? "basin" : null,
+      right_hand: scoop.state === "held" ? "rice_scoop" : null,
+      head: basin.state === "worn" ? "basin" : null,
+      waist_slot: scoop.mode === "waist" ? "rice_scoop" : null,
+    },
     objects: [
       { ...basin.snapshot(), ...(basin.state === "resting" ? { approachCandidates: approachHint() } : {}) },
       { ...scoop.snapshot(), ...(scoop.state === "resting" ? { pickupStand: variantStand("rice_scoop") } : {}) },
@@ -494,7 +499,7 @@ async function boot() {
       player.walkDistance(meters);
       // 进展 = 已走距离；收步阶段也要算，否则最后 0.09 m 会被当成卡住
       await waitForProgress(
-        () => !player.state.walking && player.state.base === "idle_stand",
+        () => !player.state.walking && player.state.resting,
         () => root.position.distanceTo(from),
         { idleMs: 8000 },
       );
@@ -503,7 +508,7 @@ async function boot() {
       const from = root.position.clone();
       if (!player.runDistance(meters)) return;
       await waitForProgress(
-        () => !player.moving && player.state.base === "idle_stand",
+        () => !player.moving && player.state.resting,
         () => root.position.distanceTo(from),
         { idleMs: 8000 },
       );
@@ -512,7 +517,7 @@ async function boot() {
       const from = root.position.clone();
       player.adjustDistance(meters);
       await waitForProgress(
-        () => !player.moving && player.state.base === "idle_stand",
+        () => !player.moving && player.state.resting,
         () => root.position.distanceTo(from),
         { idleMs: 8000 },
       );
@@ -1038,6 +1043,41 @@ async function boot() {
   };
   loco.dig = digBridge;
 
+  // ---- 右腰挂勺：bindings.rightWaist 只存在于象棋目录，用到时才拉一次 ----
+  let waist: { bone: THREE.Bone; matrix: THREE.Matrix4 } | null = null;
+  const ensureWaist = async () => {
+    if (waist) return waist;
+    const res = await fetch("/models/xiangqi-v1/catalog.json");
+    if (!res.ok) throw new Error(`catalog ${res.status}`);
+    const catalog = (await res.json()) as { bindings?: Record<string, { bone: string; matrixColumnMajor: number[] }> };
+    const binding = catalog.bindings?.rightWaist;
+    if (!binding) throw new Error("catalog 缺少 rightWaist 绑定");
+    const bone = boneMap.get(binding.bone.replace(/[^A-Za-z0-9_]/g, ""));
+    if (!bone) throw new Error(`缺少骨骼 ${binding.bone}`);
+    waist = { bone, matrix: new THREE.Matrix4().fromArray(binding.matrixColumnMajor) };
+    scoop.setWaistTarget(waist.bone, waist.matrix);
+    return waist;
+  };
+
+  /**
+   * 挂勺 / 取勺共用一条路径：整段右臂动画（1.4s），在素材给的时刻才换父级。
+   * stow_scoop 0.9s waist_attach；unstow_scoop 0.5s hand_attach。
+   */
+  const scoopTransfer = async (kind: "stow" | "unstow") => {
+    if (kind === "stow") {
+      if (scoop.state !== "held") return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NO_SCOOP" } };
+      try { await ensureWaist(); } catch (error) { return { ok: false, reason: "CAPABILITY_DISABLED", detail: { error: String(error) } }; }
+    } else if (scoop.mode !== "waist") {
+      return { ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NOT_STOWED" } };
+    }
+    const events = kind === "stow" ? [{ time: 0.9, type: "waist_attach" }] : [{ time: 0.5, type: "hand_attach" }];
+    const done = await player.perform(kind === "stow" ? "stow_scoop" : "unstow_scoop", events, (type) => scoop.handleEvent(type), "right_arm");
+    if (!done) return { ok: false, reason: "TRANSFER_FAILED" };
+    return { ok: true, slot: kind === "stow" ? "waist_slot" : "right_hand", state: scoop.state };
+  };
+  loco.stowScoop = () => scoopTransfer("stow");
+  loco.unstowScoop = () => scoopTransfer("unstow");
+
   /** 象棋搬棋：走近 0.85m → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
   loco.xiangqiMove = async (step, ctx) => {
     const piece = xiangqiView?.pieces.find((p) => p.id === step.piece_id);
@@ -1071,6 +1111,8 @@ async function boot() {
       if (type === "grasp") xiangqiBoard.beginCarry(piece.id, root);
     });
     if (!picked) return { ok: false, reason: "PICKUP_FAILED" };
+    // 棋子已经在手上：换成抱棋基底层，之后走路不再摆臂
+    player.setCarrying(true);
     // 抱到目标旁：仍站在距目标 0.85m 的位置
     const dx2 = root.position.x - to.x;
     const dz2 = root.position.z - to.z;
@@ -1078,9 +1120,11 @@ async function boot() {
     const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
     await walkToPoint(stand2.x, stand2.z);
     await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
-    const placed = await player.perform("chess_place", [{ time: 0.4, type: "release" }, { time: 1.2, type: "settle" }], (type) => {
+    // 事件表来自 catalog.actions[chess_place]：0.4 release / 1.2 placement_gate / 1.3 land_confirmed
+    const placed = await player.perform("chess_place", [{ time: 0.4, type: "release" }, { time: 1.2, type: "placement_gate" }, { time: 1.3, type: "land_confirmed" }], (type) => {
       if (type === "release") xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
     });
+    player.setCarrying(false);
     if (!placed) return { ok: false, reason: "PLACE_FAILED" };
     const token = (ctx as { token?: string } | undefined)?.token ?? xiangqiTokenRef;
     const res = await client.xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col });
@@ -1171,7 +1215,7 @@ async function boot() {
   // 收步也是按帧推进的：低帧率下 0.8 秒的收步可能占好几秒墙钟，给足时间
   const waitBodySettled = async (timeoutMs = 30000) => {
     const t0 = performance.now();
-    while (player.state.walking || player.state.base !== "idle_stand" || phase !== "idle" || player.state.upper !== null || player.performing !== null) {
+    while (player.state.walking || !player.state.resting || phase !== "idle" || player.state.upper !== null || player.performing !== null) {
       if (performance.now() - t0 > timeoutMs) return false;
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -1416,7 +1460,7 @@ async function boot() {
 
     switch (phase) {
       case "stopping":
-        if (player.state.base === "idle_stand") phase = "idle";
+        if (player.state.resting) phase = "idle";
         break;
       case "idle": {
         if (!destination) break;
@@ -1468,7 +1512,7 @@ async function boot() {
     const gameInProgress = gameBoard?.status === "playing";
     const canRoam =
       stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !destination && !roamBusy && !taskActive &&
-      !gameInProgress && phase === "idle" && !player.state.walking && player.state.base === "idle_stand";
+      !gameInProgress && phase === "idle" && !player.state.walking && player.state.resting;
 
     if (canRoam) {
       roamTimer -= dt;
@@ -1583,6 +1627,7 @@ async function boot() {
 
   (window as unknown as Record<string, unknown>).whale = {
     stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE, stepPropWorld, xiangqiBoard,
+    stowScoop: loco.stowScoop, unstowScoop: loco.unstowScoop,
     getXiangqi: () => xiangqiView,
     getGame: () => gameBoard,
     gomokuBoard,

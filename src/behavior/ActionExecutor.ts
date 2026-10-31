@@ -457,6 +457,19 @@ export class ActionExecutor {
         return done("succeeded", outcome as unknown as Record<string, unknown>, "OK");
       }
 
+      // 饭勺腰挂：素材事件在整段落臂动画中间（0.9s / 0.5s），到点才换父级
+      case "stow_scoop":
+      case "unstow_scoop": {
+        const bridge = step.action === "stow_scoop" ? this.loco.stowScoop : this.loco.unstowScoop;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const raced = await this.withTimeout(bridge(), 60000);
+        if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
+        const outcome = raced.value;
+        if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");
+        if (!outcome.ok) return done("failed", outcome as unknown as Record<string, unknown>, "PRECONDITION_FAILED");
+        return done("succeeded", outcome as unknown as Record<string, unknown>, "OK");
+      }
+
       case "walk_to": {
         const walkTo = this.loco.walkTo;
         if (!walkTo) return done("unsupported", null, "CAPABILITY_DISABLED");

@@ -93,6 +93,10 @@ export interface Locomotion {
   stone?: StoneBridge;
   /** 可选：象棋搬棋：走近 → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
   xiangqiMove?(step: { game_id: string; piece_id: string; to_row: number; to_col: number; expected_revision: number }, ctx: { token?: string }): Promise<{ ok: boolean; committed?: boolean; revision?: number; reason?: string; captured?: string | null; [k: string]: unknown }>;
+  /** 可选：把饭勺挂到右腰（stow_scoop，素材 waist_attach@0.9s） */
+  stowScoop?(): Promise<{ ok: boolean; slot?: string; reason?: string; [k: string]: unknown }>;
+  /** 可选：从右腰取回饭勺（unstow_scoop，素材 hand_attach@0.5s） */
+  unstowScoop?(): Promise<{ ok: boolean; slot?: string; reason?: string; [k: string]: unknown }>;
   /** 可选：走到指定世界坐标（宿主算转向与步数） */
   walkTo?(x: number, z: number, toleranceM: number): Promise<{ ok: boolean; distance_m?: number; position?: { x: number; z: number }; error?: string; [k: string]: unknown }>;
 }

@@ -43,7 +43,7 @@
 
 ## 未完成（客户端与正式场景）
 
-1. ~~棋盘与场地~~ ✅ 已完成（余：寻路边界/物理边界仍按 8m，执行器 walkableHalf 未跟随 11.5m）
+1. ~~棋盘与场地~~ ✅ 已完成（场地与执行器 walkableHalf 都跟随 11.5m；`makeExecutor` 每次运行取 `stage.roomHalf`）
 2. **用户交互**（基础已通）：轨迹弧线落座、被吃子消失时序、拖动排除、触屏、重连恢复；
 3. **角色搬运**：`character_xiangqi.glb`（61 段）加载与旧 45 段兼容、魔法吸附/抱持/送出、`chess_*` 16 段动作接入、右腰挂勺的视觉与槽位、两手单一持棋锚点；
 4. **异常与抢占**：闹钟最高优先级打断、安全放置、ACK 丢失/重复、旧代际 token、多页租约；
@@ -66,4 +66,28 @@
 
 仍未接：`chess_carry_start/walk/stop`（抱棋时仍在用普通走路摆臂）、右腰挂勺、抢占/安全放置、完整棋例。
 
-服务端可开局、可走子、可提交，但**前端还没有象棋入口**，UI 不显示棋盘。按交接文档「素材数值通过不代表正式执行器已上线」，这一版只算服务端切片，不能当作象棋游戏已交付。
+前端已有入口（「象棋开局」）。按交接文档「素材数值通过不代表正式执行器已上线」，这一版算**可玩的服务端 + 客户端成型切片**，但抢占/安全放置/完整棋例与真实模型对局仍未完成，不能当作象棋已交付。
+
+### ⑦ 抱棋步态（已接）
+
+素材的 14 段 `chess_*` 是整段全身动画（含尾巴）。`LayeredMotionPlayer` 新增抱棋基底层：
+
+- 按 `walk.lower` 的骨骼分区把 `chess_hold / chess_carry_start / chess_carry_walk / chess_carry_stop / chess_carry_adjust_*` 切成 `lower` + `upperBase` 两层，**尾巴轨道丢掉**交给尾巴层独占（不丢会双写尾巴）。没有参照分区就不启用抱棋，宁可退回普通步态。
+- 位移曲线照抄 catalog：起步 `0.045u²`、循环 `0.1125t`（每圈 0.18m）、停步 `0.045(2u-u²)`、微调 `d·u²(3-2u)`，多一档 1cm（`chess_carry_adjust_01`）。位移仍由 `movementDelta` 输出，与动画同一时钟。
+- 走完落到 `chess_hold`（抱棋静姿）而不是 `idle_stand`；`state.resting` 统一表示"站定了"，等步/收步/结算的判定都改用它，否则抱棋会被当成永远没停。
+- 抱棋时不能跑（`runDistance` 直接拒绝），也不能在走步中途切模式（`setCarrying` 返回 false）。
+
+**浏览器实测**（本地服务 + headless）：采样 3362 帧，抱棋阶段出现的基底只有 `chess_hold / chess_carry_start / chess_carry_walk / chess_carry_stop`，全程没有 `walk`；提交成功 `black_cannon_1 → (3,1) rev=2`。
+
+### ⑧ 右腰挂勺（已接）
+
+- `stow_scoop` / `unstow_scoop` 进执行器（此前只在能力表和协议里，执行时是 `CAPABILITY_DISABLED`）。
+- `PropItem` 新增 `waist` 模式：挂点来自象棋目录 `bindings.rightWaist`（bone `root.x` + 列主序矩阵），用到时才拉目录并 `setWaistTarget`，给 `playful-v2` 目录零改动（它有 SHA 校验）。
+- 事件按素材走：`stow_scoop` 0.9s `waist_attach`、`unstow_scoop` 0.5s `hand_attach`，整段 `right_arm` 层，手臂交给动作、持物层让位。
+- 挂上后 `state=worn / mode=waist`，`dig`/`throw` 的前置条件自然不再满足；快照新增 `slots.waist_slot`。
+
+**浏览器实测**：`stow` 返回 `{ok, slot:"waist_slot", state:"worn"}`，勺子贴到腰高 0.354m；身体转 90° 后勺子跟着走 0.265m；`unstow` 回到 `{slot:"right_hand", state:"held"}`。
+
+### ⑨ 旧授权作废
+
+`beginMove` 签发新 token 时把上一张未使用的标记为 `superseded`，`commitMove` 返回 `SUPERSEDED`——抢占/重来之后，上一轮的 token 不能把棋子落下去。

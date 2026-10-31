@@ -525,3 +525,31 @@ test("walk_to 之后接 place_stone：两步都执行", async () => {
   assert.equal(r.steps[0].status, "succeeded");
   assert.equal(r.steps[1].status, "succeeded");
 });
+
+test("stow_scoop / unstow_scoop：接线后走成功，没接线报 CAPABILITY_DISABLED", async () => {
+  const { loco } = makeMoveLoco();
+  const off = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r0 = await off.run({ steps: [{ action: "stow_scoop", object_id: "rice_scoop" }] });
+  assert.equal(r0.steps[0].reasonCode, "CAPABILITY_DISABLED");
+
+  const calls = [];
+  loco.stowScoop = async () => { calls.push("stow"); return { ok: true, slot: "waist_slot" }; };
+  loco.unstowScoop = async () => { calls.push("unstow"); return { ok: true, slot: "right_hand" }; };
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r1 = await ex.run({ steps: [{ action: "stow_scoop", object_id: "rice_scoop" }, { action: "unstow_scoop", object_id: "rice_scoop" }] });
+  assert.deepEqual(calls, ["stow", "unstow"]);
+  assert.equal(r1.steps[0].status, "succeeded");
+  assert.equal(r1.steps[0].actual.slot, "waist_slot");
+  assert.equal(r1.steps[1].status, "succeeded");
+  assert.equal(r1.steps[1].actual.slot, "right_hand");
+});
+
+test("stow_scoop 没有勺子时报 PRECONDITION_FAILED，不会假装成功", async () => {
+  const { loco } = makeMoveLoco();
+  loco.stowScoop = async () => ({ ok: false, reason: "PRECONDITION_FAILED", detail: { error: "NO_SCOOP" } });
+  const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+  const r = await ex.run({ steps: [{ action: "stow_scoop", object_id: "rice_scoop" }] });
+  assert.equal(r.steps[0].status, "failed");
+  assert.equal(r.steps[0].reasonCode, "PRECONDITION_FAILED");
+  assert.equal(r.steps[0].actual.detail.error, "NO_SCOOP");
+});

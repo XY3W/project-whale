@@ -37,13 +37,29 @@ export const MOVE_CLIPS: Record<string, { duration: number; distance: (t: number
   walk_adjust_04: { duration: 0.8, distance: (t) => 0.04 * smoothstep(clamp01(t / 0.8)) },
   walk_adjust_06: { duration: 0.8, distance: (t) => 0.06 * smoothstep(clamp01(t / 0.8)) },
   walk_adjust_08: { duration: 0.8, distance: (t) => 0.08 * smoothstep(clamp01(t / 0.8)) },
+  // 抱棋步态：取自 XIANGQI_ASSET_HANDOFF 的动作表，曲线与普通走路同一套公式，
+  // 只是幅度按"双手占着、不能摆臂"重新交付过。chess_hold 是无限循环的静姿，不进这张表。
+  chess_carry_start: { duration: 0.8, distance: (t) => 0.045 * clamp01(t / 0.8) ** 2 },
+  chess_carry_walk: { duration: 1.6, distance: (t) => 0.1125 * t },
+  chess_carry_stop: { duration: 0.8, distance: (t) => 0.045 * (2 * clamp01(t / 0.8) - clamp01(t / 0.8) ** 2) },
+  chess_carry_adjust_01: { duration: 0.8, distance: (t) => 0.01 * smoothstep(clamp01(t / 0.8)) },
+  chess_carry_adjust_02: { duration: 0.8, distance: (t) => 0.02 * smoothstep(clamp01(t / 0.8)) },
+  chess_carry_adjust_04: { duration: 0.8, distance: (t) => 0.04 * smoothstep(clamp01(t / 0.8)) },
+  chess_carry_adjust_06: { duration: 0.8, distance: (t) => 0.06 * smoothstep(clamp01(t / 0.8)) },
+  chess_carry_adjust_08: { duration: 0.8, distance: (t) => 0.08 * smoothstep(clamp01(t / 0.8)) },
 };
 
 export const ADJUST_DISTANCES = [0.02, 0.04, 0.06, 0.08];
+/** 抱棋时多一档 1cm（素材 chess_carry_adjust_01） */
+export const CARRY_ADJUST_DISTANCES = [0.01, 0.02, 0.04, 0.06, 0.08];
 /** run 的合法距离：0.144 + 0.32N（N=1..11） */
 export const RUN_DISTANCES = Array.from({ length: 11 }, (_, i) => Math.round((0.144 + 0.32 * (i + 1)) * 1000) / 1000);
+const CARRY_BASES = ['chess_hold', 'chess_carry_start', 'chess_carry_walk', 'chess_carry_stop',
+  'chess_carry_adjust_01', 'chess_carry_adjust_02', 'chess_carry_adjust_04', 'chess_carry_adjust_06', 'chess_carry_adjust_08'];
 const BASE_CLIPS = ['idle_stand','walk_start','walk','walk_stop','run_start','run','run_stop',
-  'walk_adjust_02','walk_adjust_04','walk_adjust_06','walk_adjust_08'];
+  'walk_adjust_02','walk_adjust_04','walk_adjust_06','walk_adjust_08', ...CARRY_BASES];
+const adjustName = (carry: boolean, meters: number) =>
+  `${carry ? 'chess_carry_adjust' : 'walk_adjust'}_${String(Math.round(meters * 100)).padStart(2, '0')}`;
 type MoveKind = 'walk' | 'run' | 'adjust';
 
 /** Baked poses only. Locomotion transitions are authored; no runtime bone solving. */
@@ -70,6 +86,8 @@ export class LayeredMotionPlayer {
   private soloName: string | null = null;
   private soloPaused = false;
   private soloLoop = false;
+  /** 抱棋模式：基底层换成 chess_* 一套，走路不再摆臂 */
+  private carryMode = false;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
   movementDelta = 0;
   /** 调试用：这一帧持仓层实际作用/让位了哪些槽位 */
@@ -88,7 +106,38 @@ export class LayeredMotionPlayer {
       }
       this.actions.set(clip.name, a);
     }
+    this.registerCarryBases();
     this.weights(); this.mixer.update(0);
+  }
+
+  /**
+   * 抱棋动作在素材里是整段全身动画（含尾巴）。按 walk.lower 的骨骼分区切成
+   * lower / upperBase 两层，尾巴轨道丢掉交给尾巴层独占，这样抱棋能和走路一样分层。
+   * 没有参照分区就不启用抱棋——宁可退回普通步态，也不要猜错骨骼归属。
+   */
+  private registerCarryBases() {
+    const lower = new Set(this.actions.get('walk.lower')?.getClip().tracks.map((t) => t.name) ?? []);
+    if (lower.size === 0) return;
+    const tail = new Set(this.actions.get('tail_idle')?.getClip().tracks.map((t) => t.name) ?? []);
+    const oneShot = new Set(['chess_carry_start', 'chess_carry_stop']);
+    for (const base of CARRY_BASES) {
+      const clip = this.actions.get(base)?.getClip();
+      if (!clip) continue;
+      const pairs: Array<readonly [string, THREE.KeyframeTrack[]]> = [
+        ['lower', clip.tracks.filter((t) => lower.has(t.name))],
+        ['upperBase', clip.tracks.filter((t) => !lower.has(t.name) && !tail.has(t.name))],
+      ];
+      for (const [suffix, tracks] of pairs) {
+        if (!tracks.length) continue;
+        const split = new THREE.AnimationClip(`${base}.${suffix}`, clip.duration, tracks.map((t) => t.clone()));
+        const a = this.mixer.clipAction(split);
+        a.setEffectiveWeight(0);
+        if (oneShot.has(base)) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; }
+        a.play();
+        this.actions.set(`${base}.${suffix}`, a);
+      }
+      this.actions.get(base)?.setEffectiveWeight(0).stop();
+    }
   }
   private get(name: string) { const a = this.actions.get(name); if (!a) throw new Error(`Missing baked clip: ${name}`); return a; }
   private setBase(base: string) {
@@ -106,6 +155,24 @@ export class LayeredMotionPlayer {
 
   get moving(): boolean { return this.moveKind !== null; }
 
+  /** 站定静姿：普通是 idle_stand，抱棋是 chess_hold。等"走完了"的地方都该看这个。 */
+  private get atRest(): boolean { return this.base === 'idle_stand' || this.base === 'chess_hold'; }
+  get carrying(): boolean { return this.carryMode; }
+
+  /**
+   * 切换抱棋模式。只在站定时切，避免半途换基底把脚步打断。
+   * 抱棋期间手势由上层继续接管上臂，与素材的"双手占住"不冲突（手势本就只在站定时触发）。
+   */
+  setCarrying(on: boolean): boolean {
+    if (this.carryMode === on) return true;
+    if (this.moveKind || this.perf) return false;
+    this.carryMode = on;
+    this.setBase(on ? 'chess_hold' : 'idle_stand');
+    this.weights();
+    this.mixer.update(0);
+    return true;
+  }
+
   /** 精确走：只接受 0.09 + 0.18n 米，返回是否接受 */
   walkDistance(meters: number): boolean {
     if (this.perf) return false;
@@ -118,12 +185,13 @@ export class LayeredMotionPlayer {
     this.halted = false;
     // n 是完整步周期数：起步之后要真的走满 n 圈，n=0（0.09m）直接收步
     this.cyclesLeft = n;
-    this.setBase('walk_start');
+    this.setBase(this.carryMode ? 'chess_carry_start' : 'walk_start');
     return true;
   }
 
   /** 跑动：距离必须是 0.144 + 0.32N，起步/收步固定在片段首尾 */
   runDistance(meters: number): boolean {
+    if (this.carryMode) return false;
     if (this.perf) return false;
     if (this.soloAction) this.stopSolo();
     if (!Number.isFinite(meters) || this.moveKind) return false;
@@ -142,12 +210,12 @@ export class LayeredMotionPlayer {
     if (this.perf) return false;
     if (this.soloAction) this.stopSolo();
     if (!Number.isFinite(meters) || this.moveKind) return false;
-    const match = ADJUST_DISTANCES.find((d) => Math.abs(d - meters) < 1e-9);
+    const match = (this.carryMode ? CARRY_ADJUST_DISTANCES : ADJUST_DISTANCES).find((d) => Math.abs(d - meters) < 1e-9);
     if (match === undefined) return false;
     this.moveKind = 'adjust';
     this.halted = false;
     this.cyclesLeft = 0;
-    this.setBase(`walk_adjust_${String(Math.round(match * 100)).padStart(2, '0')}`);
+    this.setBase(adjustName(this.carryMode, match));
     return true;
   }
 
@@ -161,7 +229,7 @@ export class LayeredMotionPlayer {
   setWalking(value: boolean) {
     if (this.perf) return;
     if (!value) this.haltMovement();
-    else if (!this.moveKind && this.base === 'idle_stand') { this.moveKind = 'walk'; this.cyclesLeft = Infinity; this.setBase('walk_start'); }
+    else if (!this.moveKind && this.atRest) { this.moveKind = 'walk'; this.cyclesLeft = Infinity; this.setBase(this.carryMode ? 'chess_carry_start' : 'walk_start'); }
   }
   gesture(name: string) {
     if (this.perf) return;
@@ -192,6 +260,13 @@ export class LayeredMotionPlayer {
   get holdEnabled(): boolean { return this.holds.get('left_hand')?.enabled ?? false; }
   get holdTrackCount(): number { return this.holds.get('left_hand')?.overlay.trackCount ?? 0; }
   get holdSlots(): string[] { return [...this.holds.keys()]; }
+  /** 调试用：抱棋步态切出来的两条轨道各有多少条骨骼通道（尾巴应被排除） */
+  get carryTrackCounts(): { lower: number; upper: number } {
+    return {
+      lower: this.actions.get('chess_carry_walk.lower')?.getClip().tracks.length ?? 0,
+      upper: this.actions.get('chess_carry_walk.upperBase')?.getClip().tracks.length ?? 0,
+    };
+  }
 
   /**
    * 播放一次性全身互动片段（拾取/戴上/取下/投掷/挖掘）。
@@ -355,7 +430,9 @@ export class LayeredMotionPlayer {
       walking: this.moveKind === 'walk',
       running: this.moveKind === 'run',
       base: this.base,
-      walkWeight: this.base === 'idle_stand' ? 0 : 1,
+      carrying: this.carryMode,
+      resting: this.atRest,
+      walkWeight: this.atRest ? 0 : 1,
       upper: this.upper,
       upperWeight: this.upperWeight,
       tail: this.tail,
@@ -371,8 +448,9 @@ export class LayeredMotionPlayer {
       if (perf) w *= perf.ending ? 1 - perf.fade : 0;
       const lower = this.actions.get(`${base}.lower`);
       const upperBase = this.actions.get(`${base}.upperBase`);
-      lower?.setEffectiveWeight(w).setEffectiveTimeScale(base === 'idle_stand' ? 1 : this.rate);
-      upperBase?.setEffectiveWeight(w * (1 - this.upperWeight)).setEffectiveTimeScale(base === 'idle_stand' ? 1 : this.rate);
+      const timeScale = base === 'idle_stand' || base === 'chess_hold' ? 1 : this.rate;
+      lower?.setEffectiveWeight(w).setEffectiveTimeScale(timeScale);
+      upperBase?.setEffectiveWeight(w * (1 - this.upperWeight)).setEffectiveTimeScale(timeScale);
     }
     if (perf) {
       perf.action.setEffectiveWeight(perf.ending ? perf.fade : 1);
@@ -432,20 +510,25 @@ export class LayeredMotionPlayer {
 
   /** 基础片段结束时的状态转移 */
   private completeBase() {
+    const c = this.carryMode;
     const base = this.base;
-    if (base === 'walk_start') { this.setBase(this.cyclesLeft > 0 ? 'walk' : 'walk_stop'); return; }
+    const start = c ? 'chess_carry_start' : 'walk_start';
+    const loop = c ? 'chess_carry_walk' : 'walk';
+    const stop = c ? 'chess_carry_stop' : 'walk_stop';
+    const rest = c ? 'chess_hold' : 'idle_stand';
+    if (base === start) { this.setBase(this.cyclesLeft > 0 ? loop : stop); return; }
     if (base === 'run_start') { this.setBase(this.cyclesLeft > 0 ? 'run' : 'run_stop'); return; }
-    if (base === 'walk' || base === 'run') {
+    if (base === loop || base === 'walk' || base === 'run') {
       this.cyclesLeft--;
       // 点击地面这种连续行走用 Infinity 表示无限循环；haltMovement 之后不再续圈
-      if (this.halted || this.moveKind === null) { this.setBase(base === 'walk' ? 'walk_stop' : 'run_stop'); return; }
+      if (this.halted || this.moveKind === null) { this.setBase(base === loop ? stop : base === 'walk' ? 'walk_stop' : 'run_stop'); return; }
       if (this.cyclesLeft > 0) { this.setBase(base); return; }
-      this.setBase(base === 'walk' ? 'walk_stop' : 'run_stop');
+      this.setBase(base === loop ? stop : base === 'walk' ? 'walk_stop' : 'run_stop');
       return;
     }
     this.moveKind = null;
     this.halted = false;
-    this.setBase('idle_stand');
+    this.setBase(rest);
   }
 
   /** 互动片段推进：事件前先求值到事件时刻，再继续吃掉本帧剩余时间 */
