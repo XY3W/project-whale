@@ -1,0 +1,42 @@
+{
+  "baseline": "9b3d5a0",
+  "scope": "actual board/player/physics classes in memory; no browser timing or production simulation",
+  "release": {
+    "before": [
+      0,
+      0.32234999537467957,
+      0.6267220377922058
+    ],
+    "afterFirstTick": [
+      -3.4499999999999997,
+      0,
+      -1.7249999999999999
+    ],
+    "expected": "Continue the authored transfer curve and wait above the victim until commit"
+  },
+  "pauseInsideEvent": {
+    "paused": true,
+    "actualTime": 1.1300000000000008,
+    "expectedTime": 1.1
+  },
+  "expandedFloor": {
+    "arenaHalf": 5.75,
+    "positionAfter2s": [
+      5.349999904632568,
+      -17.16131591796875,
+      0
+    ]
+  },
+  "lateWaistBinding": {
+    "beforeBinding": {
+      "state": "resting",
+      "holder": null,
+      "mode": "world"
+    },
+    "afterBinding": {
+      "state": "resting",
+      "holder": null,
+      "mode": "world"
+    }
+  }
+}

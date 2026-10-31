@@ -350,7 +350,7 @@ function tickAutoPlay() {
   const now = Date.now();
   if (Date.now() < autoplay.manualPauseUntil) return;
   // 五子棋进行中就不自动开局扫雷（两盘互斥，场上一次只摆一个盘）
-  if (gomoku.public()?.status === "playing") return;
+  if (gomoku.public()?.status === "playing" || xiangqi.public()) return;
   if (session.task || !isLeaseAlive() || session.phase === "unknown" || session.phase === "stopping") {
     if (process.env.AUTOPLAY_DEBUG) console.log(`[autoplay] skip task=${!!session.task} lease=${!!isLeaseAlive()} chat=${session.chatOpen} phase=${session.phase}`);
     return;
@@ -922,11 +922,14 @@ function skillCandidate(task) {
 
 function eventNote(events) {
   const types = [...new Set((events ?? []).map((e) => e.type))];
-  if (types.includes("xiangqi_started")) {
-    const yours = (events ?? []).find((e) => e.type === "xiangqi_started")?.yourTurn;
-    return yours
-      ? "本轮触发：xiangqi_started。新开一局、你执红先行：按 xiangqi 段落的规则想好第一着，调用 xiangqi_move 落子；没有别的用户指令。"
-      : "本轮触发：xiangqi_started。新开一局、你执黑、用户先走：只简短确认一句你在等，不要调用 xiangqi_move，也不要替用户走红子。";
+  const chess = xiangqi.public();
+  const chessEvents = (events ?? []).filter((e) => e.gameId === chess?.gameId && ["xiangqi_started", "xiangqi_your_turn"].includes(e.type));
+  if (chess?.status === "playing" && chessEvents.length) {
+    // 开局事件可能与用户第一手合并，必须看最新回合，不能被旧的“用户先走”说明盖掉。
+    if (chess.turn === chess.characterSide) {
+      return "本轮触发：xiangqi_your_turn。当前权威棋盘已经轮到你：用户完成了合法走子，或正在恢复你尚未完成的一手；若新局由你执红则走第一着。请先根据 xiangqi.legalMoves 决定棋步，再准备装备并调用 xiangqi_move。只走自己一方的一着，服务端确认后等待用户。";
+    }
+    return "本轮触发：xiangqi_started。新开一局、用户执红先走：只简短确认一句你在等，不要调用 xiangqi_move，也不要替用户走红子。";
   }
   const candidate = (events ?? []).find((e) => e.type === "skill_candidate");
   const head = types.length ? `本轮触发：${types.join(" / ")}。` : "";
@@ -1416,6 +1419,16 @@ wss.on("connection", (ws, req) => {
         if(typeof msg.runtimeVersion==="string")ws.runtimeVersion=msg.runtimeVersion;
         if (!isLeaseAlive()) grantLease(ws);
         send(ws, "session_state", statePayload(ws));
+        // 部署/重连后，已经轮到她的棋局不能因为内存事件丢失而永久等住。
+        // 每个执行租约只补一次；只读连接及重复 hello 不触发。
+        if (isLease(ws) && ws.xiangqiWakeEpoch !== session.leaseEpoch) {
+          ws.xiangqiWakeEpoch = session.leaseEpoch;
+          if (xiangqi.waitingForCharacter()) {
+            autoplay.manualPauseUntil = 0;
+            persist();
+            noteGameEvent("xiangqi_your_turn", xiangqi.public(), { trigger: "executor_reconnected" });
+          }
+        }
         break;
 
       case "heartbeat":
@@ -1577,6 +1590,9 @@ wss.on("connection", (ws, req) => {
         send(ws, "xiangqi_state", { board });
         broadcastState();
         console.log(`[xiangqi] 开局 ${board.gameId}（用户执${board.userSide === "red" ? "红" : "黑"}）`);
+        // 用户主动开象棋，应解除扫雷/五子棋手动结束留下的硬暂停。
+        autoplay.manualPauseUntil = 0;
+        autoplay.backoff = 1;
         persist();
         // 新开一局就唤起一次模型：她执红先走就规划第一着；用户执红时只确认、不抢第一着。
         // gameId 变了才算新局，重复点开局不会重复触发。
@@ -1603,6 +1619,10 @@ wss.on("connection", (ws, req) => {
         send(ws, "xiangqi_state", { board: xiangqi.public(), result: { ok: result.ok, reason: result.reason ?? null, replay: !!result.replay } });
         broadcastState();
         if (result.ok && !result.replay) {
+          // 每一手合法用户走子都是明确的继续对局意图；非法步/重发不唤醒模型。
+          autoplay.manualPauseUntil = 0;
+          autoplay.backoff = 1;
+          persist();
           console.log(`[xiangqi] 用户走子 ${msg.pieceId} → (${msg.toRow},${msg.toCol}) rev=${xiangqi.public().revision}`);
           if (xiangqi.status !== "playing") noteGameEvent("xiangqi_finished", xiangqi.public(), { result: xiangqi.status });
           else if (xiangqi.waitingForCharacter()) noteGameEvent("xiangqi_your_turn", xiangqi.public(), { trigger: "user_moved" });
@@ -1644,10 +1664,13 @@ wss.on("connection", (ws, req) => {
       case "xiangqi_end": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能结束对局" }); break; }
         if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        const before = xiangqi.public()?.gameId ?? null;
         pendingXiangqiCleanup(session, msg.resign ? "xiangqi_resign" : "xiangqi_end");
         if (msg.resign) xiangqi.resign(msg.side === "black" ? "black" : msg.side === "red" ? "red" : null);
         else xiangqi.clear();
         session.pendingXiangqi = null;
+        gameEvents.clearGame(before ?? "");
+        autoplay.manualPauseUntil = Date.now() + AUTO_AFTER_MANUAL_END_MS;
         send(ws, "xiangqi_state", { board: xiangqi.public() });
         broadcastState();
         console.log(`[xiangqi] ${msg.resign ? "认输" : "结束对局"}`);

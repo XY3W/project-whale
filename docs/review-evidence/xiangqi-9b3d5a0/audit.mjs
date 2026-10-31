@@ -1,0 +1,41 @@
+// Deterministic follow-up probes. No network, production data, or LLM calls.
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import * as T from 'three';
+import { XiangqiBoard } from '../../../src/game/XiangqiBoard.ts';
+import { LayeredMotionPlayer } from '../../../src/character/LayeredMotionPlayer.ts';
+import { BasinPhysics } from '../../../src/prop/basinPhysics.ts';
+import { PropItem } from '../../../src/prop/PropItem.ts';
+import { createGame, publicGame } from '../../../server/xiangqi.mjs';
+const out={baseline:'9b3d5a0',scope:'actual board/player/physics classes in memory; no browser timing or production simulation'};
+const board=new XiangqiBoard(new T.Scene());
+for(const p of JSON.parse(fs.readFileSync('public/models/xiangqi-v1/initial_layout.json'))){board.layout.set(p.pieceId,p);board.templates.set(p.template,new T.Group());}
+board.curves=JSON.parse(fs.readFileSync('public/models/xiangqi-v1/prop_motion.json')).clips;
+board.update(publicGame(createGame()));
+const parent=new T.Group();board.beginCarry('black_cannon_1',parent);board.followCarry('chess_hold',0);
+const obj=board.instances.get('black_cannon_1'),before=obj.position.toArray();
+board.endCarry('black_cannon_1',{row:3,col:1});board.tick(performance.now());
+out.release={before,afterFirstTick:obj.position.toArray(),expected:'Continue the authored transfer curve and wait above the victim until commit'};
+assert.equal(obj.position.y,0);
+const root=new T.Group(),sample=new T.Object3D();sample.name='sample';root.add(sample);
+const position=new T.VectorKeyframeTrack('sample.position',[0,1.8],[0,0,0,0,1.8,0]);
+const tail=new T.QuaternionKeyframeTrack('sample.quaternion',[0,1.8],[0,0,0,1,0,0,0,1]);
+const player=new LayeredMotionPlayer(root,[new T.AnimationClip('chess_capture_place',1.8,[position]),new T.AnimationClip('tail_idle',1.8,[tail]),new T.AnimationClip('tail_swish',1.8,[tail.clone()])]);
+const done=player.perform('chess_capture_place',[{time:1.1,type:'capture_commit_gate'}],()=>player.pausePerformance());
+for(let i=0;i<108;i++)player.update(.01);player.update(.05);
+out.pauseInsideEvent={paused:player.performancePaused,actualTime:player.performanceTime,expectedTime:1.1};
+assert(player.performanceTime>1.12);player.cancelPerformance();for(let i=0;i<20;i++)player.update(.05);await done;
+const hull=new Float32Array([-0.03,-0.03,-0.03, .03,-.03,-.03, -.03,.03,-.03, .03,.03,-.03, -.03,-.03,.03, .03,-.03,.03, -.03,.03,.03, .03,.03,.03]);
+const physics=await BasinPhysics.create(hull,4,'box');physics.setArenaHalf(5.75);
+physics.launch({position:new T.Vector3(5.35,1,0),quaternion:new T.Quaternion(),velocity:new T.Vector3(),angularVelocity:new T.Vector3()});
+let last;for(let i=0;i<120;i++)last=physics.step(1/60);
+out.expandedFloor={arenaHalf:physics.arenaHalfSize,positionAfter2s:last.pose.position.toArray()};assert(last.pose.position.y<-1);physics.stop();physics.world.free();
+const catalog=JSON.parse(fs.readFileSync('public/models/playful-v2/catalog.json'));
+const bones=new Map();for(const b of Object.values(catalog.bindings)){const bone=new T.Bone();bone.name=b.bone;bones.set(b.bone.replace(/[^A-Za-z0-9_]/g,''),bone);}
+const scene=new T.Group();scene.add(new T.Mesh(new T.BoxGeometry(.04,.04,.04),new T.MeshBasicMaterial()));
+const ladle=await PropItem.create({id:'rice_scoop',catalog,propMotion:JSON.parse(fs.readFileSync('public/models/playful-v2/prop_motion.json')),charRoot:new T.Group(),scene,bones,parent:new T.Scene()});
+ladle.restore({state:'worn',holder:'waist_slot',position:[0,.35,0],quaternion:[0,0,0,1]});
+const first=ladle.snapshot();ladle.setWaistTarget(new T.Bone(),new T.Matrix4());const later=ladle.snapshot();
+out.lateWaistBinding={beforeBinding:{state:first.state,holder:first.holder,mode:ladle.mode},afterBinding:{state:later.state,holder:later.holder,mode:ladle.mode}};
+assert.notEqual(later.holder,'waist_slot');
+console.log(JSON.stringify(out,null,2));

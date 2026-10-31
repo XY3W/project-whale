@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { configureCameraInput } from "./cameraInput";
 
 /**
  * 舞台：渲染器、相机、灯光、地面、环境贴图。
@@ -46,6 +47,8 @@ export class Stage {
     this.camera.position.set(6, 12, 10);
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    // 左键留给棋子/角色交互；按住滚轮旋转，滚动滚轮仍缩放。
+    configureCameraInput(this.controls);
     this.controls.target.set(0, 0.62, 0);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.06;

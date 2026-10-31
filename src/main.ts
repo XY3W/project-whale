@@ -349,6 +349,11 @@ async function boot() {
 
   const canvas = stage.renderer.domElement;
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) {
+      downAt = null;
+      if (e.button === 1) e.preventDefault();
+      return;
+    }
     downAt = { x: e.clientX, y: e.clientY, t: performance.now() };
   });
   canvas.addEventListener("pointercancel", () => {
@@ -360,6 +365,7 @@ async function boot() {
     xiangqiBoard.select(null);
   });
   canvas.addEventListener("pointerup", (e) => {
+    if (e.button !== 0) { downAt = null; return; }
     if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
     const quick = performance.now() - downAt.t < 400;
