@@ -60,7 +60,7 @@ export const PROTOCOL = (process.env.LLM_PROTOCOL ?? "json").trim() === "tools" 
  */
 export function renderSections(text, flags = {}) {
   return text
-    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gm, (_, name, body) =>
+    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku|xiangqi)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gm, (_, name, body) =>
       flags[name.toLowerCase()] ? body : "",
     )
     .replace(/\n{3,}/g, "\n\n");
@@ -116,7 +116,7 @@ function contextBlock(ctx) {
 }
 
 function render(templateName, ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, skillIndex: ctx.skills?.index ?? [] };
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: !!ctx.xiangqi, skillIndex: ctx.skills?.index ?? [] };
   // 索引已经写进 system prompt，就别在上下文 JSON 里再付一遍
   const contextForJson = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
   const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...contextForJson, phase: ctx.phase ?? templateName.replace(".txt", "") }));
@@ -131,7 +131,7 @@ function render(templateName, ctx) {
  * 之后的轮次只追加 assistant(tool_calls) / tool(result)，前缀保持稳定以便命中缓存。
  */
 export function toolStartMessages(ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, skillIndex: ctx.skills?.index ?? [] };
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: !!ctx.xiangqi, skillIndex: ctx.skills?.index ?? [] };
   const { index, ...restSkills } = ctx.skills ?? {};
   const clean = ctx.skills ? { ...ctx, skills: restSkills } : ctx;
   return [

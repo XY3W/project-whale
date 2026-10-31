@@ -243,3 +243,45 @@ export function trimExecutionReport(result) {
     }),
   };
 }
+
+/**
+ * 象棋公开上下文：完整可见盘面 + 合法候选 + 装备槽位。
+ * 只放模型需要的稳定事实，动画/寻路细节留给执行器。
+ */
+export function xiangqiContext(view, character = null, slots = null, pending = null) {
+  if (!view) return null;
+  const grid = Array.from({ length: 10 }, () => Array(9).fill("."));
+  const legendKind = { general: "将", advisor: "士", elephant: "象", horse: "马", rook: "车", cannon: "炮", pawn: "兵" };
+  for (const p of view.pieces ?? []) {
+    if (!grid[p.row] || grid[p.row][p.col] === undefined) continue;
+    const letter = legendKind[p.kind] ?? "?";
+    grid[p.row][p.col] = p.side === "red" ? letter : letter.toLowerCase();
+  }
+  const legal = {};
+  for (const m of view.legalMoves ?? []) {
+    (legal[m.pieceId] ??= []).push({ row: m.row, col: m.col });
+  }
+  return {
+    gameId: view.gameId,
+    ruleset: view.ruleset,
+    revision: view.revision,
+    status: view.status,
+    turn: view.turn,
+    userSide: view.userSide,
+    characterSide: view.characterSide,
+    yourTurn: view.turn === view.characterSide,
+    check: view.check,
+    result: view.result,
+    lastMove: view.lastMove ? { pieceId: view.lastMove.pieceId, from: view.lastMove.from, to: view.lastMove.to, captured: view.lastMove.captured } : null,
+    pieces: (view.pieces ?? []).map((p) => ({ id: p.id, side: p.side, kind: p.kind, row: p.row, col: p.col })),
+    legalMoves: legal,
+    pendingMove: pending,
+    slots,
+    coordinateRule: "row=0 黑底线、row=9 红底线；col=0..8；世界坐标 x=(col-4)*1.15, z=(row-4.5)*1.15",
+    legend: "rows 每行 9 列，红方大写（将士象马车炮兵），黑方小写；. 为空",
+    rows: grid.map((line) => line.join("")),
+    currentCell: character && Number.isFinite(character.x) && Number.isFinite(character.z)
+      ? { row: Math.round(character.z / 1.15 + 4.5), col: Math.round(character.x / 1.15 + 4) }
+      : null,
+  };
+}

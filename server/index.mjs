@@ -19,6 +19,8 @@ import { WebSocketServer } from "ws";
 import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
+import { XiangqiService } from "./xiangqi-service.mjs";
+import { RED as XIANGQI_RED, BLACK as XIANGQI_BLACK, publicGame as xiangqiPublic, legalMoves as xiangqiLegalMoves } from "./xiangqi.mjs";
 import { createSpeechTidy } from "./speech.mjs";
 import { SkillRegistry } from "./skills.mjs";
 import { createFailureLog, describeFailures } from "./failures.mjs";
@@ -32,7 +34,7 @@ import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS 
 
 import { createGameEventQueue } from "./events.mjs";
 import { createTimerService } from "./timers.mjs";
-import { boardContext, characterContext, gomokuContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport } from "./public-state.mjs";
+import { boardContext, characterContext, gomokuContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport, xiangqiContext } from "./public-state.mjs";
 import { CAPABILITY_VERSION, ModelError, PROMPT_VERSION, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 import { validatePlan } from "./capabilities.mjs";
 
@@ -117,6 +119,7 @@ let nextTask = 100;
 const STATE_FILE = path.join(process.cwd(), "data", "state.json");
 const games = new GameService(path.join(process.cwd(), "data", "minesweeper.json"));
 const gomoku = new GomokuService(path.join(process.cwd(), "data", "gomoku.json"));
+const xiangqi = new XiangqiService(path.join(process.cwd(), "data", "xiangqi.json"));
 /** 台词微调：连续回合不重复用同一个开场迟疑词（“唔……”） */
 const speechTidy = createSpeechTidy();
 /** 她自己写的经验（技能）；正文按需读取，不常驻提示词 */
@@ -222,6 +225,10 @@ const session = {
   digSeq: 0,
   stoneAuth: new Map(),
   stoneSeq: 0,
+  /** 象棋搬运事务：服务端签发的 token 与阶段，提交后清空 */
+  xiangqiAuth: new Map(),
+  xiangqiSeq: 0,
+  pendingXiangqi: null,
 };
 
 
@@ -290,6 +297,7 @@ function statePayload(ws) {
     ...propPayload(),
     game: games.public(),
     gomoku: gomoku.public(),
+    xiangqi: xiangqi.public(),
     readOnly: ws !== session.lease,
     hasExecutor: isLeaseAlive(),
     character,
@@ -720,6 +728,7 @@ function modelContext(task, phase, extra = {}) {
       note: task.skillNote ?? null,
     },
     gomoku: gomokuContext(gomoku.public(), character, GOMOKU_BLACK),
+    xiangqi: xiangqiContext(xiangqi.public(), character, slotsOf(props), session.pendingXiangqi ?? null),
     ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: recent })),
     memory: selfPlay?[]:relevantMemory(store.state,task.ownerScope),
     ...extra,
@@ -999,6 +1008,7 @@ function worldSnapshot() {
   return {
     board: boardContext(board, character),
     gomoku: gomokuContext(g, character, GOMOKU_BLACK),
+    xiangqi: xiangqiContext(xiangqi.public(), character, slotsOf(props), session.pendingXiangqi ?? null),
     characterState: characterContext(character),
     props: propsContext(props),
     position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
@@ -1240,6 +1250,7 @@ function applyOutput(ws, task, out) {
   // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
   // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
   const digAuthId = issueDigAuth(task, out.plan);
+  const xiangqiAuth = issueXiangqiAuth(task, out.plan);
   const planSpeech = speechTidy.tidy(out.speech || "");
   if(planSpeech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",planSpeech));
   if (task.toolsMode) {
@@ -1254,6 +1265,8 @@ function applyOutput(ws, task, out) {
     speech: planSpeech,
     digAuthId,
     stoneAuthId,
+    xiangqiToken: xiangqiAuth.token,
+    xiangqiError: xiangqiAuth.error,
     plan: out.plan,
   });
 }
@@ -1285,6 +1298,36 @@ function issueStoneAuth(task, plan) {
   for (const [id] of used.slice(0, Math.max(0, used.length - 8))) session.stoneAuth.delete(id);
   console.log(`[gomoku] 落子授权 ${authId} (${step.row},${step.col}) rev=${step.expected_revision}`);
   return authId;
+}
+
+/**
+ * 为计划里的 xiangqi_move 签发一次性搬运 token。
+ * 规则校验在 xiangqi-service.beginMove 里做（回合、归属、合法性、revision），
+ * 客户端只负责搬，提交时服务端再复检一次，token 不能由模型编造。
+ */
+function issueXiangqiAuth(task, plan) {
+  const step = (plan.steps ?? []).find((s) => s.action === "xiangqi_move");
+  if (!step) return { token: null, error: null };
+  const began = xiangqi.beginMove({
+    pieceId: step.piece_id,
+    toRow: step.to_row,
+    toCol: step.to_col,
+    expectedRevision: step.expected_revision,
+    taskId: task.id,
+    generation: task.generation,
+  });
+  if (!began.ok) return { token: null, error: began };
+  const token = `xq-${task.id}-${++session.xiangqiSeq}-g${task.generation}`;
+  session.xiangqiAuth.set(token, {
+    token, serviceToken: began.token, taskId: task.id, generation: task.generation,
+    pieceId: step.piece_id, from: began.from, to: began.to,
+    expectedRevision: began.revision, issuedAt: Date.now(), used: false, response: null,
+  });
+  session.pendingXiangqi = { token, pieceId: step.piece_id, from: began.from, to: began.to, expectedRevision: began.revision, stage: "reserved", taskId: task.id, generation: task.generation };
+  const unused = [...session.xiangqiAuth].filter(([, a]) => !a.used);
+  for (const [id] of unused.slice(0, -1)) session.xiangqiAuth.delete(id);
+  console.log(`[xiangqi] 搬运授权 ${token} ${step.piece_id} (${began.from.row},${began.from.col})→(${began.to.row},${began.to.col}) rev=${began.revision}`);
+  return { token, error: null };
 }
 
 /**
@@ -1392,6 +1435,7 @@ wss.on("connection", (ws, req) => {
           break;
         }
         if (gomoku.public()) { gomoku.clear(); send(ws, "gomoku_state", { board: null }); console.log("[gomoku] 收起五子棋，改开扫雷"); }
+        if (xiangqi.public()) { xiangqi.clear(); send(ws, "xiangqi_state", { board: null }); console.log("[xiangqi] 收起象棋，改开扫雷"); }
         const previous = games.public()?.gameId ?? null;
         const board = games.start(msg.requestId);
         send(ws, "game_state", { board });
@@ -1434,6 +1478,7 @@ wss.on("connection", (ws, req) => {
         if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
         // 五子棋与扫雷互斥：开一局就收起另一局
         if (games.public()) { games.clear(); send(ws, "game_state", { board: null }); console.log("[game] 收起扫雷，改开五子棋"); }
+        if (xiangqi.public()) { xiangqi.clear(); send(ws, "xiangqi_state", { board: null }); console.log("[xiangqi] 收起象棋，改开五子棋"); }
         const previous = gomoku.public()?.gameId ?? null;
         const board = gomoku.start(msg.requestId);
         send(ws, "gomoku_state", { board });
@@ -1521,6 +1566,94 @@ wss.on("connection", (ws, req) => {
       case "skills_delete": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能删技能" }); break; }
         if (skills.remove(msg.id)) broadcastSkills();
+        break;
+      }
+
+      case "xiangqi_start": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能开局" }); break; }
+        if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        // 三种模式互斥：开象棋就收起扫雷/五子棋
+        if (games.public()) { games.clear(); send(ws, "game_state", { board: null }); console.log("[game] 收起扫雷，改开象棋"); }
+        if (gomoku.public()) { gomoku.clear(); send(ws, "gomoku_state", { board: null }); console.log("[gomoku] 收起五子棋，改开象棋"); }
+        const previous = xiangqi.public()?.gameId ?? null;
+        const board = xiangqi.start({ requestId: msg.requestId, userSide: msg.userSide === "black" ? "black" : "red" });
+        send(ws, "xiangqi_state", { board });
+        broadcastState();
+        console.log(`[xiangqi] 开局 ${board.gameId}（用户执${board.userSide === "red" ? "红" : "黑"}）`);
+        persist();
+        if (board.gameId !== previous && board.turn === board.characterSide) {
+          noteGameEvent("xiangqi_started", board, { trigger: "user_button" });
+        }
+        break;
+      }
+
+      case "xiangqi_move": {
+        if (!isLease(ws)) { send(ws, "xiangqi_state", { board: xiangqi.public(), error: "NOT_EXECUTOR" }); break; }
+        if (!epochOk(msg)) { send(ws, "xiangqi_state", { board: xiangqi.public(), error: "STALE_LEASE" }); break; }
+        const result = xiangqi.userMove({
+          moveId: msg.moveId,
+          gameId: msg.gameId,
+          pieceId: msg.pieceId,
+          toRow: msg.toRow,
+          toCol: msg.toCol,
+          expectedRevision: msg.expectedRevision,
+        });
+        send(ws, "xiangqi_state", { board: xiangqi.public(), result: { ok: result.ok, reason: result.reason ?? null, replay: !!result.replay } });
+        broadcastState();
+        if (result.ok && !result.replay) {
+          console.log(`[xiangqi] 用户走子 ${msg.pieceId} → (${msg.toRow},${msg.toCol}) rev=${xiangqi.public().revision}`);
+          if (xiangqi.status !== "playing") noteGameEvent("xiangqi_finished", xiangqi.public(), { result: xiangqi.status });
+          else if (xiangqi.waitingForCharacter()) noteGameEvent("xiangqi_your_turn", xiangqi.public(), { trigger: "user_moved" });
+        }
+        break;
+      }
+
+      case "xiangqi_commit": {
+        const reply = (body) => send(ws, "xiangqi_result", { token: msg.token, ...body });
+        if (!isLease(ws)) return reply({ ok: false, reason: "NOT_EXECUTOR" });
+        if (!isLeaseAlive()) return reply({ ok: false, reason: "LEASE_STALE" });
+        if (!epochOk(msg)) return reply({ ok: false, reason: "STALE_LEASE" });
+        const task = session.task;
+        const auth = session.xiangqiAuth.get(String(msg.token ?? ""));
+        if (!auth) return reply({ ok: false, reason: "NO_AUTH" });
+        if (!task || task.id !== auth.taskId || task.generation !== auth.generation) return reply({ ok: false, reason: "STALE_TASK" });
+        if (auth.used) return reply(auth.response ?? { ok: false, reason: "ALREADY_COMMITTED" });
+        const result = xiangqi.commitMove({ token: auth.serviceToken, revision: msg.expectedRevision, toRow: msg.toRow, toCol: msg.toCol });
+        const response = {
+          ok: !!result.ok,
+          committed: !!result.committed,
+          reason: result.reason ?? null,
+          revision: xiangqi.public()?.revision ?? null,
+          captured: result.captured ?? null,
+          board: result.board ?? xiangqi.public(),
+        };
+        auth.used = true;
+        auth.response = response;
+        session.pendingXiangqi = null;
+        reply(response);
+        if (response.committed) {
+          broadcastState();
+          console.log(`[xiangqi] 她落子 ${auth.pieceId} → (${auth.to.row},${auth.to.col}) rev=${xiangqi.public().revision}`);
+          if (xiangqi.status !== "playing") noteGameEvent("xiangqi_finished", xiangqi.public(), { result: xiangqi.status });
+        }
+        break;
+      }
+
+      case "xiangqi_end": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能结束对局" }); break; }
+        if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        if (msg.resign) xiangqi.resign(msg.side === "black" ? "black" : msg.side === "red" ? "red" : null);
+        else xiangqi.clear();
+        session.pendingXiangqi = null;
+        send(ws, "xiangqi_state", { board: xiangqi.public() });
+        broadcastState();
+        console.log(`[xiangqi] ${msg.resign ? "认输" : "结束对局"}`);
+        persist();
+        break;
+      }
+
+      case "xiangqi_state": {
+        send(ws, "xiangqi_state", { board: xiangqi.public() });
         break;
       }
 

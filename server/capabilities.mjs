@@ -47,6 +47,34 @@ export const CAPABILITIES = [
     },
   },
   {
+    id: "stow_scoop",
+    enabled: true,
+    channels: ["item"],
+    params: {
+      object_id: { enum: ["rice_scoop"], note: "要挂到右腰的兵械（当前只有饭勺）" },
+    },
+  },
+  {
+    id: "unstow_scoop",
+    enabled: true,
+    channels: ["item"],
+    params: {
+      object_id: { enum: ["rice_scoop"], note: "要从右腰取回的兵械（当前只有饭勺）" },
+    },
+  },
+  {
+    id: "xiangqi_move",
+    enabled: true,
+    channels: ["item"],
+    params: {
+      game_id: { type: "string", note: "当前象棋的 gameId" },
+      piece_id: { type: "string", note: "要搬的棋子稳定 id，如 red_rook_1" },
+      to_row: { type: "number", min: 0, max: 9, note: "0 黑底线，9 红底线" },
+      to_col: { type: "number", min: 0, max: 8, note: "0 从 -X 向 +X" },
+      expected_revision: { type: "number", min: 0, note: "必须等于公开棋局的 revision" },
+    },
+  },
+  {
     id: "place_stone",
     enabled: true,
     channels: ["item"],
@@ -156,7 +184,7 @@ export function validatePlan(plan) {
  */
 export function assertDigPlacement(steps) {
   // dig 和 place_stone 都是一次性“落地”动作：最多一个，且必须是最后一步
-  for (const [action, label] of [["dig", "DIG"], ["place_stone", "STONE"]]) {
+  for (const [action, label] of [["dig", "DIG"], ["place_stone", "STONE"], ["xiangqi_move", "XIANGQI_MOVE"]]) {
     const at = steps.map((s, i) => (s && s.action === action ? i : -1)).filter((i) => i >= 0);
     if (at.length > 1) throw new ModelError(`MULTIPLE_${label}_STEPS`, `一个计划最多一个 ${action}`, 0);
     if (at.length === 1 && at[0] !== steps.length - 1) {
@@ -164,7 +192,7 @@ export function assertDigPlacement(steps) {
     }
   }
   if (digInParallel(steps)) {
-    throw new ModelError("DIG_IN_PARALLEL", "dig/place_stone 不能放进 parallel", 0);
+    throw new ModelError("DIG_IN_PARALLEL", "dig/place_stone/xiangqi_move 不能放进 parallel", 0);
   }
 }
 
@@ -181,6 +209,21 @@ export function validateStep(step, id = "step") {
   if (!cap.enabled) throw new ModelError("CAPABILITY_DISABLED", `${id} ${cap.id} 未启用：${cap.disabledReason}`, 0);
 
   switch (cap.id) {
+    case "stow_scoop":
+      if (step.object_id !== "rice_scoop") throw new ModelError("INVALID_SCHEMA", `${id} stow_scoop 只支持 rice_scoop`, 0);
+      return { action: "stow_scoop", object_id: "rice_scoop" };
+    case "unstow_scoop":
+      if (step.object_id !== "rice_scoop") throw new ModelError("INVALID_SCHEMA", `${id} unstow_scoop 只支持 rice_scoop`, 0);
+      return { action: "unstow_scoop", object_id: "rice_scoop" };
+    case "xiangqi_move": {
+      const row = step.to_row, col = step.to_col, rev = step.expected_revision;
+      if (typeof step.game_id !== "string" || !step.game_id) throw new ModelError("INVALID_SCHEMA", `${id} 需要 game_id`, 0);
+      if (typeof step.piece_id !== "string" || !step.piece_id) throw new ModelError("INVALID_SCHEMA", `${id} 需要 piece_id`, 0);
+      if (!Number.isInteger(row) || row < 0 || row > 9) throw new ModelError("INVALID_SCHEMA", `${id} to_row 必须是 0..9 的整数`, 0);
+      if (!Number.isInteger(col) || col < 0 || col > 8) throw new ModelError("INVALID_SCHEMA", `${id} to_col 必须是 0..8 的整数`, 0);
+      if (!Number.isInteger(rev) || rev < 0) throw new ModelError("INVALID_SCHEMA", `${id} expected_revision 必须是非负整数`, 0);
+      return { action: "xiangqi_move", game_id: step.game_id, piece_id: step.piece_id, to_row: row, to_col: col, expected_revision: rev };
+    }
     case "set_basin_grip":
       if(step.object_id!=="basin"||!["inward","outward"].includes(step.grip))throw new ModelError("INVALID_SCHEMA",`${id} 持盆参数非法`,0);
       return {action:cap.id,object_id:"basin",grip:step.grip};
