@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { sampleCurve, type CurveSample } from "../prop/catalog.ts";
 import type { XiangqiView } from "../behavior/protocol";
 
 /** 与素材契约一致：格宽 1.15m，10 行 × 9 列交点，场地 11.5×11.5m */
@@ -61,6 +62,8 @@ export class XiangqiBoard {
   private lastGameId: string | null = null;
   /** 正在被抱着的棋子：暂时脱离盘面同步 */
   private carried = new Set<string>();
+  /** 素材交付的持棋轨迹：每个 chess_* 动作一条 actor-local 曲线（prop_motion.json） */
+  private curves: Record<string, { chess: CurveSample[] }> = {};
 
   private readonly groundTop: THREE.Mesh | null;
 
@@ -86,11 +89,13 @@ export class XiangqiBoard {
     const loader = new GLTFLoader();
     const base = "/models/xiangqi-v1/";
     try {
-      const [board, pieces, layout] = await Promise.all([
+      const [board, pieces, layout, motion] = await Promise.all([
         loader.loadAsync(`${base}board.glb`),
         loader.loadAsync(`${base}pieces.glb`),
         fetch(`${base}initial_layout.json`).then((r) => r.json() as Promise<LayoutPiece[]>),
+        fetch(`${base}prop_motion.json`).then((r) => r.json() as Promise<{ clips: Record<string, { chess: CurveSample[] }> }>),
       ]);
+      this.curves = motion.clips;
       // 棋盘：11.5×11.5 平面，压在地板上方一点
       const boardRoot = board.scene;
       boardRoot.traverse((o) => {
@@ -263,6 +268,7 @@ export class XiangqiBoard {
     const t = Math.min(0.16, (now - this.lastMovePulse) / 600);
     const arc = Math.sin(Math.min(1, t) * Math.PI) * 0.32;
     for (const [id, obj] of this.instances) {
+      if (this.carried.has(id)) continue; // 抱着的棋子由 followCarry 独占，缓动不能再拉它
       const target = this.targets.get(id);
       if (!target) continue;
       obj.position.lerp(target.pos, 0.22);
@@ -294,10 +300,38 @@ export class XiangqiBoard {
     const obj = this.instances.get(pieceId);
     if (!obj) return false;
     this.carried.add(pieceId);
+    this.targets.delete(pieceId);
     parent.attach(obj);
     obj.position.copy(local);
     obj.quaternion.identity();
     return true;
+  }
+
+  /**
+   * 抱棋推进：棋子按素材交付的 actor-local 曲线（prop_motion.json 的 chess 键）
+   * 跟着双手走，而不是固定在身体某个点。时间轴与动画同一个时钟。
+   */
+  followCarry(clip: string, time: number) {
+    const samples = this.curves[clip]?.chess;
+    if (!samples?.length || !this.carried.size) return false;
+    const sample = sampleCurve(samples, time);
+    if (!sample) return false;
+    for (const id of this.carried) {
+      const obj = this.instances.get(id);
+      if (!obj) continue;
+      obj.position.fromArray(sample.position);
+      obj.quaternion.fromArray(sample.quaternion);
+    }
+    return true;
+  }
+
+  /** 调试用：被抱棋子的角色本地坐标 */
+  carriedPose(): { x: number; y: number; z: number } | null {
+    for (const id of this.carried) {
+      const obj = this.instances.get(id);
+      if (obj) return { x: obj.position.x, y: obj.position.y, z: obj.position.z };
+    }
+    return null;
   }
 
   /** 送出：棋子回到棋盘层，之后由 tick 缓动到目标交点 */

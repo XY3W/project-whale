@@ -1609,6 +1609,8 @@ async function boot() {
     root.updateMatrixWorld(true);
     board.tick();
     gomokuBoard.tick();
+    const carry = player.carrySample;
+    if (carry) xiangqiBoard.followCarry(carry.clip, carry.time);
     xiangqiBoard.tick(performance.now());
     stepPropWorld(dt);
     basin.update(dt, player.performanceTime);

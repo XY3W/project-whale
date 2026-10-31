@@ -262,6 +262,20 @@ export class LayeredMotionPlayer {
   get holdEnabled(): boolean { return this.holds.get('left_hand')?.enabled ?? false; }
   get holdTrackCount(): number { return this.holds.get('left_hand')?.overlay.trackCount ?? 0; }
   get holdSlots(): string[] { return [...this.holds.keys()]; }
+  /**
+   * 抱棋曲线的采样时钟：优先互动片段（chess_pickup / chess_place），其次抱棋基底层。
+   * 循环片段按自己的时长取模，避免采样到曲线末端。
+   */
+  get carrySample(): { clip: string; time: number } | null {
+    const chess = (name: string | null) => (name && name.startsWith('chess_') ? name : null);
+    const perfName = chess(this.perf?.name ?? null);
+    if (perfName) return { clip: perfName, time: this.perf!.action.time };
+    const base = chess(this.base);
+    if (!base) return null;
+    const duration = this.actions.get(`${base}.lower`)?.getClip().duration ?? 0;
+    return { clip: base, time: duration > 0 ? this.baseTime % duration : this.baseTime };
+  }
+
   /** 调试用：抱棋步态切出来的两条轨道各有多少条骨骼通道（尾巴应被排除） */
   get carryTrackCounts(): { lower: number; upper: number } {
     return {
