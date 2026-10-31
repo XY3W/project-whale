@@ -19,22 +19,26 @@ const TOKEN_TTL_MS = 5 * 60 * 1000;
 export class XiangqiService {
   constructor(file) {
     this.file = file;
-    this.game = this.load();
     this.lastRequestId = null;
     this.tokens = new Map();
     this.tokenSeq = 0;
     /** moveId → 结算结果，用于客户端重发时幂等回放 */
     this.decisions = {};
-    this.history = this.game ? [signature(this.game)] : [];
+    /** 局面签名历史：长将/重复裁决的依据，必须跟盘面一起落盘 */
+    this.history = [];
+    this.game = this.load();
+    if (this.game && !this.history.length) this.history = [signature(this.game)];
   }
 
   load() {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, "utf8"));
       this.decisions = raw?.decisions ?? {};
+      this.history = Array.isArray(raw?.history) ? raw.history : [];
       return restoreGame(raw);
     } catch {
       this.decisions = {};
+      this.history = [];
       return null;
     }
   }
@@ -43,7 +47,7 @@ export class XiangqiService {
     try {
       fs.mkdirSync(path.dirname(this.file), { recursive: true });
       const tmp = `${this.file}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify({ ...serializeGame(this.game), decisions: this.decisions }));
+      fs.writeFileSync(tmp, JSON.stringify({ ...serializeGame(this.game), decisions: this.decisions, history: this.history }));
       fs.renameSync(tmp, this.file);
     } catch (err) {
       console.error("xiangqi save failed", err.message);

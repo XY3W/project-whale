@@ -410,25 +410,35 @@ export function adjudicateRepeat(game, history) {
   if (seen.length < 3) return null;
   // 只回看最后一次循环：从倒数第三次出现到现在
   const cycle = game.moves.slice(seen[seen.length - 3]);
-  const mover = cycle.at(-1)?.side;
-  const own = mover ? cycle.filter((m) => m.side === mover) : [];
-  if (mover && own.length >= 2 && own.every((m) => m.check)) {
-    return { threefold: true, reason: "perpetual_check", winner: other(mover), loser: mover };
+  if (!cycle.length) return null;
+  // 按走子方分组：循环是整圈，双方各走若干手
+  const bySide = new Map();
+  for (const m of cycle) {
+    if (!bySide.has(m.side)) bySide.set(m.side, []);
+    bySide.get(m.side).push(m);
   }
-  // 长捉：循环里每一手都在威胁吃掉同一个敌子，而且这口子是"白吃"（那子没人保）。
-  // 只认白吃，是为了不把长兑/长跟/长拦误判成捉——那些都建立在子被保护、吃了要亏子的前提上。
-  if (mover && own.length >= 2) {
+  // 长将：看的是"谁每一手都在将军"，不是"谁最后走"。
+  // 被将一方把局面走回重复时，最后走的是防守方，按旧写法会去查防守方而漏掉将军方。
+  const checkers = [...bySide.entries()].filter(([, moves]) => moves.length >= 2 && moves.every((m) => m.check));
+  if (checkers.length === 1) {
+    const [side] = checkers[0];
+    return { threefold: true, reason: "perpetual_check", winner: other(side), loser: side };
+  }
+  if (checkers.length > 1) return { threefold: true, reason: "repetition", winner: null }; // 互将，判和
+  // 长捉：某一方循环里每一手都在威胁同一枚敌子，而且这口子吃下去赚子力。
+  // 换亏或兑子（净收益 ≤ 0）只算长兑/长跟/长拦，判和。
+  for (const [side, moves] of bySide) {
+    if (moves.length < 2) continue;
     let common = null;
-    for (const m of own) {
+    for (const m of moves) {
       const set = new Set(m.attacks ?? []);
       common = common === null ? set : new Set([...common].filter((id) => set.has(id)));
     }
     for (const victimId of common ?? []) {
       const victim = game.pieces.get(victimId);
-      if (!victim || victim.kind === "general") continue; // 将军已在上面按长将处理
-      // 吃这口子要能赚子力：白吃当然算，换子赚也算；换亏/兑子不算
+      if (!victim || victim.kind === "general") continue; // 将军已按长将处理
       if (captureGain(game, victimId) <= 0) continue;
-      return { threefold: true, reason: "perpetual_chase", winner: other(mover), loser: mover, victim: victimId };
+      return { threefold: true, reason: "perpetual_chase", winner: other(side), loser: side, victim: victimId };
     }
   }
   return { threefold: true, reason: "repetition", winner: null };
@@ -500,7 +510,7 @@ export function restoreGame(raw) {
     pieces: new Map(raw.pieces.filter((p) => p && p.id).map((p) => [p.id, { ...p }])),
     turn: raw.turn === BLACK ? BLACK : RED,
     revision: Number(raw.revision) || 0,
-    status: ["playing", "won", "draw", "ended"].includes(raw.status) ? raw.status : "playing",
+    status: ["playing", "won", "drawn", "draw", "ended"].includes(raw.status) ? (raw.status === "draw" ? "drawn" : raw.status) : "playing",
     result: raw.result ?? null,
     userSide: raw.userSide === BLACK ? BLACK : RED,
     characterSide: other(raw.userSide === BLACK ? BLACK : RED),

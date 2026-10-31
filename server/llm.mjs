@@ -111,14 +111,28 @@ const OUTPUT_CONTRACT = outputContract();
 /**
  * 上下文块的统一包装。用函数替换，避免 JSON 里的 `$&`/`$1` 被 String.replace 当成替换语法。
  */
+/**
+ * 详细棋规只在"正在下"的时候注入：终局/收起后保留最小结果做一次总结，
+ * 不把整套规则和旧合法着法一直挂在提示词里。
+ */
+const xiangqiLive = (view) => !!view && view.status === "playing";
+
+/** 终局后只留最小结果（谁赢、怎么结束、最后一手），不再给整套盘面与候选着法 */
+function slimXiangqi(view) {
+  if (!view || view.status === "playing") return view;
+  const { rows, legalMoves, pieces, slots, currentCell, ...rest } = view;
+  return rest;
+}
+
 function contextBlock(ctx) {
   return `REQUEST_CONTEXT_JSON:\n${JSON.stringify(ctx)}`;
 }
 
 function render(templateName, ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: !!ctx.xiangqi, skillIndex: ctx.skills?.index ?? [] };
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
   // 索引已经写进 system prompt，就别在上下文 JSON 里再付一遍
-  const contextForJson = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
+  const base = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
+  const contextForJson = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;
   const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...contextForJson, phase: ctx.phase ?? templateName.replace(".txt", "") }));
   return [
     { role: "system", content: systemPrompt(flags) },
@@ -131,9 +145,10 @@ function render(templateName, ctx) {
  * 之后的轮次只追加 assistant(tool_calls) / tool(result)，前缀保持稳定以便命中缓存。
  */
 export function toolStartMessages(ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: !!ctx.xiangqi, skillIndex: ctx.skills?.index ?? [] };
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
   const { index, ...restSkills } = ctx.skills ?? {};
-  const clean = ctx.skills ? { ...ctx, skills: restSkills } : ctx;
+  const base = ctx.skills ? { ...ctx, skills: restSkills } : ctx;
+  const clean = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;
   return [
     { role: "system", content: systemPrompt(flags) },
     {

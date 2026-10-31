@@ -251,7 +251,9 @@ export function trimExecutionReport(result) {
 export function xiangqiContext(view, character = null, slots = null, pending = null) {
   if (!view) return null;
   const grid = Array.from({ length: 10 }, () => Array(9).fill("."));
-  const legendKind = { general: "将", advisor: "士", elephant: "象", horse: "马", rook: "车", cannon: "炮", pawn: "兵" };
+  // 用 ASCII 字母而不是汉字：中文没有大小写，toLowerCase 对"将"是空操作，
+  // 之前 rows 里红黑完全一样，模型没法按说明区分。
+  const legendKind = { general: "K", advisor: "A", elephant: "B", horse: "N", rook: "R", cannon: "C", pawn: "P" };
   for (const p of view.pieces ?? []) {
     if (!grid[p.row] || grid[p.row][p.col] === undefined) continue;
     const letter = legendKind[p.kind] ?? "?";
@@ -278,7 +280,7 @@ export function xiangqiContext(view, character = null, slots = null, pending = n
     pendingMove: pending,
     slots,
     coordinateRule: "row=0 黑底线、row=9 红底线；col=0..8；世界坐标 x=(col-4)*1.15, z=(row-4.5)*1.15",
-    legend: "rows 每行 9 列，红方大写（将士象马车炮兵），黑方小写；. 为空",
+    legend: "rows 每行 9 列：红方大写、黑方小写（K 将 / A 士 / B 象 / N 马 / R 车 / C 炮 / P 兵），. 为空",
     rows: grid.map((line) => line.join("")),
     currentCell: character && Number.isFinite(character.x) && Number.isFinite(character.z)
       ? { row: Math.round(character.z / 1.15 + 4.5), col: Math.round(character.x / 1.15 + 4) }
