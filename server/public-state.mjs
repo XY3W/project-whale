@@ -36,12 +36,14 @@ export function sanitizeProp(raw, previous = null) {
   let state = typeof raw.state === "string" ? raw.state : "resting";
   const checkpoint=["resting","held","worn"].includes(previous?.state)?previous:previous?.checkpoint??null;
   if(!PERSISTED_PROP_STATES.has(state))state="unknown";
-  // 饭勺不能戴在头上：旧数据写错了就降级成手持
-  if (state === "worn" && !def.wear) state = "held";
   let holder = raw.holder ?? raw.slot ?? null;
   if (holder === "hand") holder = DEFAULT_SLOT[objectId] ?? def.slots[0];
+  // 挂腰也是一种 worn：饭勺挂在右腰时不能降级成手持，否则"右手空了"这件事进不了上下文
+  const waistStowed = state === "worn" && holder === "waist_slot";
+  // 饭勺不能戴在头上：旧数据写错了就降级成手持
+  if (state === "worn" && !def.wear && !waistStowed) state = "held";
   if (!["held","worn"].includes(state)) holder = null;
-  else if (state === "worn") holder = "head";
+  else if (state === "worn") holder = waistStowed ? "waist_slot" : "head";
   else if (!def.slots.includes(holder)) holder = DEFAULT_SLOT[objectId] ?? def.slots[0];
   const stand = raw.pickupStand && typeof raw.pickupStand === "object"
     && Number.isFinite(raw.pickupStand.x) && Number.isFinite(raw.pickupStand.z)
@@ -66,10 +68,12 @@ export function sanitizeProp(raw, previous = null) {
 
 /** 双手槽位：由物品状态推出，不信任单独的 slots 字段 */
 export function slotsOf(props) {
-  const slots = { left_hand: null, right_hand: null, head: null };
+  const slots = { left_hand: null, right_hand: null, head: null, waist_slot: null };
   for (const prop of props.values()) {
     if (prop.state === "held" && prop.holder in slots && !slots[prop.holder]) slots[prop.holder] = prop.object_id;
-    if (prop.state === "worn" && !slots.head) slots.head = prop.object_id;
+    if (prop.state !== "worn") continue;
+    if (prop.holder === "waist_slot") slots.waist_slot = prop.object_id;
+    else if (!slots.head) slots.head = prop.object_id;
   }
   return slots;
 }

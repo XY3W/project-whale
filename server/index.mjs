@@ -20,6 +20,7 @@ import { createStore, reconcileOnLoad } from "./store.mjs";
 import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
 import { XiangqiService } from "./xiangqi-service.mjs";
+import { issueXiangqiAuth, pendingXiangqiCleanup } from "./xiangqi-auth.mjs";
 import { RED as XIANGQI_RED, BLACK as XIANGQI_BLACK, publicGame as xiangqiPublic, legalMoves as xiangqiLegalMoves } from "./xiangqi.mjs";
 import { createSpeechTidy } from "./speech.mjs";
 import { SkillRegistry } from "./skills.mjs";
@@ -503,6 +504,7 @@ function broadcastState() {
 function cancelCurrentPlan(reason) {
   const task = session.task;
   task?.abort?.abort();
+  pendingXiangqiCleanup(session, reason);
   if (!task?.planId) return;
   const entry = session.ledger.get(task.planId);
   if (entry && entry.state === "dispatched") session.ledger.set(task.planId, { ...entry, state: "cancel_requested", reason });
@@ -1253,7 +1255,7 @@ function applyOutput(ws, task, out) {
   // 挖一个格子的授权：只有服务端下发的 dig 才能提交，客户端必须回传这个 id。
   // 授权绑定任务/代际/计划/局/格子/版本，提交时逐项复检。
   const digAuthId = issueDigAuth(task, out.plan);
-  const xiangqiAuth = issueXiangqiAuth(task, out.plan);
+  const xiangqiAuth = issueXiangqiAuth({ xiangqi, session, task, plan: out.plan });
   const planSpeech = speechTidy.tidy(out.speech || "");
   if(planSpeech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",planSpeech));
   if (task.toolsMode) {
@@ -1308,31 +1310,6 @@ function issueStoneAuth(task, plan) {
  * 规则校验在 xiangqi-service.beginMove 里做（回合、归属、合法性、revision），
  * 客户端只负责搬，提交时服务端再复检一次，token 不能由模型编造。
  */
-function issueXiangqiAuth(task, plan) {
-  const step = (plan.steps ?? []).find((s) => s.action === "xiangqi_move");
-  if (!step) return { token: null, error: null };
-  const began = xiangqi.beginMove({
-    pieceId: step.piece_id,
-    toRow: step.to_row,
-    toCol: step.to_col,
-    expectedRevision: step.expected_revision,
-    taskId: task.id,
-    generation: task.generation,
-  });
-  if (!began.ok) return { token: null, error: began };
-  const token = `xq-${task.id}-${++session.xiangqiSeq}-g${task.generation}`;
-  session.xiangqiAuth.set(token, {
-    token, serviceToken: began.token, taskId: task.id, generation: task.generation,
-    pieceId: step.piece_id, from: began.from, to: began.to,
-    expectedRevision: began.revision, issuedAt: Date.now(), used: false, response: null,
-  });
-  session.pendingXiangqi = { token, pieceId: step.piece_id, from: began.from, to: began.to, expectedRevision: began.revision, stage: "reserved", taskId: task.id, generation: task.generation };
-  const unused = [...session.xiangqiAuth].filter(([, a]) => !a.used);
-  for (const [id] of unused.slice(0, -1)) session.xiangqiAuth.delete(id);
-  console.log(`[xiangqi] 搬运授权 ${token} ${step.piece_id} (${began.from.row},${began.from.col})→(${began.to.row},${began.to.col}) rev=${began.revision}`);
-  return { token, error: null };
-}
-
 /**
  * 为计划里的 dig 发放一次性授权。计划里没有 dig 就返回 null。
  * 旧的未使用授权立即作废，used 的保留少量用于幂等重放。
@@ -1579,6 +1556,8 @@ wss.on("connection", (ws, req) => {
         if (games.public()) { games.clear(); send(ws, "game_state", { board: null }); console.log("[game] 收起扫雷，改开象棋"); }
         if (gomoku.public()) { gomoku.clear(); send(ws, "gomoku_state", { board: null }); console.log("[gomoku] 收起五子棋，改开象棋"); }
         const previous = xiangqi.public()?.gameId ?? null;
+        // 换局即撤销上一局的搬运授权，旧计划不能再落到新棋局
+        pendingXiangqiCleanup(session, "xiangqi_start");
         const board = xiangqi.start({ requestId: msg.requestId, userSide: msg.userSide === "black" ? "black" : "red" });
         send(ws, "xiangqi_state", { board });
         broadcastState();
@@ -1645,6 +1624,7 @@ wss.on("connection", (ws, req) => {
       case "xiangqi_end": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能结束对局" }); break; }
         if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        pendingXiangqiCleanup(session, msg.resign ? "xiangqi_resign" : "xiangqi_end");
         if (msg.resign) xiangqi.resign(msg.side === "black" ? "black" : msg.side === "red" ? "red" : null);
         else xiangqi.clear();
         session.pendingXiangqi = null;

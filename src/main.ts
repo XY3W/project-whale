@@ -1077,10 +1077,17 @@ async function boot() {
   };
   loco.stowScoop = () => scoopTransfer("stow");
   loco.unstowScoop = () => scoopTransfer("unstow");
+  // 开局就把腰挂点准备好：刷新时如果勺子是挂在腰上的，restore 才有地方挂
+  void ensureWaist().catch((error) => console.warn("[scoop] 腰挂绑定加载失败", error));
 
   /** 象棋搬棋：走近 0.85m → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
   loco.xiangqiMove = async (step, ctx) => {
-    const piece = xiangqiView?.pieces.find((p) => p.id === step.piece_id);
+    // 没有授权、或授权属于另一盘棋：一步都别动（走位和吸附都不能先发生）
+    if (!ctx?.token) return { ok: false, reason: "NO_AUTH" };
+    if (!xiangqiView || xiangqiView.gameId !== step.game_id) return { ok: false, reason: "STALE_GAME" };
+    if (xiangqiView.status !== "playing") return { ok: false, reason: "GAME_OVER" };
+    if (xiangqiView.turn !== xiangqiView.characterSide) return { ok: false, reason: "NOT_YOUR_TURN" };
+    const piece = xiangqiView.pieces.find((p) => p.id === step.piece_id);
     if (!piece) return { ok: false, reason: "NO_PIECE" };
     // 抢占/取消：每一步之前先问执行器还要不要继续，别把整段搬运跑完
     const aborted = () => Boolean(ctx?.isCancelled?.());

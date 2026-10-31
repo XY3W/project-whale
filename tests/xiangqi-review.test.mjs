@@ -139,3 +139,73 @@ test('盘面编码：红方大写、黑方小写，同一行能分清敌我', ()
   assert.equal(view2.rows[0][3], 'k');
   assert.match(view2.legend, /红方大写/);
 });
+
+// ---------- R03：腰间勺子在快照/槽位里必须还是腰 ----------
+
+test('挂腰的勺子：快照保持 worn + waist_slot，右手是空的', async () => {
+  const { sanitizeProp, slotsOf } = await import('../server/public-state.mjs');
+  const cleaned = sanitizeProp({
+    object_id: 'rice_scoop', state: 'worn', holder: 'waist_slot',
+    position: [0, 0.35, 0], quaternion: [0, 0, 0, 1],
+  });
+  assert.equal(cleaned.state, 'worn');
+  assert.equal(cleaned.holder, 'waist_slot');
+  const slots = slotsOf(new Map([['rice_scoop', cleaned]]));
+  assert.equal(slots.right_hand, null, '挂腰之后右手要如实报空');
+  assert.equal(slots.waist_slot, 'rice_scoop');
+  // 旧数据/脏数据仍按原规则处理
+  const bogus = sanitizeProp({ object_id: 'rice_scoop', state: 'worn', holder: null, position: [0, 0, 0], quaternion: [0, 0, 0, 1] });
+  assert.equal(bogus.state, 'held');
+  assert.equal(bogus.holder, 'right_hand');
+});
+
+test('盆戴在头上仍然是 head，不受腰槽影响', async () => {
+  const { sanitizeProp, slotsOf } = await import('../server/public-state.mjs');
+  const cleaned = sanitizeProp({ object_id: 'basin', state: 'worn', holder: 'head', position: [0, 0.9, 0], quaternion: [0, 0, 0, 1] });
+  const slots = slotsOf(new Map([['basin', cleaned]]));
+  assert.equal(cleaned.holder, 'head');
+  assert.equal(slots.head, 'basin');
+  assert.equal(slots.waist_slot, null);
+});
+
+// ---------- R04：授权必须对得上当前这盘棋 ----------
+
+test('授权：计划指向别的棋局时一个 token 都不发', async () => {
+  const { issueXiangqiAuth } = await import('../server/xiangqi-auth.mjs');
+  const svc = new XiangqiService(tmp());
+  svc.start({ requestId: 'new-game', userSide: 'black' });
+  const session = { xiangqiSeq: 0, xiangqiAuth: new Map(), pendingXiangqi: null };
+  const plan = { steps: [{ action: 'xiangqi_move', game_id: 'previous-unrelated-game', piece_id: 'red_soldier_1', to_row: 5, to_col: 0, expected_revision: 0 }] };
+  const result = issueXiangqiAuth({ xiangqi: svc, session, task: { id: 't1', generation: 1 }, plan, log: () => {} });
+  assert.equal(result.token, null);
+  assert.equal(result.error.reason, 'STALE_GAME');
+  assert.equal(session.xiangqiAuth.size, 0);
+  assert.equal(session.pendingXiangqi, null);
+});
+
+test('授权：game_id 对上了才签发，换局时撤销', async () => {
+  const { issueXiangqiAuth, pendingXiangqiCleanup } = await import('../server/xiangqi-auth.mjs');
+  const svc = new XiangqiService(tmp());
+  const board = svc.start({ requestId: 'g1', userSide: 'black' });
+  const session = { xiangqiSeq: 0, xiangqiAuth: new Map(), pendingXiangqi: null };
+  const plan = { steps: [{ action: 'xiangqi_move', game_id: board.gameId, piece_id: 'red_soldier_1', to_row: 5, to_col: 0, expected_revision: 0 }] };
+  const issued = issueXiangqiAuth({ xiangqi: svc, session, task: { id: 't2', generation: 3 }, plan, log: () => {} });
+  assert.ok(issued.token);
+  assert.equal(session.pendingXiangqi.stage, 'reserved');
+  assert.equal(session.pendingXiangqi.generation, 3);
+  assert.equal(pendingXiangqiCleanup(session, 'xiangqi_start', () => {}), 2, 'token 与 pending 一起撤销');
+  assert.equal(session.xiangqiAuth.size, 0);
+  assert.equal(session.pendingXiangqi, null);
+});
+
+test('能力：xiangqi_move 不能放进 parallel，也不能嵌套', async () => {
+  const { validatePlan } = await import('../server/capabilities.mjs');
+  assert.throws(
+    () => validatePlan({ type: 'execute_plan', steps: [{ action: 'parallel', items: [{ action: 'xiangqi_move', game_id: 'g', piece_id: 'black_rook_1', to_row: 3, to_col: 1, expected_revision: 1 }, { action: 'wait', duration_s: 0.2 }] }] }),
+    /parallel/,
+  );
+  assert.throws(
+    () => validatePlan({ type: 'execute_plan', steps: [{ action: 'parallel', items: [{ action: 'parallel', items: [{ action: 'wait', duration_s: 0.2 }] }] }] }),
+    /嵌套/,
+  );
+});

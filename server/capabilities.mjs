@@ -196,10 +196,12 @@ export function assertDigPlacement(steps) {
   }
 }
 
+/** 需要独占且必须最后一步的动作（dig / place_stone / xiangqi_move）不能进 parallel */
+const EXCLUSIVE_STEPS = new Set(["dig", "place_stone", "xiangqi_move"]);
 function digInParallel(steps) {
   return steps.some(
     (s) => s && s.action === "parallel" && Array.isArray(s.items)
-      && s.items.some((it) => it && (it.action === "dig" || it.action === "place_stone")),
+      && s.items.some((it) => it && EXCLUSIVE_STEPS.has(it.action)),
   );
 }
 
@@ -347,8 +349,8 @@ export function validateStep(step, id = "step") {
       const items = Array.isArray(step.items) ? step.items : [];
       if (!items.length || items.length > 3) throw new ModelError("INVALID_SCHEMA", `${id} items 数量必须是 1..3`, 0);
       if (items.some((it) => it && it.action === "parallel")) throw new ModelError("INVALID_SCHEMA", `${id} 不允许嵌套 parallel`, 0);
-      if (items.some((it) => it && (it.action === "dig" || it.action === "place_stone"))) {
-        throw new ModelError("DIG_IN_PARALLEL", `${id} dig/place_stone 不能放进 parallel`, 0);
+      if (items.some((it) => it && EXCLUSIVE_STEPS.has(it.action))) {
+        throw new ModelError("DIG_IN_PARALLEL", `${id} dig/place_stone/xiangqi_move 不能放进 parallel`, 0);
       }
       if(parallelConflict(items))throw new ModelError("CHANNEL_CONFLICT",`${id} 并行动作资源冲突`,0);
       return { action: "parallel", items: items.map((it, j) => validateStep(it, `${id}.${j + 1}`)) };

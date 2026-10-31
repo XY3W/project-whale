@@ -58,9 +58,9 @@ test("槽位由物品状态推导：两手同时持物", () => {
     ["basin", sanitizeProp(basin({ state: "held", holder: "hand" }))],
     ["rice_scoop", sanitizeProp(scoop({ state: "held", holder: "hand" }))],
   ]);
-  assert.deepEqual(slotsOf(props), { left_hand: "basin", right_hand: "rice_scoop", head: null });
+  assert.deepEqual(slotsOf(props), { left_hand: "basin", right_hand: "rice_scoop", head: null, waist_slot: null });
   props.set("basin", sanitizeProp(basin({ state: "worn", holder: "head" })));
-  assert.deepEqual(slotsOf(props), { left_hand: null, right_hand: "rice_scoop", head: "basin" });
+  assert.deepEqual(slotsOf(props), { left_hand: null, right_hand: "rice_scoop", head: "basin", waist_slot: null });
 });
 
 test("模型上下文：物品只给公开字段和可用动作", () => {

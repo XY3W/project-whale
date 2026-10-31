@@ -11,13 +11,15 @@ import { BasinPhysics, hullPoints, type Pose } from "./basinPhysics.ts";
  */
 export type PropState = "resting" | "reserved" | "held" | "transferring" | "worn" | "flying";
 export type PropSlot = "left_hand" | "right_hand" | "head";
+/** 物品占用的位置：双手/头/右腰挂 */
+export type PropHolder = PropSlot | "waist_slot";
 
 export interface PropSnapshot {
   id: string;
   object_id: string;
   type: string;
   revision: number;
-  holder: PropSlot | null;
+  holder: PropHolder | null;
   state: PropState;
   grip?: "inward"|"outward"|null;
   position: [number, number, number];
@@ -483,7 +485,7 @@ export class PropItem {
   }
 
   /** 刷新恢复：只接受 resting / held / worn；其它按落地处理 */
-  restore(record: { state?: string; position?: number[]; quaternion?: number[] | null; grip?:string }): boolean {
+  restore(record: { state?: string; holder?: string | null; position?: number[]; quaternion?: number[] | null; grip?:string }): boolean {
     const raw = record.state ?? "resting";
     const state: PropState = raw === "held" || raw === "worn" ? (raw as PropState) : "resting";
     const position = Array.isArray(record.position) && record.position.length === 3 ? record.position : null;
@@ -498,6 +500,15 @@ export class PropItem {
       this.mode = "hand";
       this.setMorph(0);
       this.followBone(this.bone, this.attach);
+      this.bump();
+      return true;
+    }
+    // 腰挂：刷新后要挂回腰间，而不是掉回手里（绑定没装好时宁可先挂在手上）
+    if (state === "worn" && record.holder === "waist_slot" && this.waistAttach) {
+      this.state = "worn";
+      this.mode = "waist";
+      this.setMorph(0);
+      this.followBone(this.waistBone, this.waistAttach);
       this.bump();
       return true;
     }
@@ -558,7 +569,7 @@ export class PropItem {
       object_id: this.id,
       type: this.id === "basin" ? "basin" : "scoop",
       revision: this.revision,
-      holder: this.mode === "hand" ? this.slot : this.mode === "head" ? "head" : null,
+      holder: this.mode === "hand" ? this.slot : this.mode === "head" ? "head" : this.mode === "waist" ? "waist_slot" : null,
       state: this.state,
       grip: this.state==="held"&&this.id==="basin"?this.grip:null,
       position: [
