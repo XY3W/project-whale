@@ -4,6 +4,19 @@ import { sampleCurve, type CurveSample } from "../prop/catalog.ts";
 import type { XiangqiView } from "../behavior/protocol";
 
 /** 与素材契约一致：格宽 1.15m，10 行 × 9 列交点，场地 11.5×11.5m */
+/** 落子动作：目标格上有敌子就走吃子片段，否则走普通落子片段（事件时刻来自 catalog） */
+export function placementFor(
+  pieces: Array<{ id: string; row: number; col: number }> | null | undefined,
+  moverId: string,
+  toRow: number,
+  toCol: number,
+) {
+  const victim = pieces?.find((p) => p.id !== moverId && p.row === toRow && p.col === toCol) ?? null;
+  return victim
+    ? { clip: "chess_capture_place", victim: victim.id, events: [{ time: 0.4, type: "release" }, { time: 1.1, type: "capture_commit_gate" }, { time: 1.5, type: "land_confirmed" }] }
+    : { clip: "chess_place", victim: null, events: [{ time: 0.4, type: "release" }, { time: 1.2, type: "placement_gate" }, { time: 1.3, type: "land_confirmed" }] };
+}
+
 export const XQ_CELL = 1.15;
 export const XQ_HALF = 5.75;
 export const XQ_ROWS = 10;

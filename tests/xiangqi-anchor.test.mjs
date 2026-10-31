@@ -109,3 +109,21 @@ test('持棋锚点：棋子中心 = 素材曲线，左右手心 = 中心 + 交�
   // 逐帧贴身精度由素材自带的 validate_runtime 负责。
   assert.ok(worst < 0.03, `持棋锚点与手心最大偏差 ${worst.toFixed(3)}m`);
 });
+
+test('落子片段：目标格有敌子走吃子片段，空位走普通落子', async () => {
+  const { placementFor } = await import('../src/game/XiangqiBoard.ts');
+  const pieces = [
+    { id: 'black_cannon_1', row: 2, col: 1 },
+    { id: 'red_soldier_1', row: 2, col: 3 },
+  ];
+  const capture = placementFor(pieces, 'black_cannon_1', 2, 3);
+  assert.equal(capture.clip, 'chess_capture_place');
+  assert.equal(capture.victim, 'red_soldier_1');
+  assert.deepEqual(capture.events.map((e) => e.type), ['release', 'capture_commit_gate', 'land_confirmed']);
+  const quiet = placementFor(pieces, 'black_cannon_1', 2, 2);
+  assert.equal(quiet.clip, 'chess_place');
+  assert.equal(quiet.victim, null);
+  assert.deepEqual(quiet.events.map((e) => e.type), ['release', 'placement_gate', 'land_confirmed']);
+  // 自己占着的格子不算吃子
+  assert.equal(placementFor(pieces, 'black_cannon_1', 2, 1).clip, 'chess_place');
+});

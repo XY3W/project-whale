@@ -119,3 +119,7 @@
 - 锚点契约有测试兜底：棋子中心 = 曲线点，左右手心 = 中心 + `pieces.gripsInCarrierFrame`（与素材自带 `validate_runtime` 同一套接触窗口规则）。
 
 **实测**：`beginCarry` 后 `followCarry('chess_hold', 0.5)` 把棋子放到 (0, 0.3223, 0.6267)，与曲线完全一致；抱棋全程曲线在推进（采样间位移 0.845m），提交照常成功。
+
+### ⑬ 吃子落位用专用片段
+
+`placementFor(pieces, moverId, row, col)`：目标格上有敌子 → `chess_capture_place`（0.4 release / 1.1 capture_commit_gate / 1.5 land_confirmed），空位 → `chess_place`（0.4 / 1.2 / 1.3）。之前吃子也播普通落子片段，等于白丢一段交付动作。

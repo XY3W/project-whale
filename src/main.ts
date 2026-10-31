@@ -24,7 +24,7 @@ import { planApproach, signedDeltaDeg } from "./prop/align";
 import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView, GomokuView, XiangqiView } from "./behavior/protocol.ts";
 import { MinesweeperBoard } from "./game/MinesweeperBoard";
 import { GomokuBoard, gomokuCellAt, gomokuCellCenter } from "./game/GomokuBoard";
-import { XiangqiBoard, xqPoint, xqPointAt, XQ_HALF } from "./game/XiangqiBoard";
+import { XiangqiBoard, xqPoint, xqPointAt, XQ_HALF, placementFor } from "./game/XiangqiBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = CHARACTER_MODEL;
@@ -1128,7 +1128,10 @@ async function boot() {
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
       // 事件表来自 catalog.actions[chess_place]：0.4 release / 1.2 placement_gate / 1.3 land_confirmed
       if (aborted()) return { ok: false, reason: "CANCELLED" };
-      const placed = await player.perform("chess_place", [{ time: 0.4, type: "release" }, { time: 1.2, type: "placement_gate" }, { time: 1.3, type: "land_confirmed" }], (type) => {
+      // 吃子和普通落子是两段交付动作：目标格上有敌子就用 chess_capture_place
+      const placement = placementFor(xiangqiView?.pieces, piece.id, step.to_row, step.to_col);
+      const placeClip = placement.clip;
+      const placed = await player.perform(placement.clip, placement.events, (type) => {
         if (type === "release") xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
       });
       carried = false;
@@ -1137,7 +1140,7 @@ async function boot() {
       const token = (ctx as { token?: string } | undefined)?.token ?? xiangqiTokenRef;
       const res = await client.xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col });
       if (!res.committed) return { ok: false, reason: String(res.reason ?? "NOT_COMMITTED"), ...res };
-      return { ok: true, committed: true, revision: Number(res.revision) || 0, captured: (res.captured as string | null) ?? null };
+      return { ok: true, committed: true, revision: Number(res.revision) || 0, captured: (res.captured as string | null) ?? null, placeClip };
     } finally {
       // 抢占/取消/异常：不提交棋步，棋子放回原格，退出抱棋（安全放置）
       if (carried) {
