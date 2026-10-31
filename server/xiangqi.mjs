@@ -46,11 +46,11 @@ export function initialPieces() {
     ["black_rook_2", BLACK, "rook", 0, 8],
     ["black_cannon_1", BLACK, "cannon", 2, 1],
     ["black_cannon_2", BLACK, "cannon", 2, 7],
-    ["black_pawn_1", BLACK, "pawn", 3, 0],
-    ["black_pawn_2", BLACK, "pawn", 3, 2],
-    ["black_pawn_3", BLACK, "pawn", 3, 4],
-    ["black_pawn_4", BLACK, "pawn", 3, 6],
-    ["black_pawn_5", BLACK, "pawn", 3, 8],
+    ["black_soldier_1", BLACK, "pawn", 3, 0],
+    ["black_soldier_2", BLACK, "pawn", 3, 2],
+    ["black_soldier_3", BLACK, "pawn", 3, 4],
+    ["black_soldier_4", BLACK, "pawn", 3, 6],
+    ["black_soldier_5", BLACK, "pawn", 3, 8],
     // 红方（row 9/7/6）
     ["red_rook_1", RED, "rook", 9, 0],
     ["red_horse_1", RED, "horse", 9, 1],
@@ -63,11 +63,11 @@ export function initialPieces() {
     ["red_rook_2", RED, "rook", 9, 8],
     ["red_cannon_1", RED, "cannon", 7, 1],
     ["red_cannon_2", RED, "cannon", 7, 7],
-    ["red_pawn_1", RED, "pawn", 6, 0],
-    ["red_pawn_2", RED, "pawn", 6, 2],
-    ["red_pawn_3", RED, "pawn", 6, 4],
-    ["red_pawn_4", RED, "pawn", 6, 6],
-    ["red_pawn_5", RED, "pawn", 6, 8],
+    ["red_soldier_1", RED, "pawn", 6, 0],
+    ["red_soldier_2", RED, "pawn", 6, 2],
+    ["red_soldier_3", RED, "pawn", 6, 4],
+    ["red_soldier_4", RED, "pawn", 6, 6],
+    ["red_soldier_5", RED, "pawn", 6, 8],
   ];
   return layout.map(([id, side, kind, row, col]) => ({ id, side, kind, row, col }));
 }

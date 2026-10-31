@@ -14,9 +14,12 @@ export class Stage {
 
   private readonly container: HTMLElement;
   private readonly resizeObserver: ResizeObserver;
-  /** 场地半边长（米） */
-  readonly roomHalf = 4;
-  /** 地板顶面（8×8）。扫雷期间棋盘直接换它的贴图，避免多一层悬空平面 */
+  /** 场地半边长（米）；象棋模式会临时放大到 5.75，退出时还原 */
+  roomHalf = 4;
+  private static readonly ROOM_HALF_DEFAULT = 4;
+  /** 台座（slab），setArena 时要跟着换尺寸 */
+  private slab!: THREE.Mesh;
+  /** 地板顶面（默认 8×8）。扫雷期间棋盘直接换它的贴图，避免多一层悬空平面 */
   readonly groundTop!: THREE.Mesh;
   /** 地板原本的装饰网格贴图，棋盘关掉时要还原 */
   readonly groundMap!: THREE.Texture;
@@ -111,7 +114,7 @@ export class Stage {
 
   /** 固定大小的方形场地：整个区域始终完整可见 */
   private buildGround() {
-    const AREA = 8;
+    const AREA = this.roomHalf * 2;
 
     // 台座：给区域一个明确的边界
     const slab = new THREE.Mesh(
@@ -119,6 +122,7 @@ export class Stage {
       new THREE.MeshStandardMaterial({ color: 0x0e131d, roughness: 0.95, metalness: 0.0 }),
     );
     slab.position.y = -0.07;
+    this.slab = slab;
     slab.receiveShadow = true;
     this.scene.add(slab);
 
@@ -154,6 +158,37 @@ export class Stage {
     this.scene.add(top);
     (this as { groundTop: THREE.Mesh }).groundTop = top;
     (this as { groundMap: THREE.Texture }).groundMap = gridTex;
+  }
+
+  /**
+   * 切换场地尺寸（米）。象棋 11.5m、其余模式 8m。
+   * 台座和地板平面一起重建，相机按新外接圆重新取景；已注册的棋盘会在 update 时换贴图。
+   */
+  setArena(size: number) {
+    const half = size / 2;
+    if (Math.abs(half - this.roomHalf) < 1e-6) return;
+    this.roomHalf = half;
+    // 台座
+    if (this.slab) {
+      this.slab.geometry.dispose();
+      this.slab.geometry = new THREE.BoxGeometry(size, 0.14, size);
+    }
+    // 地板平面：扫雷/五子棋会把贴图直接换到这块平面上，尺寸必须跟着变
+    this.groundTop.geometry.dispose();
+    this.groundTop.geometry = new THREE.PlaneGeometry(size, size);
+    for (const child of this.scene.children) {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh && mesh.geometry?.type === "PlaneGeometry" && mesh.position.y > 0 && mesh.position.y < 0.01) {
+        mesh.geometry.dispose();
+        mesh.geometry = new THREE.PlaneGeometry(size, size);
+      }
+    }
+    this.setRoomCamera();
+  }
+
+  /** 还原默认 8m 场地 */
+  resetArena() {
+    this.setArena(Stage.ROOM_HALF_DEFAULT * 2);
   }
 
   /** 固定房间视角：按场地外接圆反算距离，整个区域完整入画 */

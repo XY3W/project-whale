@@ -194,6 +194,30 @@ export interface GomokuView {
   stones: GomokuStone[];
 }
 
+export interface XiangqiPiece {
+  id: string;
+  side: "red" | "black";
+  kind: "general" | "advisor" | "elephant" | "horse" | "rook" | "cannon" | "pawn";
+  row: number;
+  col: number;
+}
+
+export interface XiangqiView {
+  gameId: string;
+  ruleset: string;
+  revision: number;
+  status: "playing" | "won" | "draw" | "ended";
+  turn: "red" | "black";
+  userSide: "red" | "black";
+  characterSide: "red" | "black";
+  check: boolean;
+  result: { winner: string; reason: string } | null;
+  lastMove: { pieceId: string; from: { row: number; col: number }; to: { row: number; col: number }; captured: string | null } | null;
+  moves: number;
+  pieces: XiangqiPiece[];
+  legalMoves: { pieceId: string; row: number; col: number }[];
+}
+
 export interface StoneOutcome {
   ok: boolean;
   reason?: string;

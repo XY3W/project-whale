@@ -26,7 +26,7 @@ test("用户落子：只能动自己的子，moveId 幂等，版本校验", () =
   const svc = new XiangqiService(tmp());
   const g = svc.start({ requestId: "r1", userSide: "red" });
   // 红方回合，但试图动黑子
-  assert.equal(svc.userMove({ gameId: g.gameId, pieceId: "black_pawn_1", toRow: 4, toCol: 0, expectedRevision: 0 }).reason, "NOT_YOUR_PIECE");
+  assert.equal(svc.userMove({ gameId: g.gameId, pieceId: "black_soldier_1", toRow: 4, toCol: 0, expectedRevision: 0 }).reason, "NOT_YOUR_PIECE");
   const ok = svc.userMove({ moveId: "m1", gameId: g.gameId, pieceId: "red_cannon_1", toRow: 6, toCol: 1, expectedRevision: 0 });
   assert.equal(ok.ok, true);
   assert.equal(ok.board.turn, "black");
@@ -35,7 +35,7 @@ test("用户落子：只能动自己的子，moveId 幂等，版本校验", () =
   assert.equal(replay.replay, true);
   assert.equal(replay.board.revision, 1);
   // 版本过期
-  assert.equal(svc.userMove({ moveId: "m2", gameId: g.gameId, pieceId: "black_pawn_1", toRow: 4, toCol: 0, expectedRevision: 0 }).reason, "STALE_REVISION");
+  assert.equal(svc.userMove({ moveId: "m2", gameId: g.gameId, pieceId: "black_soldier_1", toRow: 4, toCol: 0, expectedRevision: 0 }).reason, "STALE_REVISION");
 });
 
 test("角色落子：beginMove 签发 token，commitMove 结算一次", () => {

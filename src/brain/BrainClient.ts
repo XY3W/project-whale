@@ -39,6 +39,7 @@ type Handlers = {
   onBasin?: (basin: Record<string, unknown>) => void;
   onGame?: (board: unknown) => void;
   onGomoku?: (board: unknown) => void;
+  onXiangqi?: (board: unknown) => void;
   onSkills?: (payload: unknown) => void;
   onSkillEvent?: (payload: unknown) => void;
   onError?: (code: string, message: string) => void;
@@ -145,6 +146,7 @@ export class BrainClient {
           if (msg.basin) this.handlers.onBasin?.(msg.basin as Record<string, unknown>);
           if ("game" in msg) this.handlers.onGame?.(msg.game);
           if ("gomoku" in msg) this.handlers.onGomoku?.(msg.gomoku);
+          if ("xiangqi" in msg) this.handlers.onXiangqi?.(msg.xiangqi);
           if(msg.behaviorMode)this.handlers.onMode?.(msg.behaviorMode);
           if (msg.needsReconcile) this.handlers.onReconcile?.();
           break;
@@ -157,6 +159,9 @@ export class BrainClient {
           break;
         case "gomoku_state":
           this.handlers.onGomoku?.(msg.board);
+          break;
+        case "xiangqi_state":
+          this.handlers.onXiangqi?.(msg.board);
           break;
         case "skill_event":
           for (const fn of this.skillsListeners) fn(msg);
@@ -257,6 +262,21 @@ export class BrainClient {
   }
   setSkill(id: string, enabled: boolean) { return this.send("skills_set", { id, enabled }); }
   deleteSkill(id: string) { return this.send("skills_delete", { id }); }
+
+  /** 象棋开局：userSide 选红/黑，红先 */
+  startXiangqi(userSide: "red" | "black" = "red", requestId = `xq${Date.now()}`) {
+    return this.send("xiangqi_start", { requestId, userSide, leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 用户走子（己方回合） */
+  xiangqiMove(payload: { gameId: string; pieceId: string; toRow: number; toCol: number; expectedRevision: number; moveId?: string }) {
+    return this.send("xiangqi_move", { ...payload, leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 结束/收起象棋 */
+  endXiangqi() {
+    return this.send("xiangqi_end", { leaseEpoch: this.leaseEpoch });
+  }
 
   /** 五子棋开局：她执黑先行 */
   startGomoku(requestId = `gm${Date.now()}`) {

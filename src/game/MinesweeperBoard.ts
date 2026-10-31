@@ -131,6 +131,7 @@ export class MinesweeperBoard {
 
   show(visible: boolean) {
     this.active = visible;
+    this.field.visible = visible;
     if (!this.floor) this.mesh.visible = visible;
     this.syncFloor();
     if (!visible) this.draw();
@@ -151,6 +152,8 @@ export class MinesweeperBoard {
   update(board: PublicBoard | null) {
     this.board = board;
     this.active = !!board;
+    // 场地边墙只在扫雷进行时出现，平时不该一直亮着
+    this.field.visible = !!board;
     if (!this.floor) this.mesh.visible = !!board;
     this.syncFloor();
     if (board) {

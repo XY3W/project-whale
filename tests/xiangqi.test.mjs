@@ -63,7 +63,7 @@ test("马：蹩马腿", () => {
   assert.ok(moves.includes("7,0"));
   assert.ok(moves.includes("7,2"));
   // 在 (8,1) 放一个子挡住向上两条腿
-  const blocker = g.pieces.get("red_pawn_1");
+  const blocker = g.pieces.get("red_soldier_1");
   g.board[blocker.row * COLS + blocker.col] = null;
   g.board[8 * COLS + 1] = blocker.id;
   blocker.row = 8; blocker.col = 1;
@@ -79,7 +79,7 @@ test("象：塞象眼且不过河", () => {
   assert.ok(moves.includes("7,0"));
   assert.ok(moves.includes("7,4"));
   // 塞住 (8,1) 象眼
-  const b = g.pieces.get("red_pawn_1");
+  const b = g.pieces.get("red_soldier_1");
   g.board[b.row * COLS + b.col] = null;
   g.board[8 * COLS + 1] = b.id; b.row = 8; b.col = 1;
   moves = ids(legalMoves(g, elephant.id));
@@ -97,20 +97,20 @@ test("炮：隔一个炮架才能吃", () => {
   const cannon = g.pieces.get("red_cannon_1"); // (7,1)
   // 正前方 (6,1) 空、(5,1) 空……(3,1) 有黑卒？黑卒在 row3,col0/2/4/6/8 → (3,1) 空
   // 手工摆一个靶子与炮架
-  const target = g.pieces.get("black_pawn_1");
+  const target = g.pieces.get("black_soldier_1");
   g.board[target.row * COLS + target.col] = null;
   target.row = 4; target.col = 1; g.board[4 * COLS + 1] = target.id;
   // 没有炮架时不能吃
   let moves = ids(legalMoves(g, cannon.id));
   assert.ok(!moves.includes("4,1"));
   // 放一个炮架在 (5,1)
-  const screen = g.pieces.get("red_pawn_5");
+  const screen = g.pieces.get("red_soldier_5");
   g.board[screen.row * COLS + screen.col] = null;
   screen.row = 5; screen.col = 1; g.board[5 * COLS + 1] = screen.id;
   moves = ids(legalMoves(g, cannon.id));
   assert.ok(moves.includes("4,1"), "有炮架就能吃");
   // 两个炮架就吃不到
-  const extra = g.pieces.get("red_pawn_4");
+  const extra = g.pieces.get("red_soldier_4");
   g.board[extra.row * COLS + extra.col] = null;
   extra.row = 6; extra.col = 1; g.board[6 * COLS + 1] = extra.id;
   moves = ids(legalMoves(g, cannon.id));
@@ -131,9 +131,9 @@ test("士/将：只能在九宫内", () => {
 
 test("兵：过河前只能向前，过河后可横走，不能后退", () => {
   const g = game();
-  const pawn = g.pieces.get("red_pawn_1"); // (6,0)
+  const pawn = g.pieces.get("red_soldier_1"); // (6,0)
   assert.deepEqual(ids(legalMoves(g, pawn.id)), ["5,0"]);
-  const crossed = g.pieces.get("red_pawn_2"); // (6,2)
+  const crossed = g.pieces.get("red_soldier_2"); // (6,2)
   crossed.row = 4; crossed.col = 4;
   g.board[6 * COLS + 2] = null;
   g.board[4 * COLS + 4] = crossed.id;
