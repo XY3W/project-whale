@@ -48,7 +48,7 @@
 3. ~~角色搬运~~ ✅ 抱棋步态、腰挂勺、魔法吸附、双手公共锚点都已接（见 ⑦⑧⑫）；
 4. **异常与抢占**：~~旧代际 token~~ ✅、~~抢占撤回与安全放置~~ ✅（见 ⑨⑩）；ACK 丢失/重复由服务端 replay 兜住，但**重连恢复**（搬运中断线重进）没做；多页租约沿用服务端租约机制，没专门测；
 5. **完整棋例**：长将判负、长捉白吃判负、其余三次重复判和、60 回合自然限着判和已实现（见 ⑪⑭）；**长兑/长跟/长拦这类"有保护子被反复攻击"的情形仍按判和处理**，逐例精细裁决未做，仍不能宣称已完整符合 CCA2020；
-6. **LLM 闭环实测**：能力、提示词、事件已就绪，但还没有真实模型 + 真人对局跑通「她走一着 → review → 等用户」的完整回合。
+6. ~~LLM 闭环实测~~ ✅ 2026-10-31 19:31 生产环境真人对局跑通（见 ⑯）。
 
 ### ⑥ 角色搬棋（第一版跑通）
 
@@ -151,3 +151,20 @@
 - 刷新前：`carrying=true / base=chess_hold`，棋子贴在曲线锚点 (0, 0.3223, 0.6267)；
 - 刷新后：`carrying=false / base=idle_stand`，没有漂浮棋子，`revision` 仍为 1，`black_cannon_1` 仍在 (2,1)，32 枚棋子齐全——完全按服务端真相重建；
 - 再发一次搬运：服务端 `她落子 black_cannon_1 → (3,1) rev=2`，旧授权没有留下第二手。
+
+### ⑯ 真实对局（生产，deepseek-flash）
+
+2026-10-31 19:31 在服务器 8090 上由用户执红实下：
+
+```
+19:31:37 [xiangqi] 开局 xqmvwbmbg00hm（用户执红）
+19:31:47 [xiangqi] 用户走子 red_soldier_3 → (5,4) rev=1
+19:32:07 [llm] prompt_tokens=15722 completion_tokens=436
+19:32:07 [llm] thinking enabled/minimal · reasoning_tokens=258
+19:32:07 [plan] t478-228bde94 turn=1 steps=stow_scoop,xiangqi_move speech=yes
+19:32:07 [xiangqi] 搬运授权 xq-t478-228bde94-1-g383 black_cannon_2 (2,7)→(2,4) rev=1
+19:33:22 [xiangqi] 她落子 black_cannon_2 → (2,4) rev=2
+19:33:24 [llm] prompt_tokens=18442 completion_tokens=141  → [task] finish:completed
+```
+
+这一轮同时验证了：条件提示词（她先按"勺先挂腰"把装备收了）、`stow_scoop` 真实执行、`xiangqi_move` 走位/搬运/提交、review 回灌后收尾。模型仍是 deepseek-flash、thinking minimal，没有改动。
