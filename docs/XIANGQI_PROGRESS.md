@@ -28,14 +28,23 @@
 - `server/prompts/system.txt`、`planning.txt`、`review.txt` 增加 `{{#xiangqi}}` 条件段（**仅在对局进行时注入**，实测 +853 字符）；`server/llm.mjs` 的 `renderSections` 支持 `xiangqi`；
 - `server/public-state.mjs` 新增 `xiangqiContext`：10×9 文本盘面（红大写、黑小写）、合法候选、装备槽位、pending。
 
+### ⑤ 场地、棋盘与用户交互（客户端）
+
+- `Stage.setArena(11.5)`：台座与地板平面重建、相机按新外接圆重新取景；`resetArena()` 退出复原 8m。
+- `src/game/XiangqiBoard.ts`：加载 `board.glb`（正好 11.5×11.5 木纹棋盘）与 `pieces.glb` 的 14 模板，按 `initial_layout.json` 摆 32 枚棋子；只渲染服务端公开状态——被吃子移除、合法目标来自 `legalMoves`、选中棋子抬高 4.5cm、目标环（青=空位/红=吃子/金=悬停与最近一步）。
+- 交互：射线打到 y=0 平面取最近交点（0.45 格内），点己方子选中、点合法目标发 `xiangqi_move`（moveId = game+revision+piece），点别处取消；左侧工具栏新增「象棋开局」。
+- 顺手修掉两个既有问题：棋子 id 改成素材的 `*_soldier_*`（原来 `*_pawn_*` 导致 10 枚兵不渲染）；扫雷的蓝色边墙在构造时就 visible=true 且从没隐藏过，会一直压在其他场地上。
+
+**浏览器实测**：32/32 枚实例、场地半边长 5.75、网格地板隐藏；点 (6,0) 红兵选中并出现合法目标环，点 (5,0) 走成——revision 1、轮到黑、lastMove 记录正确。
+
 ### 测试
 
 `tests/xiangqi.test.mjs`（14，含 perft）、`tests/xiangqi-service.test.mjs`（9）、`tests/xiangqi-ws.test.mjs`（4，真实 WS：开局/用户走子/非法与幂等/授权提交/结束）。
 
 ## 未完成（客户端与正式场景）
 
-1. **棋盘与场地**：11.5×11.5 场地、board.glb 铺地、隐藏 16×16 网格、相机/边界/寻路参数切换与退出恢复；
-2. **用户交互**：选子抬升悬停、两种目标提示、悬停强调、弧线落座、拖动排除、重连恢复；
+1. ~~棋盘与场地~~ ✅ 已完成（余：寻路边界/物理边界仍按 8m，执行器 walkableHalf 未跟随 11.5m）
+2. **用户交互**（基础已通）：轨迹弧线落座、被吃子消失时序、拖动排除、触屏、重连恢复；
 3. **角色搬运**：`character_xiangqi.glb`（61 段）加载与旧 45 段兼容、魔法吸附/抱持/送出、`chess_*` 16 段动作接入、右腰挂勺的视觉与槽位、两手单一持棋锚点；
 4. **异常与抢占**：闹钟最高优先级打断、安全放置、ACK 丢失/重复、旧代际 token、多页租约；
 5. **完整棋例**：长将/长捉/循环/自然限着目前只有 `adjudicateRepeat` 的保守占位（三次重复→不判和，仅标记），**不能宣称已完整符合 CCA2020 棋例**；逐例裁决待补；
