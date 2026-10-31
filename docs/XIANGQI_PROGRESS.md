@@ -1,5 +1,7 @@
 # 中国象棋接入进度（DeepSeek）
 
+> 移动速度更新：用户明确允许抱棋跑动，已取消后半段禁跑与固定 0.6m 慢走尾段；下半身跑步、双手托棋、棋子跟随手骨。333 项测试及真实模型验收通过，见 [移动修复说明](XIANGQI_MOVEMENT_FIX_2026-10-31.md)。部署后需刷新网页加载新 JS。
+
 > 2026-10-31 最新用户决定与修复：取消自动判和，改为聊天双方同意后结束；旧进度中的自然限着、重复自动判和已被撤销。`924f704` 已修复本轮复现的规则误判和变着提醒，328 项测试及构建通过，完整覆盖/剩余认证范围见 [规则修复说明](XIANGQI_RULES_FIX_2026-10-31.md)。下文保留历史过程，不能将旧“已实现”当作当前自动和棋需求。
 
 2026-10-31。入口与契约见 [XIANGQI_DEVELOPMENT_HANDOFF.md](XIANGQI_DEVELOPMENT_HANDOFF.md)、[XIANGQI_PLAN.md](XIANGQI_PLAN.md)、[XIANGQI_ASSET_HANDOFF.md](XIANGQI_ASSET_HANDOFF.md)。

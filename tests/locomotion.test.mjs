@@ -12,14 +12,40 @@ test('档位与素材一致：跑/走/微调三套距离表', () => {
   assert.equal(MOVE_CLIPS.run.distance(1), 0.4);
 });
 
-test('远距离先跑、留一段走；近距离只走', () => {
+test('远距离先跑、残差再走；近距离只走', () => {
   const far = planWalkLegs(4.6);
   assert.ok(far.some((l) => l.kind === 'run'), '4.6m 应该先跑');
-  assert.ok(far.some((l) => l.kind === 'walk'), '跑完要留一段走');
+  assert.ok(far.some((l) => l.kind === 'walk'), '该距离的残差仍需走路补齐');
   const near = planWalkLegs(0.27);
   assert.deepEqual(near, [{ kind: 'walk', meters: 0.27 }]);
   const noRun = planWalkLegs(4.6, { allowRun: false });
   assert.ok(!noRun.some((l) => l.kind === 'run'));
+});
+
+function seconds(legs) {
+  return legs.reduce((sum, leg) => sum + (leg.kind === 'run'
+    ? 0.8 + Math.round((leg.meters - 0.144) / 0.32) * 0.8
+    : leg.kind === 'walk' ? 1.6 + Math.round((leg.meters - 0.09) / 0.18) * 1.6 : 0.8), 0);
+}
+
+test('空手接近 1.17m 不再全程慢走，取消固定 0.6m 尾段', () => {
+  const approach = planWalkLegs(1.17);
+  assert.deepEqual(approach, [{ kind: 'run', meters: 1.104 }, { kind: 'adjust', meters: 0.06 }]);
+  assert.ok(Math.abs(seconds(approach) - 4) < 1e-9);
+  assert.ok(seconds(approach) < seconds(planWalkLegs(1.17, { allowRun: false })) / 2);
+  for (const d of [0.09, 0.27, 0.45, 0.63]) assert.ok(planWalkLegs(d).every(l => l.kind !== 'run'));
+  assert.deepEqual(planWalkLegs(0.784), [{ kind: 'run', meters: 0.784 }], '精确跑到就收步，不凭空加慢走');
+});
+
+test('所有接近距离保持合法档位、不越过目标；无效距离不挂死', () => {
+  for (let cm = 1; cm <= 1200; cm++) {
+    const d = cm / 100;
+    const legs = planWalkLegs(d);
+    const total = legs.reduce((sum, l) => sum + l.meters, 0);
+    assert.ok(total <= d + 1e-8);
+    assert.ok(d - total < 0.02 + 1e-8);
+  }
+  for (const d of [Infinity, -Infinity, NaN, -1, 0]) assert.deepEqual(planWalkLegs(d), []);
 });
 
 test('分段加起来不超过目标距离，残差在档位以内', () => {

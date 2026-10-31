@@ -395,7 +395,7 @@ export class XiangqiBoard {
    * 抱棋推进：棋子按素材交付的 actor-local 曲线（prop_motion.json 的 chess 键）
    * 跟着双手走，而不是固定在身体某个点。时间轴与动画同一个时钟。
    */
-  followCarry(clip: string, time: number) {
+  followCarry(clip: string, time: number, handTransform?: THREE.Matrix4) {
     const samples = this.curves[clip]?.chess;
     if (!samples?.length || !this.carried.size) return false;
     const sample = sampleCurve(samples, time);
@@ -405,6 +405,10 @@ export class XiangqiBoard {
       if (!obj) continue;
       obj.position.fromArray(sample.position);
       obj.quaternion.fromArray(sample.quaternion);
+      if (handTransform) {
+        obj.position.applyMatrix4(handTransform);
+        obj.quaternion.premultiply(new THREE.Quaternion().setFromRotationMatrix(handTransform)).normalize();
+      }
     }
     return true;
   }

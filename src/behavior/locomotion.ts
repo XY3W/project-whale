@@ -11,15 +11,18 @@ export const RUN_LADDER = Array.from({ length: 11 }, (_, i) => Math.round((0.144
 
 export type Leg = { kind: "run" | "walk" | "adjust"; meters: number };
 
-/** 跑完至少留 0.6m 用走：落点更稳，也符合"走近再拿"的站位要求 */
-const RUN_TAIL = 0.6;
+/** 短于 0.75m 仍用走路；较远目标跑完后仅补实际残差。
+ * run_stop 本身已包含减速，不必再固定慢走 0.6m（原实现额外耗时至少 5 秒）。
+ */
+const RUN_APPROACH_THRESHOLD = 0.75;
 
 export function planWalkLegs(distance: number, { allowRun = true } = {}): Leg[] {
+  if (!Number.isFinite(distance) || distance <= 0) return [];
   const legs: Leg[] = [];
   let rest = Math.max(0, distance);
-  if (allowRun) {
-    while (rest > 1.2) {
-      const fits = RUN_LADDER.filter((d) => d <= rest - RUN_TAIL);
+  if (allowRun && distance >= RUN_APPROACH_THRESHOLD) {
+    while (rest >= RUN_LADDER[0] - 1e-9) {
+      const fits = RUN_LADDER.filter((d) => d <= rest + 1e-9);
       if (!fits.length) break;
       const meters = fits[fits.length - 1];
       legs.push({ kind: "run", meters });

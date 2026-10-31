@@ -157,10 +157,13 @@ test('抱棋微调多一档 1cm，非抱棋时不接受 1cm', () => {
   assert.equal(carry.adjustDistance(0.05), false, '0.05 没有对应片段');
 });
 
-test('抱棋不能跑；走起来以后不能直接切抱棋模式', () => {
+test('抱棋允许跑，收步回到托棋；移动中不能切换抱棋模式', () => {
   const player = new LayeredMotionPlayer(makeRig(), makeClips());
   player.setCarrying(true);
-  assert.equal(player.runDistance(0.464), false);
+  assert.equal(player.runDistance(0.464), true);
+  assert.equal(player.state.base, 'chess_carry_run_start');
+  assert.equal(player.setCarrying(false), false);
+  assert.ok(Math.abs(run(player, 10) - 0.464) < 1e-6);
   assert.equal(player.state.base, 'chess_hold');
 
   assert.equal(player.walkDistance(0.27), true);
@@ -169,6 +172,54 @@ test('抱棋不能跑；走起来以后不能直接切抱棋模式', () => {
   assert.equal(player.setCarrying(false), true);
   assert.equal(player.state.base, 'idle_stand');
   assert.equal(player.state.carrying, false);
+});
+
+test('抱棋跑动：真实跑步下肢、固定托棋上身，位移与时长在多种帧率下一致', () => {
+  for (const dt of [1 / 60, 1 / 20, 0.25]) {
+    for (const speed of [0.75, 1, 1.25]) {
+      const root = makeRig();
+      const clips = makeClips();
+      const hold = clips.find(c => c.name === 'chess_hold');
+      hold.tracks = hold.tracks.map(t => t.name === UPPER
+        ? new THREE.VectorKeyframeTrack('hand.l.position', [0, 1.6], [0.2, 0.5, 0.3, 0.2, 0.5, 0.3]) : t);
+      for (const base of ['run_start', 'run', 'run_stop']) {
+        const upper = clips.find(c => c.name === `${base}.upperBase`);
+        upper.tracks = [new THREE.VectorKeyframeTrack('hand.l.position', [0, upper.duration], [9, 9, 9, -9, -9, -9])];
+        const lower = clips.find(c => c.name === `${base}.lower`);
+        lower.tracks = [new THREE.VectorKeyframeTrack(LOWER, [0, lower.duration], [0, 0, 0, 1, 0, 0])];
+      }
+      const p = new LayeredMotionPlayer(root, clips); p.speed = speed; p.setCarrying(true);
+      assert.equal(p.runDistance(1.744), true);
+      let moved = 0, elapsed = 0, legsMoved = false;
+      const allowed = new Set(['chess_carry_run_start', 'chess_carry_run', 'chess_carry_run_stop', 'chess_hold']);
+      while (p.moving && elapsed < 15) {
+        p.update(dt); elapsed += dt; moved += p.movementDelta;
+        assert.ok(allowed.has(p.state.base));
+        assert.ok(root.getObjectByName('hand.l').position.distanceTo(new THREE.Vector3(0.2, 0.5, 0.3)) < 1e-6, 'must not inherit running arm swing');
+        if (root.getObjectByName('foot.l').position.x > 0.01) legsMoved = true;
+        const sample = p.carrySample;
+        assert.equal(sample.clip, 'chess_hold');
+        if (p.moving) assert.ok(sample.handTransform, 'running must keep a valid prop attachment');
+      }
+      assert.ok(legsMoved);
+      assert.equal(p.moving, false);
+      assert.ok(Math.abs(moved - 1.744) < 1e-6);
+      assert.ok(Math.abs(elapsed - 4.8 / speed) <= dt + 1e-6);
+      assert.equal(p.state.base, 'chess_hold');
+    }
+  }
+});
+
+test('抱棋跑动曲线跟随手部上下起伏，而不是棋子悬在原地', async () => {
+  const { XiangqiBoard } = await import('../src/game/XiangqiBoard.ts');
+  const board = new XiangqiBoard(new THREE.Scene());
+  board.curves = { chess_hold: { chess: [{ time: 0, position: [0.2, 0.5, 0.3], quaternion: [0, 0, 0, 1] }] } };
+  const obj = new THREE.Group(); board.instances.set('piece', obj); board.carried.add('piece');
+  const transform = new THREE.Matrix4().compose(new THREE.Vector3(0, 0.04, 0), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), 0.1), new THREE.Vector3(1, 1, 1));
+  const expected = obj.position.clone().set(0.2, 0.5, 0.3).applyMatrix4(transform);
+  assert.equal(board.followCarry('chess_hold', 0, transform), true);
+  assert.ok(obj.position.distanceTo(expected) < 1e-6);
+  assert.ok(Math.abs(obj.quaternion.angleTo(new THREE.Quaternion().setFromRotationMatrix(transform))) < 1e-6);
 });
 
 test('互动片段播放期间切抱棋：先记状态，片段收尾才落到 chess_hold', async () => {

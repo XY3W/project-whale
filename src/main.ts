@@ -565,7 +565,7 @@ async function boot() {
       await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
     },
     /**
-     * 走到指定世界坐标：宿主算转向与步数（walk + walk_adjust），模型只给目标点。
+     * 到指定世界坐标：宿主算转向与步数（远处跑、近处走/微调），模型只给目标点。
      * 落点不止五子棋——任何“先站到某个位置”的需求都能用。
      */
     walkTo: async (x, z, toleranceM = 0.1) => {
@@ -586,9 +586,8 @@ async function boot() {
       // 目标距离取容差的一半：步长是 0.18/0.02 的量化档位，留足余量才不会“差一点”判失败
       let rest = Math.max(0, distance - tolerance * 0.5);
       let moved = 0;
-      // 空手走远路先跑：跑 0.4m/s，走只有 0.1125m/s；抱着东西时不跑
-      const allowRun = !player.state.carrying;
-      for (const leg of planWalkLegs(rest, { allowRun })) {
+      // 远距离先跑；抱棋时由专用下肢跑动 + 双手托棋层保持姿势。
+      for (const leg of planWalkLegs(rest)) {
         if (leg.kind === "run") {
           if (!loco.run) break;
           await loco.run(leg.meters);
@@ -1138,7 +1137,7 @@ async function boot() {
     const from = xqPoint(piece.row, piece.col);
     const to = xqPoint(step.to_row, step.to_col);
     const bearing = (a: { x: number; z: number }, b: { x: number; z: number }) => (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI;
-    // allowRun：空手接近时先跑（0.4m/s），抱着棋只能走（素材的抱棋步态就是走速）
+    // 空手接近和抱棋搬运都允许跑；近距离与最终残差仍走路/微调。
     const walkToPoint = async (x: number, z: number, allowRun = false) => {
       if (aborted()) return false;
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
@@ -1182,7 +1181,7 @@ async function boot() {
       const dz2 = root.position.z - to.z;
       const d2 = Math.hypot(dx2, dz2) || 1;
       const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
-      if (!(await walkToPoint(stand2.x, stand2.z, false))) return { ok: false, reason: "CANCELLED" };
+      if (!(await walkToPoint(stand2.x, stand2.z, true))) return { ok: false, reason: "CANCELLED" };
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
       if (aborted()) return { ok: false, reason: "CANCELLED" };
       // 吃子和普通落子是两段交付动作：目标格上有敌子就用 chess_capture_place
@@ -1729,7 +1728,7 @@ async function boot() {
     board.tick();
     gomokuBoard.tick();
     const carry = player.carrySample;
-    if (carry) xiangqiBoard.followCarry(carry.clip, carry.time);
+    if (carry) xiangqiBoard.followCarry(carry.clip, carry.time, carry.handTransform);
     xiangqiBoard.tick(performance.now());
     stepPropWorld(dt);
     basin.update(dt, player.performanceTime);

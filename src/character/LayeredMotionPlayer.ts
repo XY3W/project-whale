@@ -24,6 +24,9 @@ type Performance = {
 const PERF_FADE = 0.15;
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
 const smoothstep = (u: number) => 3 * u * u - 2 * u * u * u;
+const CARRY_RUN_SOURCE: Record<string, string> = {
+  chess_carry_run_start: 'run_start', chess_carry_run: 'run', chess_carry_run_stop: 'run_stop',
+};
 
 /** 基础位移片段：时长与位移曲线来自资产交付（catalog.locomotion） */
 export const MOVE_CLIPS: Record<string, { duration: number; distance: (t: number) => number }> = {
@@ -49,13 +52,15 @@ export const MOVE_CLIPS: Record<string, { duration: number; distance: (t: number
   chess_carry_adjust_08: { duration: 0.8, distance: (t) => 0.08 * smoothstep(clamp01(t / 0.8)) },
 };
 
+// Reuse the validated run displacement curves; only upper-body tracks differ.
+for (const [carry, source] of Object.entries(CARRY_RUN_SOURCE)) MOVE_CLIPS[carry] = MOVE_CLIPS[source];
 export const ADJUST_DISTANCES = [0.02, 0.04, 0.06, 0.08];
 /** 抱棋时多一档 1cm（素材 chess_carry_adjust_01） */
 export const CARRY_ADJUST_DISTANCES = [0.01, 0.02, 0.04, 0.06, 0.08];
 /** run 的合法距离：0.144 + 0.32N（N=1..11） */
 export const RUN_DISTANCES = Array.from({ length: 11 }, (_, i) => Math.round((0.144 + 0.32 * (i + 1)) * 1000) / 1000);
 const CARRY_BASES = ['chess_hold', 'chess_carry_start', 'chess_carry_walk', 'chess_carry_stop',
-  'chess_carry_adjust_01', 'chess_carry_adjust_02', 'chess_carry_adjust_04', 'chess_carry_adjust_06', 'chess_carry_adjust_08'];
+  'chess_carry_adjust_01', 'chess_carry_adjust_02', 'chess_carry_adjust_04', 'chess_carry_adjust_06', 'chess_carry_adjust_08', ...Object.keys(CARRY_RUN_SOURCE)];
 const BASE_CLIPS = ['idle_stand','walk_start','walk','walk_stop','run_start','run','run_stop',
   'walk_adjust_02','walk_adjust_04','walk_adjust_06','walk_adjust_08', ...CARRY_BASES];
 const adjustName = (carry: boolean, meters: number) =>
@@ -90,6 +95,8 @@ export class LayeredMotionPlayer {
   private perfPaused = false;
   /** 抱棋模式：基底层换成 chess_* 一套，走路不再摆臂 */
   private carryMode = false;
+  private carryRunHandInverse: THREE.Matrix4 | null = null;
+  private carryRunHand: THREE.Object3D | null = null;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
   movementDelta = 0;
   /** 调试用：这一帧持仓层实际作用/让位了哪些槽位 */
@@ -109,6 +116,7 @@ export class LayeredMotionPlayer {
       this.actions.set(clip.name, a);
     }
     this.registerCarryBases();
+    this.registerCarryRuns();
     this.weights(); this.mixer.update(0);
   }
 
@@ -140,6 +148,42 @@ export class LayeredMotionPlayer {
       }
       this.actions.get(base)?.setEffectiveWeight(0).stop();
     }
+  }
+
+  /** Lower body really runs; upper body holds a fixed, authored two-hand pose.
+   * Do not use ordinary run.upperBase, whose arm swing would release the piece.
+   */
+  private registerCarryRuns() {
+    const hold = this.actions.get('chess_hold.upperBase')?.getClip();
+    if (!hold) return;
+    for (const [base, source] of Object.entries(CARRY_RUN_SOURCE)) {
+      const lower = this.actions.get(`${source}.lower`)?.getClip();
+      if (!lower) continue;
+      const still = hold.tracks.map(track => {
+        const t = track.clone();
+        const value = track.values.slice(0, track.getValueSize());
+        t.times = new Float32Array([0, lower.duration]);
+        t.values = new Float32Array([...value, ...value]);
+        return t;
+      });
+      for (const [suffix, tracks] of [['lower', lower.tracks.map(t => t.clone())], ['upperBase', still]] as const) {
+        const action = this.mixer.clipAction(new THREE.AnimationClip(`${base}.${suffix}`, lower.duration, tracks));
+        action.setEffectiveWeight(0);
+        if (source !== 'run') { action.setLoop(THREE.LoopOnce, 1); action.clampWhenFinished = true; }
+        action.play(); this.actions.set(`${base}.${suffix}`, action);
+      }
+    }
+  }
+
+  private carryHandFrame(): THREE.Matrix4 | null {
+    // GLTFLoader sanitizes dots in node names (hand.l -> handl).
+    if (!this.carryRunHand) this.root.traverse(node => {
+      if (node.name.replace(/[^a-z0-9]/gi, '').toLowerCase() === 'handl') this.carryRunHand = node;
+    });
+    const hand = this.carryRunHand;
+    if (!hand) return null;
+    this.root.updateMatrixWorld(true);
+    return this.root.matrixWorld.clone().invert().multiply(hand.matrixWorld);
   }
   private get(name: string) { const a = this.actions.get(name); if (!a) throw new Error(`Missing baked clip: ${name}`); return a; }
   private setBase(base: string) {
@@ -195,17 +239,18 @@ export class LayeredMotionPlayer {
 
   /** 跑动：距离必须是 0.144 + 0.32N，起步/收步固定在片段首尾 */
   runDistance(meters: number): boolean {
-    if (this.carryMode) return false;
     if (this.perf) return false;
     if (this.soloAction) this.stopSolo();
     if (!Number.isFinite(meters) || this.moveKind) return false;
     const n = Math.round((meters - 0.144) / 0.32);
     if (n < 1 || n > 11) return false;
     if (Math.abs(0.144 + 0.32 * n - meters) > 1e-6) return false;
+    if (this.carryMode && !this.actions.has('chess_carry_run.lower')) return false;
+    this.carryRunHandInverse = this.carryMode ? this.carryHandFrame()?.invert() ?? null : null;
     this.moveKind = 'run';
     this.halted = false;
     this.cyclesLeft = n;
-    this.setBase('run_start');
+    this.setBase(this.carryMode ? 'chess_carry_run_start' : 'run_start');
     return true;
   }
 
@@ -268,10 +313,15 @@ export class LayeredMotionPlayer {
    * 抱棋曲线的采样时钟：优先互动片段（chess_pickup / chess_place），其次抱棋基底层。
    * 循环片段按自己的时长取模，避免采样到曲线末端。
    */
-  get carrySample(): { clip: string; time: number } | null {
+  get carrySample(): { clip: string; time: number; handTransform?: THREE.Matrix4 } | null {
     const chess = (name: string | null) => (name && name.startsWith('chess_') ? name : null);
     const perfName = chess(this.perf?.name ?? null);
     if (perfName) return { clip: perfName, time: this.perf!.action.time };
+    if (this.carryMode && this.base in CARRY_RUN_SOURCE) {
+      const hand = this.carryHandFrame();
+      return { clip: 'chess_hold', time: 0,
+        handTransform: hand && this.carryRunHandInverse ? hand.multiply(this.carryRunHandInverse) : undefined };
+    }
     const base = chess(this.base);
     if (!base) return null;
     const duration = this.actions.get(`${base}.lower`)?.getClip().duration ?? 0;
@@ -541,13 +591,17 @@ export class LayeredMotionPlayer {
     const stop = c ? 'chess_carry_stop' : 'walk_stop';
     const rest = c ? 'chess_hold' : 'idle_stand';
     if (base === start) { this.setBase(this.cyclesLeft > 0 ? loop : stop); return; }
-    if (base === 'run_start') { this.setBase(this.cyclesLeft > 0 ? 'run' : 'run_stop'); return; }
-    if (base === loop || base === 'walk' || base === 'run') {
+    if (base === 'run_start' || base === 'chess_carry_run_start') {
+      const prefix = base === 'run_start' ? '' : 'chess_carry_';
+      this.setBase(this.cyclesLeft > 0 ? `${prefix}run` : `${prefix}run_stop`); return;
+    }
+    if (base === loop || base === 'walk' || base === 'run' || base === 'chess_carry_run') {
       this.cyclesLeft--;
+      const stopBase = base === 'chess_carry_run' ? 'chess_carry_run_stop' : base === 'run' ? 'run_stop' : stop;
       // 点击地面这种连续行走用 Infinity 表示无限循环；haltMovement 之后不再续圈
-      if (this.halted || this.moveKind === null) { this.setBase(base === loop ? stop : base === 'walk' ? 'walk_stop' : 'run_stop'); return; }
+      if (this.halted || this.moveKind === null) { this.setBase(stopBase); return; }
       if (this.cyclesLeft > 0) { this.setBase(base); return; }
-      this.setBase(base === loop ? stop : base === 'walk' ? 'walk_stop' : 'run_stop');
+      this.setBase(stopBase);
       return;
     }
     this.moveKind = null;
