@@ -149,6 +149,14 @@ export function validatePlan(plan) {
     if (!["create", "list", "cancel"].includes(plan.operation)) throw new ModelError("INVALID_SCHEMA", "定时器操作无效", 0);
     return {type:"timer_tool", operation:plan.operation, timer:plan.timer, timer_id:plan.timer_id};
   }
+  if (plan.type === 'xiangqi_tool') {
+    if (plan.operation !== 'agree_draw' || typeof plan.game_id !== 'string' ||
+        !Number.isInteger(plan.expected_revision) || plan.expected_revision < 0 || plan.user_agreed !== true) {
+      throw new ModelError('INVALID_SCHEMA', '和棋需要当前 game_id、expected_revision 和 user_agreed=true', 0);
+    }
+    return { type: 'xiangqi_tool', operation: 'agree_draw', game_id: plan.game_id,
+      expected_revision: plan.expected_revision, user_agreed: true };
+  }
   if (plan.type === "finish_task") {
     if (!["completed", "cannot_complete", "cancelled"].includes(plan.outcome)) {
       throw new ModelError("INVALID_SCHEMA", "finish_task.outcome 非法", 0);
@@ -378,6 +386,7 @@ export function outputContract() {
   return [
     'execute_plan: {"type":"execute_plan","speech":"string","decision_note":"可选≤60字：为什么这么安排","steps":[Step 1..6],"memory_proposals":[{"key","value","sourceMessageId","sourceQuote"}] 可选}',
     'finish_task: {"type":"finish_task","outcome":"completed|cannot_complete|cancelled","speech":"string"}',
+    'xiangqi_tool: {"type":"xiangqi_tool","operation":"agree_draw","game_id":"当前棋局ID","expected_revision":当前版本,"user_agreed":true}；仅聊天中双方已同意和棋时使用，不可在自主回合或仅判断局势为和棋时调用。',
     'skill_tool: list/read/create/revise/disable/enable；revise 必须先 read，在 expected_version 中填写读到的版本，以 edits 数组局部修改：每项包含 field=title|trigger|body|script、operation=append|replace、text，replace 还需唯一匹配的 find。未修改的内容保留；create 使用 skill。你没有删除权限。',
     'timer_tool: {"type":"timer_tool","operation":"create","timer":{"name":"任务名","first_at":"带时区的 ISO 8601 真实时间","interval_seconds":null或整数秒,"total_occurrences":null或整数,"display_message":"提醒文字","wake_note":"到期时交给自己的提醒任务"}}；list: {"type":"timer_tool","operation":"list"}；cancel: {"type":"timer_tool","operation":"cancel","timer_id":"任务ID"}。',
     "Step 只能取以下之一：",

@@ -134,7 +134,7 @@ test('新授权签发后，旧 token 立刻作废（抢占/重来不能把旧棋
   assert.equal(fresh.committed, true);
 });
 
-test("三次重复：双方来回动马，第 8 手判和，不能再走", () => {
+test("普通重复继续对局，聊天确认和棋后才能终局", () => {
   const svc = new XiangqiService(tmp());
   svc.start({ requestId: "r-rep", userSide: "red" });
   const play = (pieceId, row, col) => {
@@ -153,9 +153,11 @@ test("三次重复：双方来回动马，第 8 手判和，不能再走", () =>
     play("red_horse_1", 9, 1);
     play("black_horse_1", 0, 1);
   }
+  assert.equal(svc.status, "playing");
+  assert.equal(svc.agreeDraw({gameId: svc.game.gameId, expectedRevision: svc.game.revision, userAgreed: true}).ok, true);
   const board = svc.public();
   assert.equal(board.status, "drawn");
-  assert.equal(board.result.reason, "repetition");
+  assert.equal(board.result.reason, "agreed_draw");
   assert.equal(board.result.winner, null);
   // 判和之后不能再走
   const after = svc.userMove({ moveId: "m-late", gameId: board.gameId, pieceId: "red_horse_1", toRow: 7, toCol: 2, expectedRevision: board.revision });

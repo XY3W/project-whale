@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   createGame, legalMoves, allLegalMoves, move, inCheck, position, publicGame,
   serializeGame, restoreGame, initialPieces, pseudoMoves, signature, inPalace, crossedRiver,
-  ROWS, COLS, adjudicateRepeat, naturalLimit, squareDefended, captureGain,
+  ROWS, COLS, adjudicateRepeat,
 } from "../server/xiangqi.mjs";
 
 const game = () => createGame({ gameId: "xq1", userSide: "red" });
@@ -248,7 +248,7 @@ test("持久化：序列化/恢复后盘面、回合、revision 一致", () => {
   assert.ok(signature(back) === signature(g));
 });
 
-test("棋例裁决：长将判负、普通三次重复判和", () => {
+test("棋例裁决：长将判负、普通重复不自动判和", () => {
   const board = new Array(90).fill(null);
   const permanent = { status: "playing", board, turn: "black", moves: [] };
   const sig = signature(permanent);
@@ -269,97 +269,7 @@ test("棋例裁决：长将判负、普通三次重复判和", () => {
   const quiet = { ...permanent, board: quietBoard, turn: "red", moves: Array.from({ length: 4 }, (_, i) => ({ side: i % 2 === 0 ? "red" : "black", check: false })) };
   const quietSig = signature(quiet);
   const drawn = adjudicateRepeat(quiet, [quietSig, "c#black", quietSig, "d#black", quietSig]);
-  assert.equal(drawn.reason, "repetition");
-  assert.equal(drawn.winner, null);
-});
-
-test("自然限着：连续 60 回合无吃子判和，有吃子就重新计", () => {
-  const make = (n, captureAt = -1) => ({
-    status: "playing",
-    moves: Array.from({ length: n }, (_, i) => ({ side: i % 2 ? "black" : "red", captured: i === captureAt ? "red_soldier_1" : null })),
-  });
-  assert.equal(naturalLimit(make(119)), false);
-  assert.equal(naturalLimit(make(120)), true);
-  assert.equal(naturalLimit(make(180, 100)), false, "第 100 手吃过子，只数了 79 手");
-  assert.equal(naturalLimit(make(221, 100)), true);
-});
-
-test("走子记录带上走子方与将军标记（棋例裁决的依据）", () => {
-  const game = createGame("g-rec");
-  const before = game.moves.length;
-  move(game, "red_cannon_1", 6, 1);
-  const last = game.moves.at(-1);
-  assert.equal(game.moves.length, before + 1);
-  assert.equal(last.side, "red");
-  assert.equal(typeof last.check, "boolean");
-});
-
-test("棋例裁决：长捉要赚子力，兑子/跟子判和", () => {
-  // 用最小局面验证"这口子值不值得吃"：红方先手，黑方三枚子分别被红方威胁
-  const build = (extra) => {
-    const g = createGame({ gameId: "g-chase" });
-    g.board.fill(null);
-    g.pieces.clear();
-    const specs = [
-      { id: "red_general", side: "red", kind: "general", row: 9, col: 3 },
-      { id: "black_general", side: "black", kind: "general", row: 0, col: 5 },
-      ...extra,
-    ];
-    for (const spec of specs) {
-      g.pieces.set(spec.id, { ...spec });
-      g.board[spec.row * 9 + spec.col] = spec.id;
-    }
-    g.turn = "red";
-    return g;
-  };
-  // ① 车（9）吃没人保的卒（1）：净赚，是捉
-  const freeSoldier = build([
-    { id: "red_rook", side: "red", kind: "rook", row: 9, col: 0 },
-    { id: "black_pawn", side: "black", kind: "pawn", row: 4, col: 0 },
-  ]);
-  assert.equal(captureGain(freeSoldier, "black_pawn"), 1);
-  // ② 车吃有保的卒，吃完被反吃：1 - 9 < 0，只是跟/兑
-  const guardedSoldier = build([
-    { id: "red_rook", side: "red", kind: "rook", row: 9, col: 0 },
-    { id: "black_pawn", side: "black", kind: "pawn", row: 4, col: 0 },
-    { id: "black_rook", side: "black", kind: "rook", row: 3, col: 0 },
-  ]);
-  assert.ok(captureGain(guardedSoldier, "black_pawn") < 0);
-  // ③ 过河卒（1→2）吃有保的车：2 - 1 > 0，还是捉
-  const soldierTakesChariot = build([
-    { id: "red_pawn", side: "red", kind: "pawn", row: 6, col: 0 },
-    { id: "black_rook", side: "black", kind: "rook", row: 5, col: 0 },
-    { id: "black_pawn", side: "black", kind: "pawn", row: 4, col: 0 },
-  ]);
-  assert.ok(captureGain(soldierTakesChariot, "black_rook") > 0);
-
-  // 裁决层：同一个局面，捉赚子力判负、换亏判和
-  const sig = signature(freeSoldier);
-  const history = [sig, "a#black", sig, "b#black", sig];
-  const cycle = (victim) => [
-    { side: "black", check: false, attacks: [] },
-    { side: "red", check: false, attacks: [victim] },
-    { side: "black", check: false, attacks: [] },
-    { side: "red", check: false, attacks: [victim] },
-  ];
-  const chase = adjudicateRepeat({ ...freeSoldier, moves: cycle("black_pawn") }, history);
-  assert.equal(chase.reason, "perpetual_chase");
-  assert.equal(chase.loser, "red");
-  assert.equal(chase.winner, "black");
-  assert.equal(chase.victim, "black_pawn");
-  const guardedSig = signature(guardedSoldier);
-  const exchange = adjudicateRepeat(
-    { ...guardedSoldier, moves: cycle("black_pawn") },
-    [guardedSig, "a#black", guardedSig, "b#black", guardedSig],
-  );
-  assert.equal(exchange.reason, "repetition", "换亏的子被反复攻击只算长兑/长跟，判和");
-  assert.equal(exchange.winner, null);
-  // 打一枪换一个地方，不算长捉
-  const scattered = adjudicateRepeat(
-    { ...freeSoldier, moves: cycle("black_pawn").map((m, i) => (i === 3 ? { ...m, attacks: [] } : m)) },
-    history,
-  );
-  assert.equal(scattered.reason, "repetition");
+  assert.equal(drawn, null);
 });
 
 test("走子记录带上走子方与将军标记（棋例裁决的依据）", () => {

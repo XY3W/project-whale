@@ -1499,7 +1499,7 @@ async function boot() {
       if (ruleNote) {
         const w = view?.ruleWarning;
         ruleNote.hidden = !w;
-        ruleNote.textContent = w ? `${w.requiredSide === 'red' ? '红方' : '黑方'}须变着：剩余 ${w.remainingTurns} 次走子机会，请勿继续原循环。` : '';
+        ruleNote.textContent = w ? `${w.requiredSide === 'red' ? '红方' : '黑方'}须变着：剩余 ${w.remainingTurns} 次走子机会，${w.needsIdle ? '须走一着不将、不杀、不捉的闲着。' : '请勿继续原循环。'}` : '';
       }
       if (view && !xiangqiArmy) {
         // 第一份棋局到达时再加载素材，避免平时多下载 40MB

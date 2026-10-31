@@ -6,7 +6,7 @@ import { CAPABILITIES } from "../server/capabilities.mjs";
 
 test("工具清单：run_plan / skill / timer / finish", () => {
   const names = toolDefinitions().map((t) => t.function.name);
-  assert.deepEqual(names, ["run_plan", "skill", "timer", "finish"]);
+  assert.deepEqual(names, ["run_plan", "skill", "timer", "xiangqi", "finish"]);
 });
 
 test("动作 schema 由能力表生成，数量和 id 一致", () => {

@@ -133,6 +133,24 @@ export function toolDefinitions() {
     {
       type: "function",
       function: {
+        name: "xiangqi",
+        description: "仅在当前聊天中用户已同意和棋、你也同意时结束象棋。不能在游戏事件、自主回合或仅猜测局势为和棋时调用。",
+        parameters: {
+          type: "object",
+          properties: {
+            operation: { type: "string", enum: ["agree_draw"] },
+            game_id: { type: "string" },
+            expected_revision: { type: "integer", minimum: 0 },
+            user_agreed: { type: "boolean", enum: [true] },
+          },
+          required: ["operation", "game_id", "expected_revision", "user_agreed"],
+          additionalProperties: false,
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "finish",
         description: "结束这一轮。目标达成用 completed；做不了用 cannot_complete；被取消用 cancelled。",
         parameters: {
@@ -153,7 +171,7 @@ export function toolDefinitions() {
 
 /** 给提示词用的一句话说明（tools 模式下不再需要完整 JSON 契约） */
 export function toolSummary() {
-  return `可用工具：run_plan(steps)、skill(operation)、timer(operation)、finish(outcome, speech)。一次动作要放在同一个 run_plan 里，不要拆成多次调用。`;
+  return `可用工具：run_plan(steps)、skill(operation)、timer(operation)、xiangqi(agree_draw，仅用户同意和棋后的聊天回合)、finish(outcome, speech)。一次动作要放在同一个 run_plan 里，不要拆成多次调用。`;
 }
 
 /** 沙箱里可以引用的道具名，供脚本文档使用 */

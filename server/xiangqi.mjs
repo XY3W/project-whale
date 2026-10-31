@@ -7,8 +7,10 @@
  * - 红先；双方各 16 子；稳定 pieceId 由初始布局给出
  *
  * 覆盖：七类棋子走法/吃法、九宫、河界、蹩马腿、塞象眼、炮架、兵卒过河、将帅照面、
- * 自陷将军过滤、将军/将死/困毙。重复与长将按 CCA2020 做近似裁决（见 adjudicateRepeat）。
+ * 自陷将军过滤、将军/将死/困毙。棋例裁决由 xiangqi-adjudication.mjs 负责。
  */
+
+export { adjudicateRepeat } from './xiangqi-adjudication.mjs';
 
 export const RULESET = "CCA2020";
 export const ROWS = 10;
@@ -91,6 +93,8 @@ export function createGame({ gameId, userSide = RED, startedAt = Date.now() } = 
     userSide,
     characterSide: other(userSide),
     moves: [], // { pieceId, from:{row,col}, to:{row,col}, captured, revision }
+    ruleVersion: 2,
+    ruleWarning: null,
     lastMove: null,
     startedAt,
   };
@@ -225,7 +229,7 @@ export function inCheck(game, side) {
   return isAttacked(game, general.row, general.col, other(side));
 }
 
-function cloneGame(game) {
+export function cloneGame(game) {
   return {
     ...game,
     board: game.board.slice(),
@@ -234,7 +238,7 @@ function cloneGame(game) {
 }
 
 /** 在副本上执行一步（不校验回合），返回新状态 */
-function applyUnchecked(game, pieceId, toRow, toCol) {
+export function applyUnchecked(game, pieceId, toRow, toCol) {
   const next = cloneGame(game);
   const piece = next.pieces.get(pieceId);
   const from = { row: piece.row, col: piece.col };
@@ -285,6 +289,7 @@ export function move(game, pieceId, toRow, toCol) {
   game.pieces = next.pieces;
   game.revision += 1;
   const record = { pieceId, from, to: { row: toRow, col: toCol }, captured: captured ? captured.id : null, revision: game.revision, side: piece.side };
+  if (captured) record.capturedPiece = { ...captured };
   game.moves.push(record);
   game.lastMove = record;
 
@@ -297,10 +302,10 @@ export function move(game, pieceId, toRow, toCol) {
   if (!opponentMoves.length) {
     game.status = "won";
     game.result = { winner: mover, reason: opponentInCheck ? "checkmate" : "stalemate" };
+    game.ruleWarning = null;
   }
   record.check = opponentInCheck;
-  // 这一手之后她能吃掉的敌子（棋例判"长捉"用）
-  record.attacks = capturesBy(game, mover).map((c) => c.victim);
+  // 棋例按历史前后盘面延迟分析；全盘既存攻击不能归因于这一手棋。
   game.result = game.status === "won" ? game.result : null;
   return { ok: true, record, captured: captured?.id ?? null, check: opponentInCheck, status: game.status, result: game.result ?? null };
 }
@@ -309,7 +314,7 @@ export function move(game, pieceId, toRow, toCol) {
  * 某一方此刻能吃掉的敌子（不看轮次）。
  * 用于棋例判断与走子记录：临时把轮次借给它，算完立刻还回去。
  */
-function capturesBy(game, side) {
+export function capturesBy(game, side) {
   const saved = game.turn;
   game.turn = side;
   const out = [];
@@ -327,27 +332,6 @@ function capturesBy(game, side) {
   return out;
 }
 
-/**
- * 某个格子上 `side` 的子有没有被保护：先把该格换成一枚对方的"幽灵"棋子，
- * 再看 `side` 能不能吃到这一格。吃得到就是有保护（被吃了能反吃回来）。
- */
-export function squareDefended(game, side, row, col) {
-  const cell = row * COLS + col;
-  const occupant = game.board[cell];
-  if (!occupant) return false;
-  const piece = game.pieces.get(occupant);
-  if (!piece) return false;
-  const ghost = "__defender_probe";
-  game.pieces.set(ghost, { id: ghost, side: other(piece.side), kind: "pawn", row, col });
-  game.board[cell] = ghost;
-  try {
-    return capturesBy(game, side).some((c) => c.row === row && c.col === col);
-  } finally {
-    game.board[cell] = occupant;
-    game.pieces.delete(ghost);
-  }
-}
-
 /** 当前局面事实：将军/合法着法/终局 */
 export function position(game) {
   const check = inCheck(game, game.turn);
@@ -363,100 +347,13 @@ export function position(game) {
   };
 }
 
-/** 子力价值（以兵为单位）：只用于棋例判断"吃这口子值不值" */
-export const PIECE_VALUE = { general: 1000, rook: 9, cannon: 4.5, horse: 4, advisor: 2, elephant: 2, pawn: 1 };
-function pieceValue(piece) {
-  if (!piece) return 0;
-  if (piece.kind === "pawn" && crossedRiver(piece.side, piece.row)) return 2; // 过河兵当两个
-  return PIECE_VALUE[piece.kind] ?? 0;
-}
-
-/**
- * 吃这枚敌子能得多少子力（负值表示换亏）。
- * 没人保 = 白吃，按整子算；有人保 = 按"吃子后被反吃"的净差算。
- * 这是 CCA2020"捉"的简化版：只看一步交换，不看被牵制的保护子、连环兑子等更深的情况。
- */
-export function captureGain(game, victimId) {
-  const victim = game.pieces.get(victimId);
-  if (!victim || victim.kind === "general") return 0;
-  const attackerSide = other(victim.side);
-  const threats = capturesBy(game, attackerSide).filter((t) => t.victim === victimId);
-  if (!threats.length) return 0;
-  const defended = squareDefended(game, victim.side, victim.row, victim.col);
-  let best = -Infinity;
-  for (const threat of threats) {
-    const attacker = game.pieces.get(threat.attacker);
-    if (!attacker) continue;
-    const gain = pieceValue(victim) - (defended ? pieceValue(attacker) : 0);
-    if (gain > best) best = gain;
-  }
-  // 有威胁就返回最好那口的净收益（换亏是负数）；根本没威胁返回 0
-  return best === -Infinity ? 0 : best;
-}
-
-/**
- * 重复局面的裁决。CCA2020 的完整棋例（长将/长捉/长兑/长拦……）需要逐例裁决，
- * 这里实现其中可精确判定的两类，其余按和棋处理并在返回值里标明：
- * - 长将：三次重复且循环里该方每一步都在将军 → 连续将军的一方判负；
- * - 其他三次重复 → 和棋。
- * 长捉暂未判定（docs/XIANGQI_PROGRESS.md 里标为未完成，不能对外宣称完整棋例）。
- */
-export function adjudicateRepeat(game, history) {
-  if (!game || game.status !== "playing") return null;
-  if (!Array.isArray(history)) return null;
-  const current = signature(game);
-  const seen = [];
-  for (let i = 0; i < history.length; i++) if (history[i] === current) seen.push(i);
-  if (seen.length < 3) return null;
-  // 只回看最后一次循环：从倒数第三次出现到现在
-  const cycle = game.moves.slice(seen[seen.length - 3]);
-  if (!cycle.length) return null;
-  // 按走子方分组：循环是整圈，双方各走若干手
-  const bySide = new Map();
-  for (const m of cycle) {
-    if (!bySide.has(m.side)) bySide.set(m.side, []);
-    bySide.get(m.side).push(m);
-  }
-  // 长将：看的是"谁每一手都在将军"，不是"谁最后走"。
-  // 被将一方把局面走回重复时，最后走的是防守方，按旧写法会去查防守方而漏掉将军方。
-  const checkers = [...bySide.entries()].filter(([, moves]) => moves.length >= 2 && moves.every((m) => m.check));
-  if (checkers.length === 1) {
-    const [side] = checkers[0];
-    return { threefold: true, reason: "perpetual_check", winner: other(side), loser: side };
-  }
-  if (checkers.length > 1) return { threefold: true, reason: "repetition", winner: null }; // 互将，判和
-  // 长捉：某一方循环里每一手都在威胁同一枚敌子，而且这口子吃下去赚子力。
-  // 换亏或兑子（净收益 ≤ 0）只算长兑/长跟/长拦，判和。
-  for (const [side, moves] of bySide) {
-    if (moves.length < 2) continue;
-    let common = null;
-    for (const m of moves) {
-      const set = new Set(m.attacks ?? []);
-      common = common === null ? set : new Set([...common].filter((id) => set.has(id)));
-    }
-    for (const victimId of common ?? []) {
-      const victim = game.pieces.get(victimId);
-      if (!victim || victim.kind === "general") continue; // 将军已按长将处理
-      if (captureGain(game, victimId) <= 0) continue;
-      return { threefold: true, reason: "perpetual_chase", winner: other(side), loser: side, victim: victimId };
-    }
-  }
-  return { threefold: true, reason: "repetition", winner: null };
-}
-
-/** 自然限着：连续 60 回合（双方各 60 步、共 120 手）没有吃子 → 和棋 */
-export function naturalLimit(game) {
-  if (!game || game.status !== "playing") return false;
-  let lastCapture = -1;
-  for (let i = game.moves.length - 1; i >= 0; i--) {
-    if (game.moves[i].captured) { lastCapture = i; break; }
-  }
-  return game.moves.length - lastCapture - 1 >= 120;
-}
-
 /** 局面签名：棋盘 + 轮到谁（用于重复检测） */
 export function signature(game) {
-  return `${game.board.map((id) => (id ? id : ".")).join("|")}#${game.turn}`;
+  return `${game.board.map((id) => {
+    if (!id) return ".";
+    const p = game.pieces?.get(id);
+    return p ? `${p.side}:${p.kind}` : id;
+  }).join("|")}#${game.turn}`;
 }
 
 /** 公开视图：给模型和前端的权威盘面 */
@@ -465,6 +362,9 @@ export function publicGame(game) {
   return {
     gameId: game.gameId,
     ruleset: game.ruleset,
+    ruleVersion: game.ruleVersion,
+    ruleCoverage: { movement: "validated", adjudication: "tested-subset", draws: "chat-agreement" },
+    ruleWarning: game.ruleWarning ?? null,
     revision: game.revision,
     status: game.status,
     turn: game.turn,
@@ -484,6 +384,8 @@ export function serializeGame(game) {
   return {
     gameId: game.gameId,
     ruleset: game.ruleset,
+    ruleVersion: game.ruleVersion,
+    ruleWarning: game.ruleWarning ?? null,
     board: game.board,
     pieces: [...game.pieces.values()],
     turn: game.turn,
@@ -506,6 +408,8 @@ export function restoreGame(raw) {
   const game = {
     gameId: raw.gameId,
     ruleset: RULESET,
+    ruleVersion: raw.ruleVersion === 2 ? 2 : 1,
+    ruleWarning: raw.ruleVersion === 2 ? raw.ruleWarning ?? null : null,
     board: raw.board.slice(),
     pieces: new Map(raw.pieces.filter((p) => p && p.id).map((p) => [p.id, { ...p }])),
     turn: raw.turn === BLACK ? BLACK : RED,

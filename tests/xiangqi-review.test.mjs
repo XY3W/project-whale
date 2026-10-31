@@ -55,7 +55,7 @@ test('长将：被将一方走回重复局面，判连续将军的一方负', ()
   assert.equal(verdict.winner, 'black');
 });
 
-test('长将：互将时判和，不冤枉任何一方', () => {
+test('长将：互将不自动判和或判负', () => {
   const board = new Array(90).fill(null);
   const game = { status: 'playing', board, turn: 'red', moves: [] };
   const sig = signature(game);
@@ -66,8 +66,7 @@ test('长将：互将时判和，不冤枉任何一方', () => {
     { side: 'black', check: true },
   ];
   const verdict = adjudicateRepeat({ ...game, moves }, [sig, 'a#black', sig, 'b#black', sig]);
-  assert.equal(verdict.reason, 'repetition');
-  assert.equal(verdict.winner, null);
+  assert.equal(verdict, null);
 });
 
 // ---------- R07：重启要保住"已判和"、幂等与循环历史 ----------
@@ -90,7 +89,8 @@ test('重启后仍是和棋，幂等记录与循环历史都还在', () => {
       assert.equal(result.ok, true, JSON.stringify(result));
     }
   }
-  assert.equal(svc.status, 'drawn');
+  assert.equal(svc.status, 'playing', '普通重复不自动判和');
+  assert.equal(svc.agreeDraw({gameId: start.gameId, expectedRevision: svc.game.revision, userAgreed: true}).ok, true);
   const before = { decisions: Object.keys(svc.decisions).length, history: svc.history.length };
 
   const restored = new XiangqiService(file);
@@ -321,12 +321,12 @@ test('落子：到等待点先暂停，提交回执回来后才继续下降收�
     const waitForRevision = async () => false;
     const factory = new Function(
       'loco', 'root', 'degYaw', 'signedDeltaDeg', 'xiangqiBoard', 'player', 'xqPoint', 'placementFor',
-      'client', 'xiangqiView', 'xiangqiTokenRef', 'waitForRevision', bridgeJs + '\nreturn loco.xiangqiMove;',
+      'client', 'xiangqiView', 'xiangqiTokenRef', 'waitForRevision', 'planWalkLegs', bridgeJs + '\nreturn loco.xiangqiMove;',
     );
     const move = factory(loco, root, () => 0, (a, b) => ((b - a + 540) % 360) - 180, board, player, (r, c) => ({ x: c, z: r }), () => ({
       clip: 'chess_place', victim: null,
       events: [{ time: 0.4, type: 'release' }, { time: 1.2, type: 'placement_gate' }, { time: 1.3, type: 'land_confirmed' }],
-    }), client, view, 'tok', waitForRevision);
+    }), client, view, 'tok', waitForRevision, meters => [{ kind: 'walk', meters }]);
     const outcome = await move(
       { game_id: 'g1', piece_id: piece.id, to_row: 1, to_col: 0, expected_revision: 1 },
       { token: 'tok', isCancelled: () => cancelled },

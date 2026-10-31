@@ -14,7 +14,7 @@ async function until(read, timeout = 6000) {
   assert.fail('Timed out waiting for the expected chess event');
 }
 async function listen(server) { await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); return server.address().port; }
-async function fixture(t, { protocol = 'json', restored = false } = {}) {
+async function fixture(t, { protocol = 'json', restored = false, reply = null } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whale-xq-wakeup-'));
   fs.mkdirSync(path.join(dir, 'data'));
   fs.writeFileSync(path.join(dir, 'data/brain-state.json'), JSON.stringify({ autoplay: { manualPaused: true, calls: [] } }));
@@ -28,7 +28,9 @@ async function fixture(t, { protocol = 'json', restored = false } = {}) {
     let raw = ''; for await (const chunk of req) raw += chunk;
     const body = JSON.parse(raw); requests.push(body);
     const tools = !!body.tools;
-    const delta = tools
+    const custom = reply?.(body);
+    const delta = custom ? (tools ? { tool_calls: [{ index: 0, id: `custom-${requests.length}`, type: 'function',
+      function: { name: custom.name, arguments: JSON.stringify(custom.args) } }] } : { content: JSON.stringify(custom.json) }) : tools
       ? { tool_calls: [{ index: 0, id: `finish-${requests.length}`, type: 'function', function: { name: 'finish', arguments: JSON.stringify({ outcome: 'completed', speech: '' }) } }] }
       : { content: JSON.stringify({ type: 'finish_task', outcome: 'completed', speech: '' }) };
     res.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -126,4 +128,27 @@ test('A first user move coalesced with start uses the current turn, not the stal
   const req = f.requests[0]; assert.equal(requestContext(req).xiangqi.revision, 1);
   assert.match(JSON.stringify(req.messages), /当前权威棋盘已经轮到你/);
   assert.doesNotMatch(requestContext(req).request ?? '', /只简短确认/);
+});
+
+for (const protocol of ['json', 'tools']) test(`${protocol}: chat-agreed draw ends the game, autonomous draw attempts are rejected`, async t => {
+  const f = await fixture(t, { protocol, reply(body) {
+    const ctx = requestContext(body);
+    if (!ctx.xiangqi || ctx.xiangqi.status !== 'playing') return null;
+    if (body.messages.some(m => m.role === 'tool')) return null;
+    const args = { operation: 'agree_draw', game_id: ctx.xiangqi.gameId, expected_revision: ctx.xiangqi.revision, user_agreed: true };
+    return { name: 'xiangqi', args, json: { type: 'xiangqi_tool', ...args } };
+  } });
+  const c = await f.connect();
+  c.send('xiangqi_start', { requestId: 'manual-draw', userSide: 'red', leaseEpoch: c.epoch });
+  const started = await until(() => c.inbox.find(m => m.type === 'xiangqi_state' && m.board));
+  await until(() => f.requests.length >= 1 && c.inbox.at(-1)?.phase === 'idle');
+  // The mock attempted the tool in the autonomous start event; no authority.
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'data/xiangqi.json'))).status, 'playing');
+  c.send('user_message', { text: '这盘和棋吧，我同意和棋。', leaseEpoch: c.epoch, snapshot: { x: 0, z: 0, yawDeg: 0, objects: [] } });
+  const finished = await until(() => c.inbox.find(m => m.type === 'xiangqi_state' && m.board?.result?.reason === 'agreed_draw'));
+  assert.equal(finished.board.status, 'drawn');
+  assert.equal(finished.board.gameId, started.board.gameId);
+  assert.equal(finished.board.result.winner, null);
+  assert.equal(finished.board.revision, 1);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'data/xiangqi.json'))).status, 'drawn');
 });

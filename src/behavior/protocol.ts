@@ -219,12 +219,13 @@ export interface XiangqiView {
   gameId: string;
   ruleset: string;
   revision: number;
-  status: "playing" | "won" | "draw" | "ended";
+  status: "playing" | "won" | "draw" | "drawn" | "ended";
   turn: "red" | "black";
   userSide: "red" | "black";
   characterSide: "red" | "black";
   check: boolean;
-  result: { winner: string; reason: string } | null;
+  result: { winner: string | null; reason: string } | null;
+  ruleWarning?: { requiredSide: "red" | "black"; remainingTurns: number; reason: string; needsIdle?: boolean } | null;
   lastMove: { pieceId: string; from: { row: number; col: number }; to: { row: number; col: number }; captured: string | null } | null;
   moves: number;
   pieces: XiangqiPiece[];

@@ -1,5 +1,7 @@
 # 中国象棋开发交接 · DeepSeek 入口
 
+> 后续规则更新：用户已取消自动判和；和棋由聊天双方同意后通过 `xiangqi(agree_draw)` / `xiangqi_tool` 结束。原文“完整 CCA2020”不再包含自动和棋、自然限着和早期和棋变着。当前规则修复及剩余认证范围见 [规则修复说明](XIANGQI_RULES_FIX_2026-10-31.md)。
+
 2026-10-31。本文是本轮接入入口；先读本页，再读[正式方案](XIANGQI_PLAN.md)、[素材契约](XIANGQI_ASSET_HANDOFF.md)及[提示词增补](llm-design/XIANGQI_PROMPT_ADDENDUM.md)。版本管理遵守[共享仓库约定](VERSION_MANAGEMENT.md)。
 
 ## 本轮边界与优先级

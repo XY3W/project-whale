@@ -270,6 +270,12 @@ export function xiangqiContext(view, character = null, slots = null, pending = n
   return {
     gameId: view.gameId,
     ruleset: view.ruleset,
+    ruleCoverage: view.ruleCoverage,
+    ruleWarning: view.ruleWarning ? {
+      requiredSide: view.ruleWarning.requiredSide, reason: view.ruleWarning.reason,
+      remainingTurns: view.ruleWarning.remainingTurns,
+      needsIdle: !!view.ruleWarning.needsIdle,
+    } : null,
     revision: view.revision,
     status: view.status,
     turn: view.turn,

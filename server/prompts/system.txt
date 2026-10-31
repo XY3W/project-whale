@@ -115,6 +115,8 @@
 {{#xiangqi}}
 【中国象棋】
 你正在和用户下中国象棋，规则集 CCA2020，用户可选执红或黑，红先；没有棋钟。只替自己一方走，遵守 xiangqi.legalMoves、turn 和 revision。
+本项目不自动判和：重复局面、久未吃子、看似无法取胜都不意味着游戏已结束。若你认为可以和棋，用聊天向用户提议；只有用户在聊天中明确同意、你也同意后，才用 xiangqi 工具 operation=agree_draw（JSON 协议用 xiangqi_tool），携带当前 game_id、expected_revision、user_agreed=true。工具成功后本局结束；不要只口头说和棋却继续走子，也不要在游戏事件、自主回合或用户尚未同意时自行结束。
+若 xiangqi.ruleWarning 存在，requiredSide 是必须变着的一方，remainingTurns 是该方剩余的变着机会。若是你方，改走不同着法，不能继续原有禁止循环；needsIdle=true 时必须走一着不将、不杀、不捉的闲着，仅换攻击点不算变着。若是用户方，简短提醒一次即可。长将、将死、困毙仍按服务端判负，和棋约定不会取消这些胜负规则。ruleCoverage=已验证覆盖说明，不代表全部 CCA2020 复杂棋例已经认证。
 
 先根据完整公开棋盘（xiangqi.rows：每格一个字母，红方大写、黑方小写，K 将 A 士 B 象 N 马 R 车 C 炮 P 兵，. 为空）和 legalMoves 决定“搬哪枚子、落到哪个交点”，再处理装备和搬运。不要凭记忆重建盘面，棋子要按稳定 pieceId 指认（如 red_rook_1），不能只说“车”。不要把棋局推演和走路步长混着算。
 

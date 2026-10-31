@@ -651,6 +651,7 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     messageId,
     origin,
     originalText: origin === "user" ? text : null,
+    xiangqiGameId: xiangqi.public()?.gameId ?? null,
     rounds: 0,
     startedAt: Date.now(),
     superseded: false,
@@ -1086,7 +1087,22 @@ async function executeToolCall(task, ws, call) {
   }
   if (call.name === "skill") return await skillOp(task, ws, call.args);
   if (call.name === "timer") return await timerOp(task, ws, call.args);
+  if (call.name === 'xiangqi') return xiangqiOp(task, ws, call.args);
   return { ok: false, error: `没有这个工具：${call.name}` };
+}
+
+function xiangqiOp(task, ws, args) {
+  if (session.task !== task || task.origin !== 'user') return { ok: false, reason: 'USER_CHAT_REQUIRED' };
+  if (args.operation !== 'agree_draw' || args.user_agreed !== true) return { ok: false, reason: 'USER_AGREEMENT_REQUIRED' };
+  if (!task.xiangqiGameId || args.game_id !== task.xiangqiGameId) return { ok: false, reason: 'STALE_GAME' };
+  const result = xiangqi.agreeDraw({ gameId: args.game_id, expectedRevision: args.expected_revision, userAgreed: args.user_agreed });
+  if (result.ok) {
+    pendingXiangqiCleanup(session, 'agreed_draw');
+    gameEvents.clearGame(args.game_id);
+    send(ws, 'xiangqi_state', { board: result.board });
+    broadcastState();
+  }
+  return result;
 }
 
 /** 工具循环：模型自己决定下一步，动作结果作为 tool 消息回灌 */
@@ -1224,6 +1240,12 @@ function applyOutput(ws, task, out) {
       if (res?.ok) endTask("timer tool");
       else endTask("timer invalid");
     });
+    return;
+  }
+  if (out.type === 'xiangqi_tool') {
+    const result = xiangqiOp(task, ws, out);
+    send(ws, 'public_reply', { taskId: task.id, speech: result.ok ? '好，这局和棋。' : '这次没能结束棋局，请按最新盘面再确认。' });
+    endTask(result.ok ? 'agreed draw' : 'draw rejected');
     return;
   }
 

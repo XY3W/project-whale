@@ -11,8 +11,9 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   RULESET, RED, BLACK, createGame, legalMoves, move as applyMove, position,
-  publicGame, restoreGame, serializeGame, signature, other, adjudicateRepeat, naturalLimit,
+  publicGame, restoreGame, serializeGame, signature, other, adjudicateRepeat,
 } from "./xiangqi.mjs";
+import { historicalPositions, advanceRuleWarning, adjudicateMultiPoint } from './xiangqi-adjudication.mjs';
 
 const TOKEN_TTL_MS = 5 * 60 * 1000;
 
@@ -35,7 +36,19 @@ export class XiangqiService {
       const raw = JSON.parse(fs.readFileSync(this.file, "utf8"));
       this.decisions = raw?.decisions ?? {};
       this.history = Array.isArray(raw?.history) ? raw.history : [];
-      return restoreGame(raw);
+      const game = restoreGame(raw);
+      if (game && (game.ruleVersion !== 2 || this.history.length !== game.moves.length + 1 || this.history.at(-1) !== signature(game))) {
+        // Old signatures contain instance IDs. Rebuild from actual moves, not
+        // by attempting to parse potentially ambiguous ID strings.
+        const positions = historicalPositions(game);
+        this.history = positions ? positions.map(signature) : [signature(game)];
+        // With incomplete legacy history, start a new evidence window. Never
+        // use old attack arrays to declare a loss.
+        if (!positions) this.history = Array(game.moves.length).fill(null).concat(signature(game));
+        if (game.ruleVersion !== 2 || !positions) game.ruleWarning = null;
+        game.ruleVersion = 2;
+      }
+      return game;
     } catch {
       this.decisions = {};
       this.history = [];
@@ -98,14 +111,17 @@ export class XiangqiService {
     if (!piece) return { ok: false, reason: "NO_PIECE" };
     if (piece.side !== this.game.userSide) return { ok: false, reason: "NOT_YOUR_PIECE" };
     const result = applyMove(this.game, pieceId, toRow, toCol);
+    if (result.ok) {
+      this.history.push(signature(this.game));
+      this.adjudicate();
+      Object.assign(result, { status: this.game.status, result: this.game.result, ruleWarning: this.game.ruleWarning });
+    }
     if (moveId) {
       this.decisions[moveId] = { ok: result.ok, ...result, board: undefined };
       const keys = Object.keys(this.decisions);
       if (keys.length > 100) for (const key of keys.slice(0, keys.length - 100)) delete this.decisions[key];
     }
     if (result.ok) {
-      this.history.push(signature(this.game));
-      this.adjudicate();
       this.save();
     }
     return { ...result, board: this.public() };
@@ -164,35 +180,55 @@ export class XiangqiService {
     if (revision !== undefined && revision !== auth.expectedRevision) return { ok: false, reason: "STALE_REVISION", revision: this.game.revision };
     if (this.game.revision !== auth.expectedRevision) return { ok: false, reason: "STALE_REVISION", revision: this.game.revision };
     const result = applyMove(this.game, auth.pieceId, auth.toRow, auth.toCol);
-    const response = { ...result, committed: result.ok, token };
-    auth.used = true;
-    auth.response = response;
     if (result.ok) {
       this.history.push(signature(this.game));
       this.adjudicate();
-      this.save();
+      Object.assign(result, { status: this.game.status, result: this.game.result, ruleWarning: this.game.ruleWarning });
     }
+    const response = { ...result, committed: result.ok, token };
+    auth.used = true;
+    auth.response = response;
+    if (result.ok) this.save();
     return { ...response, board: this.public() };
   }
 
   /**
-   * 走完一手就裁决棋例：长将判负、其余三次重复判和、自然限着判和。
+   * 长将立即判负；单方禁止着法先提醒两次己方着法内变着。
+   * 用户决定和棋通过聊天确认：不按重复、自然限着或子力自动判和。
    * 返回本次裁决结果（没触发就是 null）。
    */
   adjudicate() {
     if (!this.game || this.game.status !== "playing") return null;
-    const repeat = adjudicateRepeat(this.game, this.history);
-    if (repeat) {
-      this.game.status = repeat.winner ? "won" : "drawn";
+    const continued = advanceRuleWarning(this.game);
+    const repeat = continued ?? adjudicateRepeat(this.game, this.history) ?? adjudicateMultiPoint(this.game);
+    if (repeat?.winner) {
+      this.game.status = "won";
       this.game.result = { winner: repeat.winner, reason: repeat.reason };
+      this.game.ruleWarning = null;
       return this.game.result;
     }
-    if (naturalLimit(this.game)) {
-      this.game.status = "drawn";
-      this.game.result = { winner: null, reason: "natural_limit" };
-      return this.game.result;
+    if (repeat?.requiredSide && !this.game.ruleWarning) {
+      this.game.ruleWarning = { reason: repeat.reason, requiredSide: repeat.requiredSide,
+        remainingTurns: 2, openedAt: this.game.revision, lastRevision: this.game.revision,
+        cycle: repeat.cycle, needsIdle: !!repeat.needsIdle };
     }
     return null;
+  }
+
+  /** Explicit, chat-agreed draw only. No position or repetition inference. */
+  agreeDraw({ gameId, expectedRevision, userAgreed } = {}) {
+    if (!this.game) return { ok: false, reason: 'NO_GAME' };
+    if (gameId !== this.game.gameId) return { ok: false, reason: 'STALE_GAME' };
+    if (this.game.status !== 'playing') return { ok: false, reason: 'GAME_OVER' };
+    if (expectedRevision !== this.game.revision) return { ok: false, reason: 'STALE_REVISION' };
+    if (userAgreed !== true) return { ok: false, reason: 'USER_AGREEMENT_REQUIRED' };
+    this.game.status = 'drawn';
+    this.game.result = { winner: null, reason: 'agreed_draw' };
+    this.game.ruleWarning = null;
+    this.game.revision++;
+    this.tokens.clear();
+    this.save();
+    return { ok: true, board: this.public() };
   }
 
   /** 用户认输 / 结束 */
@@ -202,6 +238,7 @@ export class XiangqiService {
     const loser = side ?? this.game.userSide;
     this.game.status = "won";
     this.game.result = { winner: other(loser), reason: "resign" };
+    this.game.ruleWarning = null;
     this.game.revision += 1;
     this.save();
     return { ok: true, board: this.public() };
