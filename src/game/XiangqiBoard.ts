@@ -72,6 +72,9 @@ export class XiangqiBoard {
   private selected: string | null = null;
   private loaded = false;
   private lastMovePulse = 0;
+  /** 被吃掉的棋子：先缩小淡出再移除，别在提交瞬间"啪"地凭空消失 */
+  private readonly fading: Array<{ id: string; obj: THREE.Object3D; t: number }> = [];
+  private lastTickAt = 0;
   private lastGameId: string | null = null;
   /** 正在被抱着的棋子：暂时脱离盘面同步 */
   private carried = new Set<string>();
@@ -152,6 +155,8 @@ export class XiangqiBoard {
       this.hover = null;
       this.selected = null;
       this.clearMarkers();
+      for (const fade of this.fading) this.group.remove(fade.obj);
+      this.fading.length = 0;
       return;
     }
     if (view.gameId !== this.lastGameId) {
@@ -208,6 +213,12 @@ export class XiangqiBoard {
         const layout = this.layout.get(piece.id);
         const template = layout ? this.templates.get(layout.template) : null;
         if (!template) continue;
+        // 同一枚子又回到盘面（撤步/重连）：把还在淡出的替身收掉
+        for (let i = this.fading.length - 1; i >= 0; i--) {
+          if (this.fading[i].id !== piece.id) continue;
+          this.group.remove(this.fading[i].obj);
+          this.fading.splice(i, 1);
+        }
         obj = template.clone(true);
         obj.name = `xq-${piece.id}`;
         obj.userData.pieceId = piece.id;
@@ -228,14 +239,31 @@ export class XiangqiBoard {
         obj.userData.settled = true;
       }
     }
-    // 被吃掉的棋子：从盘面移除
+    // 被吃掉的棋子：退出盘面状态，用一个短淡出收尾再真正移除
     for (const [id, obj] of this.instances) {
       if (alive.has(id)) continue;
-      this.group.remove(obj);
       this.instances.delete(id);
       this.targets.delete(id);
+      this.fading.push({ id, obj, t: 0 });
     }
   }
+
+  /** 被吃棋子：0.28s 缩到 15% 并微微抬起，然后真正移除 */
+  private advanceFades(dt: number) {
+    for (let i = this.fading.length - 1; i >= 0; i--) {
+      const fade = this.fading[i];
+      fade.t += dt;
+      const k = Math.min(1, fade.t / 0.28);
+      fade.obj.scale.setScalar(1 - 0.85 * k);
+      fade.obj.position.y += 0.0035 * (1 - k);
+      if (k < 1) continue;
+      this.group.remove(fade.obj);
+      this.fading.splice(i, 1);
+    }
+  }
+
+  /** 调试用：还在淡出的棋子数量 */
+  get fadingCount(): number { return this.fading.length; }
 
   private syncMarkers(view: XiangqiView) {
     const key = `${view.gameId}:${view.revision}:${this.selected ?? ""}:${this.hover?.row ?? -1},${this.hover?.col ?? -1}:${view.status}:${view.turn}`;
@@ -278,6 +306,9 @@ export class XiangqiBoard {
   /** 每帧：棋子朝目标位置缓动（弧线），最近一步的棋子微微发亮提示 */
   tick(now: number) {
     if (!this.active) return;
+    const dt = this.lastTickAt ? Math.min(0.25, (now - this.lastTickAt) / 1000) : 0;
+    this.lastTickAt = now;
+    this.advanceFades(dt);
     const t = Math.min(0.16, (now - this.lastMovePulse) / 600);
     const arc = Math.sin(Math.min(1, t) * Math.PI) * 0.32;
     for (const [id, obj] of this.instances) {
