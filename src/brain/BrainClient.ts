@@ -65,6 +65,7 @@ export class BrainClient {
   private skillsListeners = new Set<(payload: unknown) => void>();
   private takeover: ReturnType<typeof setInterval> | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private lastBeat = 0;
 
   constructor(private readonly url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`) {}
 
@@ -198,7 +199,24 @@ export class BrainClient {
 
   private startHeartbeat() {
     if (this.heartbeat) clearInterval(this.heartbeat);
-    this.heartbeat = setInterval(() => this.send("heartbeat", {}), 5000);
+    this.lastBeat = Date.now();
+    this.heartbeat = setInterval(() => this.beat(), 5000);
+  }
+
+  /** 主线程被长任务卡住后，下一帧补一发心跳，别等服务端把任务撤了 */
+  beat() {
+    this.lastBeat = Date.now();
+    this.send("heartbeat", {});
+  }
+
+  /**
+   * 渲染循环每帧调用：心跳超过 4s 没发出去（典型原因：卡在素材解码或长帧）
+   * 就立刻补一发，代价是一次极小消息。
+   */
+  keepAlive(now = Date.now()) {
+    if (!this.connected || !this.heartbeat) return;
+    if (now - this.lastBeat < 4000) return;
+    this.beat();
   }
 
   sendReconciled(snapshot: Record<string, unknown>) {

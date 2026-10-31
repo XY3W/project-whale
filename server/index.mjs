@@ -41,7 +41,10 @@ import { validatePlan } from "./capabilities.mjs";
 const PORT = Number(process.env.BRAIN_PORT ?? 8091);
 const ROOT = path.resolve(process.cwd(), "dist");
 const PROTOCOL = 1;
-const HEARTBEAT_MS = 8_000;
+// 客户端每 5s 发一次心跳。原来只给 8s：慢机器上加载 40MB 棋子素材、
+// 或单帧卡死超过 8s，心跳就会迟到，整段任务被当成"客户端没了"撤掉。
+// 放宽到 20s（可容 4 次心跳丢失），断线靠 ws close 兜底。
+const HEARTBEAT_MS = 20_000;
 const MAX_ROUNDS = 4;
 const BUDGET_MS = Number(process.env.BRAIN_BUDGET_MS ?? 180_000);
 /** 场地事件的合并窗口：同一批动作只唤醒一次模型 */

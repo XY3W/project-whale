@@ -36,7 +36,8 @@ html, body {
   z-index: 2;
 }
 
-canvas { display: block; }
+/* 触屏：把手势交给 OrbitControls 和棋盘点选，别让浏览器拿去滚动/缩放 */
+canvas { display: block; touch-action: none; -webkit-tap-highlight-color: transparent; }
 
 /* ---------- loading ---------- */
 

@@ -1469,6 +1469,7 @@ async function boot() {
 
   stage.renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
+    client.keepAlive();
     player.update(dt);
 
     forward.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
