@@ -2,7 +2,7 @@
 
 2026-10-31。入口与契约见 [XIANGQI_DEVELOPMENT_HANDOFF.md](XIANGQI_DEVELOPMENT_HANDOFF.md)、[XIANGQI_PLAN.md](XIANGQI_PLAN.md)、[XIANGQI_ASSET_HANDOFF.md](XIANGQI_ASSET_HANDOFF.md)。
 
-## 已完成（服务端切片，273 项测试通过）
+## 已完成（服务端 + 客户端接线，288 项测试通过）
 
 ### ① 棋规引擎 `server/xiangqi.mjs`
 
@@ -123,3 +123,11 @@
 ### ⑬ 吃子落位用专用片段
 
 `placementFor(pieces, moverId, row, col)`：目标格上有敌子 → `chess_capture_place`（0.4 release / 1.1 capture_commit_gate / 1.5 land_confirmed），空位 → `chess_place`（0.4 / 1.2 / 1.3）。之前吃子也播普通落子片段，等于白丢一段交付动作。
+
+## 仍然没做的（截至 90df8ff）
+
+1. **长捉/长兑/长拦等逐例棋例**：只有长将判负、其余三次重复判和、自然限着判和。规则层仍标"部分实现"。
+2. **真实 deepseek-flash 对局**：能力/提示词/事件都通了，但还没跑过"真模型 + 真人"的完整回合。
+3. **客户端交互余项**：被吃子消失时序、拖动排除、触屏、搬运中断线后的重连恢复。
+4. **异常动画版**：取消时是逻辑回退（棋子立刻回原格），没播 `chess_safe_setdown`；中断后重新吸附的 `chess_recover` 也没接。
+5. **多页租约**在象棋下的专项验证没做（沿用服务端租约机制）。
