@@ -165,8 +165,10 @@ export class LayeredMotionPlayer {
    */
   setCarrying(on: boolean): boolean {
     if (this.carryMode === on) return true;
-    if (this.moveKind || this.perf) return false;
+    if (this.moveKind) return false; // 走步中途不换基底
     this.carryMode = on;
+    // 互动片段（含被取消后的淡出）还在播时只记状态，等它收完再落基底
+    if (this.perf) return true;
     this.setBase(on ? 'chess_hold' : 'idle_stand');
     this.weights();
     this.mixer.update(0);
@@ -565,6 +567,8 @@ export class LayeredMotionPlayer {
         perf.action.setEffectiveWeight(0);
         perf.action.paused = false;
         this.perf = null;
+        // 片段期间改过抱棋状态：收尾时落到对应的静姿
+        if (!this.moveKind) this.setBase(this.carryMode ? 'chess_hold' : 'idle_stand');
         this.weights();
         this.mixer.update(0);
         resolve(!cancelled);

@@ -1082,6 +1082,8 @@ async function boot() {
   loco.xiangqiMove = async (step, ctx) => {
     const piece = xiangqiView?.pieces.find((p) => p.id === step.piece_id);
     if (!piece) return { ok: false, reason: "NO_PIECE" };
+    // 抢占/取消：每一步之前先问执行器还要不要继续，别把整段搬运跑完
+    const aborted = () => Boolean(ctx?.isCancelled?.());
     const from = xqPoint(piece.row, piece.col);
     const to = xqPoint(step.to_row, step.to_col);
     const bearing = (a: { x: number; z: number }, b: { x: number; z: number }) => (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI;
@@ -1090,6 +1092,7 @@ async function boot() {
       const adjusts = [0.08, 0.06, 0.04, 0.02];
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
       for (let i = 0; i < 14; i++) {
+        if (aborted()) return false;
         const d = Math.hypot(x - root.position.x, z - root.position.z);
         if (d <= 0.03) break;
         const w = steps.find((v) => v <= d + 1e-6);
@@ -1099,6 +1102,7 @@ async function boot() {
         await loco.adjust(a);
       }
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
+      return true;
     };
     // 站位：从棋子朝角色方向退 0.85m
     const dx = root.position.x - from.x;
@@ -1107,29 +1111,40 @@ async function boot() {
     const stand = { x: from.x + (dx / dist) * 0.85, z: from.z + (dz / dist) * 0.85 };
     await walkToPoint(stand.x, stand.z);
     await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, from)));
-    const picked = await player.perform("chess_pickup", [{ time: 0.4, type: "summon_start" }, { time: 1.2, type: "grasp" }], (type) => {
-      if (type === "grasp") xiangqiBoard.beginCarry(piece.id, root);
-    });
-    if (!picked) return { ok: false, reason: "PICKUP_FAILED" };
-    // 棋子已经在手上：换成抱棋基底层，之后走路不再摆臂
-    player.setCarrying(true);
-    // 抱到目标旁：仍站在距目标 0.85m 的位置
-    const dx2 = root.position.x - to.x;
-    const dz2 = root.position.z - to.z;
-    const d2 = Math.hypot(dx2, dz2) || 1;
-    const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
-    await walkToPoint(stand2.x, stand2.z);
-    await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
-    // 事件表来自 catalog.actions[chess_place]：0.4 release / 1.2 placement_gate / 1.3 land_confirmed
-    const placed = await player.perform("chess_place", [{ time: 0.4, type: "release" }, { time: 1.2, type: "placement_gate" }, { time: 1.3, type: "land_confirmed" }], (type) => {
-      if (type === "release") xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
-    });
-    player.setCarrying(false);
-    if (!placed) return { ok: false, reason: "PLACE_FAILED" };
-    const token = (ctx as { token?: string } | undefined)?.token ?? xiangqiTokenRef;
-    const res = await client.xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col });
-    if (!res.committed) return { ok: false, reason: String(res.reason ?? "NOT_COMMITTED"), ...res };
-    return { ok: true, committed: true, revision: Number(res.revision) || 0, captured: (res.captured as string | null) ?? null };
+    let carried = false;
+    try {
+      const picked = await player.perform("chess_pickup", [{ time: 0.4, type: "summon_start" }, { time: 1.2, type: "grasp" }], (type) => {
+        if (type === "grasp") { xiangqiBoard.beginCarry(piece.id, root); carried = true; }
+      });
+      if (!picked) return { ok: false, reason: aborted() ? "CANCELLED" : "PICKUP_FAILED" };
+      // 棋子已经在手上：换成抱棋基底层，之后走路不再摆臂
+      player.setCarrying(true);
+      // 抱到目标旁：仍站在距目标 0.85m 的位置
+      const dx2 = root.position.x - to.x;
+      const dz2 = root.position.z - to.z;
+      const d2 = Math.hypot(dx2, dz2) || 1;
+      const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
+      if (!(await walkToPoint(stand2.x, stand2.z))) return { ok: false, reason: "CANCELLED" };
+      await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
+      // 事件表来自 catalog.actions[chess_place]：0.4 release / 1.2 placement_gate / 1.3 land_confirmed
+      if (aborted()) return { ok: false, reason: "CANCELLED" };
+      const placed = await player.perform("chess_place", [{ time: 0.4, type: "release" }, { time: 1.2, type: "placement_gate" }, { time: 1.3, type: "land_confirmed" }], (type) => {
+        if (type === "release") xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
+      });
+      carried = false;
+      player.setCarrying(false);
+      if (!placed) return { ok: false, reason: "PLACE_FAILED" };
+      const token = (ctx as { token?: string } | undefined)?.token ?? xiangqiTokenRef;
+      const res = await client.xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col });
+      if (!res.committed) return { ok: false, reason: String(res.reason ?? "NOT_COMMITTED"), ...res };
+      return { ok: true, committed: true, revision: Number(res.revision) || 0, captured: (res.captured as string | null) ?? null };
+    } finally {
+      // 抢占/取消/异常：不提交棋步，棋子放回原格，退出抱棋（安全放置）
+      if (carried) {
+        xiangqiBoard.endCarry(piece.id, { row: piece.row, col: piece.col });
+        player.setCarrying(false);
+      }
+    }
   };
 
 

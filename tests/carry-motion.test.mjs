@@ -170,3 +170,17 @@ test('抱棋不能跑；走起来以后不能直接切抱棋模式', () => {
   assert.equal(player.state.base, 'idle_stand');
   assert.equal(player.state.carrying, false);
 });
+
+test('互动片段播放期间切抱棋：先记状态，片段收尾才落到 chess_hold', async () => {
+  const clips = makeClips();
+  clips.push(clip('chess_pickup', [track(LOWER, 0, 0.5), track(UPPER, 0, 0.5)], 0.5));
+  const player = new LayeredMotionPlayer(makeRig(), clips);
+  const done = player.perform('chess_pickup', [{ time: 0.2, type: 'grasp' }], () => {});
+  assert.equal(player.setCarrying(true), true);
+  assert.equal(player.state.base, 'idle_stand', '片段没结束前不换基底');
+  for (let t = 0; t < 2; t += 1 / 60) player.update(1 / 60);
+  assert.equal(await done, true);
+  assert.equal(player.state.base, 'chess_hold');
+  assert.equal(player.state.carrying, true);
+  assert.equal(player.state.resting, true);
+});

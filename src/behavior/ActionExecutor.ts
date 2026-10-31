@@ -449,7 +449,7 @@ export class ActionExecutor {
       case "xiangqi_move": {
         const bridge = this.loco.xiangqiMove;
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
-        const raced = await this.withTimeout(bridge(step as never, { token: this.xiangqiToken }), 300000);
+        const raced = await this.withTimeout(bridge(step as never, { token: this.xiangqiToken, isCancelled: () => this.cancelled }), 300000);
         if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
         const outcome = raced.value;
         if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");
