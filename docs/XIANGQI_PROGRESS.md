@@ -1,5 +1,7 @@
 # 中国象棋接入进度（DeepSeek）
 
+> 2026-10-31 最新用户决定与修复：取消自动判和，改为聊天双方同意后结束；旧进度中的自然限着、重复自动判和已被撤销。`924f704` 已修复本轮复现的规则误判和变着提醒，328 项测试及构建通过，完整覆盖/剩余认证范围见 [规则修复说明](XIANGQI_RULES_FIX_2026-10-31.md)。下文保留历史过程，不能将旧“已实现”当作当前自动和棋需求。
+
 2026-10-31。入口与契约见 [XIANGQI_DEVELOPMENT_HANDOFF.md](XIANGQI_DEVELOPMENT_HANDOFF.md)、[XIANGQI_PLAN.md](XIANGQI_PLAN.md)、[XIANGQI_ASSET_HANDOFF.md](XIANGQI_ASSET_HANDOFF.md)。
 
 ## 已完成（服务端 + 客户端接线，288 项测试通过）
