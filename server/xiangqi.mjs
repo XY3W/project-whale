@@ -338,7 +338,7 @@ export function squareDefended(game, side, row, col) {
   const piece = game.pieces.get(occupant);
   if (!piece) return false;
   const ghost = "__defender_probe";
-  game.pieces.set(ghost, { id: ghost, side: other(piece.side), kind: "soldier", row, col });
+  game.pieces.set(ghost, { id: ghost, side: other(piece.side), kind: "pawn", row, col });
   game.board[cell] = ghost;
   try {
     return capturesBy(game, side).some((c) => c.row === row && c.col === col);
@@ -361,6 +361,37 @@ export function position(game) {
     checkmate: game.status === "playing" && check && moves.length === 0,
     stalemate: game.status === "playing" && !check && moves.length === 0,
   };
+}
+
+/** 子力价值（以兵为单位）：只用于棋例判断"吃这口子值不值" */
+export const PIECE_VALUE = { general: 1000, rook: 9, cannon: 4.5, horse: 4, advisor: 2, elephant: 2, pawn: 1 };
+function pieceValue(piece) {
+  if (!piece) return 0;
+  if (piece.kind === "pawn" && crossedRiver(piece.side, piece.row)) return 2; // 过河兵当两个
+  return PIECE_VALUE[piece.kind] ?? 0;
+}
+
+/**
+ * 吃这枚敌子能得多少子力（负值表示换亏）。
+ * 没人保 = 白吃，按整子算；有人保 = 按"吃子后被反吃"的净差算。
+ * 这是 CCA2020"捉"的简化版：只看一步交换，不看被牵制的保护子、连环兑子等更深的情况。
+ */
+export function captureGain(game, victimId) {
+  const victim = game.pieces.get(victimId);
+  if (!victim || victim.kind === "general") return 0;
+  const attackerSide = other(victim.side);
+  const threats = capturesBy(game, attackerSide).filter((t) => t.victim === victimId);
+  if (!threats.length) return 0;
+  const defended = squareDefended(game, victim.side, victim.row, victim.col);
+  let best = -Infinity;
+  for (const threat of threats) {
+    const attacker = game.pieces.get(threat.attacker);
+    if (!attacker) continue;
+    const gain = pieceValue(victim) - (defended ? pieceValue(attacker) : 0);
+    if (gain > best) best = gain;
+  }
+  // 有威胁就返回最好那口的净收益（换亏是负数）；根本没威胁返回 0
+  return best === -Infinity ? 0 : best;
 }
 
 /**
@@ -395,7 +426,8 @@ export function adjudicateRepeat(game, history) {
     for (const victimId of common ?? []) {
       const victim = game.pieces.get(victimId);
       if (!victim || victim.kind === "general") continue; // 将军已在上面按长将处理
-      if (squareDefended(game, victim.side, victim.row, victim.col)) continue;
+      // 吃这口子要能赚子力：白吃当然算，换子赚也算；换亏/兑子不算
+      if (captureGain(game, victimId) <= 0) continue;
       return { threefold: true, reason: "perpetual_chase", winner: other(mover), loser: mover, victim: victimId };
     }
   }
