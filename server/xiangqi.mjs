@@ -299,8 +299,53 @@ export function move(game, pieceId, toRow, toCol) {
     game.result = { winner: mover, reason: opponentInCheck ? "checkmate" : "stalemate" };
   }
   record.check = opponentInCheck;
+  // 这一手之后她能吃掉的敌子（棋例判"长捉"用）
+  record.attacks = capturesBy(game, mover).map((c) => c.victim);
   game.result = game.status === "won" ? game.result : null;
   return { ok: true, record, captured: captured?.id ?? null, check: opponentInCheck, status: game.status, result: game.result ?? null };
+}
+
+/**
+ * 某一方此刻能吃掉的敌子（不看轮次）。
+ * 用于棋例判断与走子记录：临时把轮次借给它，算完立刻还回去。
+ */
+function capturesBy(game, side) {
+  const saved = game.turn;
+  game.turn = side;
+  const out = [];
+  try {
+    for (const piece of game.pieces.values()) {
+      if (piece.side !== side) continue;
+      for (const m of legalMoves(game, piece.id)) {
+        const victim = game.board[m.row * COLS + m.col];
+        if (victim && victim !== piece.id) out.push({ attacker: piece.id, victim, row: m.row, col: m.col });
+      }
+    }
+  } finally {
+    game.turn = saved;
+  }
+  return out;
+}
+
+/**
+ * 某个格子上 `side` 的子有没有被保护：先把该格换成一枚对方的"幽灵"棋子，
+ * 再看 `side` 能不能吃到这一格。吃得到就是有保护（被吃了能反吃回来）。
+ */
+export function squareDefended(game, side, row, col) {
+  const cell = row * COLS + col;
+  const occupant = game.board[cell];
+  if (!occupant) return false;
+  const piece = game.pieces.get(occupant);
+  if (!piece) return false;
+  const ghost = "__defender_probe";
+  game.pieces.set(ghost, { id: ghost, side: other(piece.side), kind: "soldier", row, col });
+  game.board[cell] = ghost;
+  try {
+    return capturesBy(game, side).some((c) => c.row === row && c.col === col);
+  } finally {
+    game.board[cell] = occupant;
+    game.pieces.delete(ghost);
+  }
 }
 
 /** 当前局面事实：将军/合法着法/终局 */
@@ -338,6 +383,21 @@ export function adjudicateRepeat(game, history) {
   const own = mover ? cycle.filter((m) => m.side === mover) : [];
   if (mover && own.length >= 2 && own.every((m) => m.check)) {
     return { threefold: true, reason: "perpetual_check", winner: other(mover), loser: mover };
+  }
+  // 长捉：循环里每一手都在威胁吃掉同一个敌子，而且这口子是"白吃"（那子没人保）。
+  // 只认白吃，是为了不把长兑/长跟/长拦误判成捉——那些都建立在子被保护、吃了要亏子的前提上。
+  if (mover && own.length >= 2) {
+    let common = null;
+    for (const m of own) {
+      const set = new Set(m.attacks ?? []);
+      common = common === null ? set : new Set([...common].filter((id) => set.has(id)));
+    }
+    for (const victimId of common ?? []) {
+      const victim = game.pieces.get(victimId);
+      if (!victim || victim.kind === "general") continue; // 将军已在上面按长将处理
+      if (squareDefended(game, victim.side, victim.row, victim.col)) continue;
+      return { threefold: true, reason: "perpetual_chase", winner: other(mover), loser: mover, victim: victimId };
+    }
   }
   return { threefold: true, reason: "repetition", winner: null };
 }

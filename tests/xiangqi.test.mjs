@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   createGame, legalMoves, allLegalMoves, move, inCheck, position, publicGame,
   serializeGame, restoreGame, initialPieces, pseudoMoves, signature, inPalace, crossedRiver,
-  ROWS, COLS, adjudicateRepeat, naturalLimit,
+  ROWS, COLS, adjudicateRepeat, naturalLimit, squareDefended,
 } from "../server/xiangqi.mjs";
 
 const game = () => createGame({ gameId: "xq1", userSide: "red" });
@@ -292,4 +292,33 @@ test("走子记录带上走子方与将军标记（棋例裁决的依据）", ()
   assert.equal(game.moves.length, before + 1);
   assert.equal(last.side, "red");
   assert.equal(typeof last.check, "boolean");
+});
+
+test("棋例裁决：长捉白吃判负，捉有保护的子只判和", () => {
+  const game = createGame("g-chase");
+  const blackPieces = [...game.pieces.values()].filter((p) => p.side === "black");
+  const free = blackPieces.find((p) => p.kind !== "general" && !squareDefended(game, "black", p.row, p.col));
+  const guarded = blackPieces.find((p) => p.kind !== "general" && squareDefended(game, "black", p.row, p.col));
+  assert.ok(free, "初始局面里应该有没保护的黑子");
+  assert.ok(guarded, "初始局面里应该有有保护的黑子");
+  game.turn = "red";
+  const sig = signature(game);
+  const history = [sig, "a#black", sig, "b#black", sig];
+  const cycle = (attacks) => [
+    { side: "black", check: false, attacks: [] },
+    { side: "red", check: false, attacks },
+    { side: "black", check: false, attacks: [] },
+    { side: "red", check: false, attacks },
+  ];
+  const chase = adjudicateRepeat({ ...game, moves: cycle([free.id]) }, history);
+  assert.equal(chase.reason, "perpetual_chase");
+  assert.equal(chase.loser, "red");
+  assert.equal(chase.winner, "black");
+  assert.equal(chase.victim, free.id);
+  const exchange = adjudicateRepeat({ ...game, moves: cycle([guarded.id]) }, history);
+  assert.equal(exchange.reason, "repetition", "有保护的子被反复攻击只能算长兑/长跟，判和");
+  assert.equal(exchange.winner, null);
+  // 打一枪换一个地方，不算长捉
+  const scattered = adjudicateRepeat({ ...game, moves: cycle([free.id]).map((m, i) => (i === 3 ? { ...m, attacks: [guarded.id] } : m)) }, history);
+  assert.equal(scattered.reason, "repetition");
 });
