@@ -18,7 +18,7 @@ async function scene(){
 }
 function shaderFor(material){const shader={vertexShader:THREE.ShaderLib.standard.vertexShader,fragmentShader:THREE.ShaderLib.standard.fragmentShader,uniforms:{}};material.onBeforeCompile(shader,{});return shader}
 test('material asset keeps all source geometry, materials, skin and 45 authored animations',()=>{
- assert.ok(current.binary.subarray(0,base.binary.length).equals(base.binary));assert.deepEqual(current.g.animations,base.g.animations);assert.equal(current.g.animations.length,45);assert.deepEqual(current.g.skins,base.g.skins);assert.deepEqual(current.g.materials,base.g.materials);const meshes=structuredClone(current.g.meshes);delete meshes[0].primitives[0].attributes._EYEPART;assert.deepEqual(meshes,base.g.meshes);assert.equal(current.g.meshes.length,base.g.meshes.length);assert.ok(!('_EYECLOSE'in current.g.meshes[0].primitives[0].attributes));
+ assert.ok(current.binary.subarray(0,base.binary.length).equals(base.binary));assert.ok(base.g.animations.every((a) => current.g.animations.some((b) => JSON.stringify(b) === JSON.stringify(a))),'旧 45 段必须原样保留');assert.equal(current.g.animations.length,61,'新副本 = 旧 45 段 + 16 段象棋动作');assert.deepEqual(current.g.skins,base.g.skins);assert.deepEqual(current.g.materials,base.g.materials);const meshes=structuredClone(current.g.meshes);delete meshes[0].primitives[0].attributes._EYEPART;assert.deepEqual(meshes,base.g.meshes);assert.equal(current.g.meshes.length,base.g.meshes.length);assert.ok(!('_EYECLOSE'in current.g.meshes[0].primitives[0].attributes));
 });
 test('all six retired helpers are tagged, including the two lower sheets exposed below the ears',()=>{
  const p=attribute('POSITION'),tag=attribute('_EYEPART');let helpers=0,lowerLeft=0,lowerRight=0;
