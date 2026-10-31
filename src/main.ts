@@ -6,6 +6,7 @@ import { mountControls } from "./ui/Controls";
 import { stepPropWorld, onPropImpact } from "./prop/basinPhysics";
 import { Stage } from "./core/Stage";
 import { walkableHalfOf } from "./core/arena";
+import { planWalkLegs } from "./behavior/locomotion";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
@@ -16,7 +17,7 @@ import { BrainClient } from "./brain/BrainClient";
 import type { Plan } from "./behavior/protocol.ts";
 import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
-import { cyclesFor, nearestSupported } from "./behavior/distances.ts";
+import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
 import { PropItem } from "./prop/PropItem";
@@ -585,15 +586,22 @@ async function boot() {
       // 目标距离取容差的一半：步长是 0.18/0.02 的量化档位，留足余量才不会“差一点”判失败
       let rest = Math.max(0, distance - tolerance * 0.5);
       let moved = 0;
-      while (rest >= 0.09 - 1e-9) {
-        const stepM = nearestSupported(rest).below;
-        if (!Number.isFinite(stepM) || stepM <= 0) break;
-        await loco.walk!(stepM);
+      // 空手走远路先跑：跑 0.4m/s，走只有 0.1125m/s；抱着东西时不跑
+      const allowRun = !player.state.carrying;
+      for (const leg of planWalkLegs(rest, { allowRun })) {
+        if (leg.kind === "run") {
+          if (!loco.run) break;
+          await loco.run(leg.meters);
+        } else if (leg.kind === "walk") {
+          await loco.walk!(leg.meters);
+        } else if (loco.adjust) {
+          await loco.adjust(leg.meters);
+        }
         checkCancelled();
-        rest -= stepM;
-        moved += stepM;
-        if (rest < 0.09) break;
+        moved += leg.meters;
+        rest -= leg.meters;
       }
+      rest = Math.max(0, rest);
       while (rest >= 0.02 - 1e-9) {
         const adj = loco.adjust ? Math.min(0.08, Math.floor(rest / 0.02) * 0.02) : 0;
         if (!adj) break;
@@ -1130,21 +1138,22 @@ async function boot() {
     const from = xqPoint(piece.row, piece.col);
     const to = xqPoint(step.to_row, step.to_col);
     const bearing = (a: { x: number; z: number }, b: { x: number; z: number }) => (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI;
-    const walkToPoint = async (x: number, z: number) => {
+    // allowRun：空手接近时先跑（0.4m/s），抱着棋只能走（素材的抱棋步态就是走速）
+    const walkToPoint = async (x: number, z: number, allowRun = false) => {
       if (aborted()) return false;
-      const steps = [1.89, 1.71, 1.53, 1.35, 1.17, 0.99, 0.81, 0.63, 0.45, 0.27, 0.09];
-      const adjusts = [0.08, 0.06, 0.04, 0.02];
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
       if (aborted()) return false;
-      for (let i = 0; i < 14; i++) {
+      const distance = Math.hypot(x - root.position.x, z - root.position.z);
+      for (const leg of planWalkLegs(distance, { allowRun })) {
         if (aborted()) return false;
-        const d = Math.hypot(x - root.position.x, z - root.position.z);
-        if (d <= 0.03) break;
-        const w = steps.find((v) => v <= d + 1e-6);
-        if (w !== undefined) { await loco.walk!(w); continue; }
-        const a = adjusts.find((v) => v <= d + 1e-6);
-        if (a === undefined || !loco.adjust) break;
-        await loco.adjust(a);
+        if (leg.kind === "run") {
+          if (loco.run) await loco.run(leg.meters);
+          else await loco.walk!(leg.meters);
+        } else if (leg.kind === "walk") {
+          await loco.walk!(leg.meters);
+        } else if (loco.adjust) {
+          await loco.adjust(leg.meters);
+        }
       }
       if (aborted()) return false;
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
@@ -1155,7 +1164,7 @@ async function boot() {
     const dz = root.position.z - from.z;
     const dist = Math.hypot(dx, dz) || 1;
     const stand = { x: from.x + (dx / dist) * 0.85, z: from.z + (dz / dist) * 0.85 };
-    if (!(await walkToPoint(stand.x, stand.z))) return { ok: false, reason: "CANCELLED" };
+    if (!(await walkToPoint(stand.x, stand.z, true))) return { ok: false, reason: "CANCELLED" };
     await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, from)));
     if (aborted()) return { ok: false, reason: "CANCELLED" };
     let carried = false;
@@ -1173,7 +1182,7 @@ async function boot() {
       const dz2 = root.position.z - to.z;
       const d2 = Math.hypot(dx2, dz2) || 1;
       const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
-      if (!(await walkToPoint(stand2.x, stand2.z))) return { ok: false, reason: "CANCELLED" };
+      if (!(await walkToPoint(stand2.x, stand2.z, false))) return { ok: false, reason: "CANCELLED" };
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
       if (aborted()) return { ok: false, reason: "CANCELLED" };
       // 吃子和普通落子是两段交付动作：目标格上有敌子就用 chess_capture_place
@@ -1486,6 +1495,12 @@ async function boot() {
     onXiangqi: (value) => {
       const view = (value as XiangqiView) ?? null;
       xiangqiView = view;
+      const ruleNote = document.getElementById('xiangqi-rule-note');
+      if (ruleNote) {
+        const w = view?.ruleWarning;
+        ruleNote.hidden = !w;
+        ruleNote.textContent = w ? `${w.requiredSide === 'red' ? '红方' : '黑方'}须变着：剩余 ${w.remainingTurns} 次走子机会，请勿继续原循环。` : '';
+      }
       if (view && !xiangqiArmy) {
         // 第一份棋局到达时再加载素材，避免平时多下载 40MB
         xiangqiArmy = view;
