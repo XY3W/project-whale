@@ -1230,6 +1230,16 @@ async function boot() {
   // ---- 主循环 ----
   const clock = new THREE.Clock();
 
+  // 盆/勺落定这类稀有事件立刻上报：否则模型会一直以为它还在飞
+  const reportSettled = () => {
+    if (!stateApplied || readOnly) return;
+    lastBasinReport = performance.now();
+    lastReport = lastBasinReport;
+    client.sendStateSnapshot(snapshot());
+  };
+  basin.onSettled = reportSettled;
+  scoop.onSettled = reportSettled;
+
   stage.renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
     player.update(dt);
@@ -1406,7 +1416,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE,
+    stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE, stepPropWorld,
     getGame: () => gameBoard,
     gomokuBoard,
     getGomoku: () => gomokuView,

@@ -125,3 +125,41 @@ test("持续位移：超过6秒也不能强制静止", async () => {
   }
   assert.ok(out.flightTime>6);physics.stop();
 });
+
+test("贴墙悬空：视觉最低顶点高于旧阈值(0.025)时仍要判成落地", async () => {
+  const physics = await BasinPhysics.create(hull, ARENA_HALF, "basin");
+  const cyl = cylinderFromHull(hull);
+  const restY = cyl.halfHeight - cyl.center.y;
+  // 先在正常高度落定，拿到稳定的位姿
+  physics.launch({ position: new THREE.Vector3(3.6, restY, 0.05), quaternion: new THREE.Quaternion(), velocity: new THREE.Vector3(), angularVelocity: new THREE.Vector3() });
+  let out = null;
+  for (let i = 0; i < 600; i++) {
+    out = physics.step(1 / 60);
+    if (out.resting) break;
+  }
+  assert.equal(out.resting, true, "正常贴地应当能落定");
+  // 模拟“碰撞面在接触、视觉 hull 悬空”：抬高 3.5cm 并让它睡眠（贴墙被顶住时的典型形态）
+  const t = physics.body.translation();
+  physics.body.setTranslation({ x: t.x, y: t.y + 0.035, z: t.z }, true);
+  physics.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  physics.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  physics.body.sleep();
+  const pose = physics.body.translation();
+  const q = physics.body.rotation();
+  let lowest = Infinity;
+  const v = new THREE.Vector3();
+  const quat = new THREE.Quaternion(q.x, q.y, q.z, q.w);
+  for (let i = 0; i < hull.length; i += 3) {
+    v.set(hull[i], hull[i + 1], hull[i + 2]).applyQuaternion(quat).add(new THREE.Vector3(pose.x, pose.y, pose.z));
+    if (v.y < lowest) lowest = v.y;
+  }
+  assert.ok(lowest > 0.025, `这个高度应当高于旧阈值，实际 ${lowest.toFixed(4)}`);
+  assert.ok(lowest <= 0.06, `应当在新的容差内，实际 ${lowest.toFixed(4)}`);
+  let settled = null;
+  for (let i = 0; i < 120; i++) {
+    settled = physics.step(1 / 60);
+    if (settled.resting) break;
+  }
+  assert.equal(settled.resting, true, "悬空但静止的盆也必须能落定，否则会永远处于 flying");
+  physics.stop();
+});

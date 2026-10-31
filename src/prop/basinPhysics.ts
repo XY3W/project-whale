@@ -10,6 +10,16 @@ const MAX_FRAME = 0.1;
 const STILL_SECONDS = 0.8;
 const STILL_DISTANCE = 0.003;
 const STILL_ANGLE = 0.02;
+/**
+ * 落地判定的海拔容差。碰撞体是“空心圆台”，接触发生在碰撞面上，而 hull 是外层视觉顶点，
+ * 停下来时最低顶点常在 0.02~0.03m 之间——原来的 0.025 正好卡在边界上。
+ */
+const FLOOR_SLACK = 0.06;
+/** 近零速度阈值：贴墙被接触约束顶住时，位移会有微抖，但速度其实已经归零。 */
+const STILL_SPEED = 0.02;
+const STILL_SPIN = 0.08;
+/** 兜底：飞了这么久还没判成落地，只要接近静止就强制收 */
+const MAX_FLIGHT = 20;
 
 export interface Pose {
   position: THREE.Vector3;
@@ -36,6 +46,10 @@ export interface StepResult {
   speed: number;
   spin: number;
   flightTime: number;
+  /** 刚体是否已被物理引擎判定为睡眠（贴墙卡住时的重要信号） */
+  asleep: boolean;
+  /** 触发兜底收尾（超时/近零速） */
+  forced: boolean;
 }
 
 export interface Impact {id:string;pair:string[];normalSpeed:number;point:{x:number;y:number;z:number}|null;}
@@ -229,16 +243,26 @@ export class BasinPhysics {
       point.set(this.hull[i], this.hull[i + 1], this.hull[i + 2]).applyQuaternion(pose.quaternion).add(pose.position);
       lowest = Math.min(lowest, point.y);
     }
-    const onFloor = lowest <= FLOOR_Y + 0.025;
-    if (onFloor && moved <= STILL_DISTANCE && turned <= STILL_ANGLE) this.calmFor += dt;
+    const onFloor = lowest <= FLOOR_Y + FLOOR_SLACK;
+    const asleep = typeof body.isSleeping === "function" ? body.isSleeping() : false;
+    const still = moved <= STILL_DISTANCE && turned <= STILL_ANGLE;
+    // 位移是硬门槛：真的不动了才算停（防止被“推着走但速度读数为 0”骗过）。
+    // 速度/睡眠只用来放宽“脚是不是落在地上”这一条——贴墙时碰撞面在接触，视觉 hull 可能悬空。
+    const nearZero = speed <= STILL_SPEED && spin <= STILL_SPIN;
+    const settled = still && (onFloor || nearZero || asleep);
+    const timedOut = this.flightTime >= MAX_FLIGHT && still;
+    if (settled || timedOut) this.calmFor += dt;
     else { this.calmFor = 0; this.stillAnchor.copy(pose.position); this.stillRotation.copy(pose.quaternion); }
+    const forced = timedOut && !(onFloor && still);
     return {
       pose,
       calm: this.calmFor,
-      resting: onFloor && this.calmFor >= STILL_SECONDS,
+      resting: this.calmFor >= STILL_SECONDS && (settled || timedOut),
       speed: Math.round(speed * 1000) / 1000,
       spin: Math.round(spin * 1000) / 1000,
       flightTime: Math.round(this.flightTime * 100) / 100,
+      asleep,
+      forced,
     };
   }
 

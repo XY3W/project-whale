@@ -92,6 +92,10 @@ export class PropItem {
   private actionsBefore: PropState = "resting";
   private restorePose: Pose;
   private throwSpec: ThrowSpec | null = null;
+  /** 起飞的墙钟时刻，用于“永远飞着”的看门狗 */
+  private flightWall = 0;
+  /** 由 main.ts 注入：状态落定时立即上报快照 */
+  onSettled: (() => void) | null = null;
   private lastPose: Pose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion() };
   private lastCalm = 0;
   private lastSpeed = 0;
@@ -174,6 +178,12 @@ export class PropItem {
   }
 
   private bump() { this.revision++; }
+
+  /** 状态发生实质性变化（落地/扶正完成）时通知宿主立刻上报，别被上报节流吞掉 */
+  private settled() {
+    this.bump();
+    try { this.onSettled?.(); } catch { /* 上报失败不影响物理 */ }
+  }
 
   private applyPose(pose: Pose) {
     this.object.position.copy(pose.position);
@@ -308,6 +318,7 @@ export class PropItem {
     this.state = "flying";
     this.mode = "physics";
     this.lastCalm = 0;
+    this.flightWall = Date.now();
   }
 
   private followCurve(clip: string, time: number) {
@@ -345,7 +356,7 @@ export class PropItem {
       const e = k * k * (3 - 2 * k);
       this.object.position.lerpVectors(this.uprightFrom.position, this.uprightTo.position, e);
       this.object.quaternion.slerpQuaternions(this.uprightFrom.quaternion, this.uprightTo.quaternion, e);
-      if (k >= 1) { this.mode = "world"; this.state = "resting"; this.bump(); }
+      if (k >= 1) { this.mode = "world"; this.state = "resting"; this.settled(); }
       return;
     }
     if (this.mode === "physics") {
@@ -359,10 +370,21 @@ export class PropItem {
       this.lastSpeed = result.speed;
       this.lastSpin = result.spin;
       if (result.resting) {
+        if (result.forced) console.warn(`[basin] 兜底判落地（飞行 ${result.flightTime}s，速度 ${result.speed}）`);
         this.physics.stop();
         this.mode = "world";
         this.state = "resting";
-        this.bump();
+        this.settled();
+        return;
+      }
+      // 看门狗：物理层没给结果或世界没推进时，别让它永远“飞着”
+      if (this.flightWall && Date.now() - this.flightWall > 25000) {
+        console.warn(`[basin] 飞行超时强制落地（已 ${Math.round((Date.now() - this.flightWall) / 1000)}s）`);
+        this.physics.stop();
+        this.mode = "world";
+        this.state = "resting";
+        this.flightWall = 0;
+        this.settled();
       }
     }
   }
