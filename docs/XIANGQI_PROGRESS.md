@@ -193,3 +193,22 @@
 ```
 
 页面 B 能收到 `xiangqi_state`（32 枚棋子、轮次都同步），但调 `startXiangqi` 不会产生开局——服务端按 `NOT_EXECUTOR` 拒绝。租约随连接关闭释放，符合"同一时刻只有一个执行者"的约定。
+
+## 审查回应（CODE_REVIEW_XIANGQI_2026-10-31）
+
+基线 26fd9ec 的 10 项发现逐条处理，回归用例集中在 `tests/xiangqi-review.test.mjs`（15 项，全部断言"修复后应有的行为"）：
+
+| 项 | 处理 | 证据 |
+| --- | --- | --- |
+| R01 场地边界 | 新增 `src/core/arena.ts` / `server/arena.mjs` 作为唯一来源；逐帧夹取、快照回填、接近规划、模型上下文、道具物理墙全部跟随 `roomHalf` | `walkableHalfOf(5.75)=5.45`、客户端与服务端同源测试 |
+| R02 落子不等 ACK | 片段时钟可暂停；release 后在等待点暂停 → 提交 → 回执到了才继续下降；明确失败中止并回原格；UNKNOWN_COMMIT 用 revision 自证 | 桥顺序测试：pause → commit → animation_complete；失败时 cancel + 回原格 |
+| R03 腰挂只说通 | snapshot 的 holder 增加 `waist_slot`；sanitizeProp 不再把挂腰降级成手持；slotsOf 增加腰槽；restore 接受腰状态并预装绑定 | 挂腰快照仍是 worn/waist_slot、右手为空；脏数据仍降级 |
+| R04 授权不认局 | 抽出 `server/xiangqi-auth.mjs`；game_id 不符直接拒绝；换局/收摊/取消撤销；parallel 禁止 xiangqi_move；客户端走位前验收权 | 错局授权测试、换局撤销测试、parallel 拒绝测试 |
+| R05 取消还拾取 | walkToPoint 入口与每个 await 后都查取消；源站位失败立即返回；finally 送还原格 | 取消跑测试：0 次 perform |
+| R06 长将误判和 | 按循环内双方各自责任判定，不再看"最后走子方" | 真实合法对局：红车来回将军、黑将走回重复，最后一手是黑，仍判红负 |
+| R07 重启复活 | 状态统一成 drawn（兼容 draw）；decisions 与 history 落盘并恢复 | 重启后仍 drawn、幂等与历史都在 |
+| R08 开局入口 | 执色选择弹窗（红/黑/取消，取消不发请求）；按钮文案随状态切换；两种执色都触发一次开局事件（用户执红只确认不抢第一着） | 浏览器实测：闲置显示"象棋开局"、点击弹三选项、取消不建局、执黑后她执红先行 |
+| R09 落子不落地 | 弧线改为按真实时间推进的一跳，u=1 精确落地；每手刷新金色环；取消选择归零 | 240 帧后 y 必须为 0；select(null) 目标高度归零 |
+| R10 提示词条件 | 详细棋规仅在 `status === "playing"` 注入；终局只留最小结果；rows 改成 ASCII（红大写/黑小写） | 无局/终局不加载、终局无 rows/legalMoves、编码可区分敌我 |
+
+仍未做（审查也点明属独立缺口）：完整 CCA2020 的捉/兑换例外逐例裁决、`chess_safe_setdown`/`chess_recover` 的表现层接入、棋子障碍导航。
