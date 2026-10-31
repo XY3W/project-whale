@@ -266,3 +266,118 @@ test('场地：象棋 11.5m 时角色可走范围跟着放大，退出复原', a
   assert.equal(walkableHalfOf(4), walkableHalfNow(false));
   assert.equal(walkableHalfOf(5.75), walkableHalfNow(true));
 });
+
+// ---------- R02 / R05：落子先停住等服务端确认；取消后一步都不动 ----------
+
+test('落子：到等待点先暂停，提交回执回来后才继续下降收尾', async () => {
+  const ts = await import('typescript');
+  const main = fs.readFileSync('src/main.ts', 'utf8');
+  const start = main.indexOf('  loco.xiangqiMove = async (step, ctx) => {');
+  const stop = main.indexOf('  gomokuButton?.addEventListener', start);
+  assert.ok(start > 0 && stop > start, '找不到搬运桥');
+  const bridgeJs = ts.transpileModule(main.slice(start, stop), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
+
+  const runBridge = async ({ cancelled = false, capture = false, commitReply = { committed: true, revision: 2 } } = {}) => {
+    const events = [];
+    let clock = 0;
+    const THREE = await import('three');
+    const root = new THREE.Group();
+    const piece = { id: 'black_rook_1', side: 'black', row: 0, col: 0 };
+    const view = {
+      gameId: 'g1', status: 'playing', turn: 'black', characterSide: 'black', revision: 1,
+      pieces: [piece, ...(capture ? [{ id: 'red_soldier_1', side: 'red', row: 1, col: 0 }] : [])],
+    };
+    const loco = {
+      async turn() {}, async walk() {}, async adjust() {},
+    };
+    const player = {
+      paused: false, cancelled: false,
+      pausePerformance() { this.paused = true; events.push({ type: 'pause' }); },
+      resumePerformance() { this.paused = false; events.push({ type: 'resume' }); },
+      cancelPerformance() { this.cancelled = true; this.paused = false; events.push({ type: 'cancel-performance' }); },
+      setCarrying(on) { events.push({ type: 'carrying', on }); return true; },
+      async perform(clip, evts, cb) {
+        events.push({ type: 'perform', clip });
+        for (const e of evts) {
+          if (this.cancelled) return false;
+          events.push({ type: e.type, time: e.time });
+          cb(e.type);
+          if (this.paused) await new Promise((resolve) => {
+            const timer = setInterval(() => { if (!this.paused) { clearInterval(timer); resolve(); } }, 5);
+          });
+        }
+        clock += 1.8;
+        events.push({ type: 'animation_complete', clip, time: clock });
+        return !this.cancelled;
+      },
+    };
+    const board = {
+      beginCarry() { events.push({ type: 'beginCarry' }); return true; },
+      endCarry(id, target) { events.push({ type: 'endCarry', target }); },
+    };
+    const client = {
+      async xiangqiCommit() { events.push({ type: 'commit' }); await new Promise((r) => setTimeout(r, 5)); return commitReply; },
+    };
+    const waitForRevision = async () => false;
+    const factory = new Function(
+      'loco', 'root', 'degYaw', 'signedDeltaDeg', 'xiangqiBoard', 'player', 'xqPoint', 'placementFor',
+      'client', 'xiangqiView', 'xiangqiTokenRef', 'waitForRevision', bridgeJs + '\nreturn loco.xiangqiMove;',
+    );
+    const move = factory(loco, root, () => 0, (a, b) => ((b - a + 540) % 360) - 180, board, player, (r, c) => ({ x: c, z: r }), () => ({
+      clip: 'chess_place', victim: null,
+      events: [{ time: 0.4, type: 'release' }, { time: 1.2, type: 'placement_gate' }, { time: 1.3, type: 'land_confirmed' }],
+    }), client, view, 'tok', waitForRevision);
+    const outcome = await move(
+      { game_id: 'g1', piece_id: piece.id, to_row: 1, to_col: 0, expected_revision: 1 },
+      { token: 'tok', isCancelled: () => cancelled },
+    );
+    return { outcome, events };
+  };
+
+  const ok = await runBridge({ capture: true });
+  const commitAt = ok.events.findIndex((e) => e.type === 'commit');
+  const completeAt = ok.events.findIndex((e) => e.type === 'animation_complete' && e.clip === 'chess_place');
+  const pauseAt = ok.events.findIndex((e) => e.type === 'pause');
+  assert.ok(pauseAt >= 0, '到等待点必须先暂停');
+  assert.ok(commitAt > pauseAt, '暂停之后才发提交');
+  assert.ok(commitAt > ok.events.findIndex((e) => e.type === 'release'), '先到位（release）再提交');
+  assert.ok(commitAt < completeAt, '提交要在整段动画结束之前，不是等它播完');
+  assert.ok(!ok.events.some((e) => e.type === 'endCarry' && e.target && e.target.row === 0), '成功之后不能再把棋子拉回原格');
+  assert.equal(ok.outcome.ok, true);
+
+  const denied = await runBridge({ commitReply: { committed: false, reason: 'STALE_REVISION' } });
+  assert.equal(denied.outcome.ok, false);
+  assert.ok(denied.events.some((e) => e.type === 'cancel-performance'), '提交失败要中止下降');
+  assert.ok(denied.events.some((e) => e.type === 'endCarry' && e.target && e.target.row === 0), '棋子要回到原格');
+
+  const cancelledRun = await runBridge({ cancelled: true });
+  assert.equal(cancelledRun.outcome.reason, 'CANCELLED');
+  assert.equal(cancelledRun.events.filter((e) => e.type === 'perform').length, 0, '取消后不能开始拾取');
+});
+
+test('片段暂停：暂停期间动作时钟不推进', async () => {
+  const { LayeredMotionPlayer } = await import('../src/character/LayeredMotionPlayer.ts');
+  const THREE = await import('three');
+  const root = new THREE.Group();
+  const bone = new THREE.Object3D();
+  bone.name = 'root.x';
+  root.add(bone);
+  const track = new THREE.VectorKeyframeTrack('root.x.position', [0, 1], [0, 0, 0, 0, 1, 0]);
+  const tail = [new THREE.VectorKeyframeTrack('root.x.quaternion', [0, 1], [0, 0, 0, 1, 0, 0, 0, 1])];
+  const clips = [
+    new THREE.AnimationClip('greet', 1, [track]),
+    new THREE.AnimationClip('tail_idle', 1, tail),
+    new THREE.AnimationClip('tail_swish', 1, tail),
+  ];
+  const player = new LayeredMotionPlayer(root, clips);
+  let seen = 0;
+  const done = player.perform('greet', [{ time: 0.5, type: 'half' }], () => { seen++; });
+  player.pausePerformance();
+  for (let i = 0; i < 30; i++) player.update(1 / 60);
+  assert.equal(seen, 0, '暂停期间不该触发事件');
+  assert.equal(player.performancePaused, true);
+  player.resumePerformance();
+  for (let i = 0; i < 120; i++) player.update(1 / 60);
+  await done;
+  assert.equal(seen, 1);
+});

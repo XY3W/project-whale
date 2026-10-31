@@ -149,6 +149,13 @@ async function boot() {
     gomokuButton.textContent = onField ? "五子棋结束" : "五子棋开局";
     gomokuButton.style.background = onField ? "#8a3a3a" : "#3d62ad";
   };
+  const syncXiangqiButton = () => {
+    if (!xiangqiButton) return;
+    const onField = !!xiangqiView;
+    xiangqiButton.textContent = onField ? "象棋结束" : "象棋开局";
+    xiangqiButton.style.background = onField ? "#8a3a3a" : "#3d62ad";
+    xiangqiButton.disabled = readOnly && !onField;
+  };
   const renderGomokuChip = (view: GomokuView | null) => {
     if (!view) {
       gomokuChip.classList.remove("show");
@@ -1089,6 +1096,16 @@ async function boot() {
   void ensureWaist().catch((error) => console.warn("[scoop] 腰挂绑定加载失败", error));
 
   /** 象棋搬棋：走近 0.85m → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
+  /** 等盘面 revision 前进：提交回执丢了也不要盲目重开一着，先让盘面自证 */
+  const waitForRevision = async (expected: number, timeoutMs: number) => {
+    const deadline = performance.now() + timeoutMs;
+    while (performance.now() < deadline) {
+      if ((xiangqiView?.revision ?? -1) > expected) return true;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    return false;
+  };
+
   loco.xiangqiMove = async (step, ctx) => {
     // 没有授权、或授权属于另一盘棋：一步都别动（走位和吸附都不能先发生）
     if (!ctx?.token) return { ok: false, reason: "NO_AUTH" };
@@ -1097,15 +1114,18 @@ async function boot() {
     if (xiangqiView.turn !== xiangqiView.characterSide) return { ok: false, reason: "NOT_YOUR_TURN" };
     const piece = xiangqiView.pieces.find((p) => p.id === step.piece_id);
     if (!piece) return { ok: false, reason: "NO_PIECE" };
-    // 抢占/取消：每一步之前先问执行器还要不要继续，别把整段搬运跑完
-    const aborted = () => Boolean(ctx?.isCancelled?.());
+    const gameId = xiangqiView.gameId;
+    // 抢占/取消：每个 await 边界都问执行器还要不要继续，别把整段搬运跑完
+    const aborted = () => Boolean(ctx?.isCancelled?.()) || xiangqiView?.gameId !== gameId;
     const from = xqPoint(piece.row, piece.col);
     const to = xqPoint(step.to_row, step.to_col);
     const bearing = (a: { x: number; z: number }, b: { x: number; z: number }) => (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI;
     const walkToPoint = async (x: number, z: number) => {
+      if (aborted()) return false;
       const steps = [1.89, 1.71, 1.53, 1.35, 1.17, 0.99, 0.81, 0.63, 0.45, 0.27, 0.09];
       const adjusts = [0.08, 0.06, 0.04, 0.02];
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
+      if (aborted()) return false;
       for (let i = 0; i < 14; i++) {
         if (aborted()) return false;
         const d = Math.hypot(x - root.position.x, z - root.position.z);
@@ -1116,22 +1136,26 @@ async function boot() {
         if (a === undefined || !loco.adjust) break;
         await loco.adjust(a);
       }
+      if (aborted()) return false;
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
-      return true;
+      return !aborted();
     };
     // 站位：从棋子朝角色方向退 0.85m
     const dx = root.position.x - from.x;
     const dz = root.position.z - from.z;
     const dist = Math.hypot(dx, dz) || 1;
     const stand = { x: from.x + (dx / dist) * 0.85, z: from.z + (dz / dist) * 0.85 };
-    await walkToPoint(stand.x, stand.z);
+    if (!(await walkToPoint(stand.x, stand.z))) return { ok: false, reason: "CANCELLED" };
     await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, from)));
+    if (aborted()) return { ok: false, reason: "CANCELLED" };
     let carried = false;
+    let released = false;
     try {
       const picked = await player.perform("chess_pickup", [{ time: 0.4, type: "summon_start" }, { time: 1.2, type: "grasp" }], (type) => {
         if (type === "grasp") { xiangqiBoard.beginCarry(piece.id, root); carried = true; }
       });
       if (!picked) return { ok: false, reason: aborted() ? "CANCELLED" : "PICKUP_FAILED" };
+      if (aborted()) return { ok: false, reason: "CANCELLED" };
       // 棋子已经在手上：换成抱棋基底层，之后走路不再摆臂
       player.setCarrying(true);
       // 抱到目标旁：仍站在距目标 0.85m 的位置
@@ -1141,24 +1165,49 @@ async function boot() {
       const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
       if (!(await walkToPoint(stand2.x, stand2.z))) return { ok: false, reason: "CANCELLED" };
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
-      // 事件表来自 catalog.actions[chess_place]：0.4 release / 1.2 placement_gate / 1.3 land_confirmed
       if (aborted()) return { ok: false, reason: "CANCELLED" };
       // 吃子和普通落子是两段交付动作：目标格上有敌子就用 chess_capture_place
       const placement = placementFor(xiangqiView?.pieces, piece.id, step.to_row, step.to_col);
-      const placeClip = placement.clip;
+      const token = ctx.token ?? xiangqiTokenRef;
+      let gateReply: Record<string, unknown> | null = null;
+      let gateStarted = false;
+      // release 之后棋子交给棋盘缓动；到等待点先暂停身体，等服务端确认再继续下降
       const placed = await player.perform(placement.clip, placement.events, (type) => {
-        if (type === "release") xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
+        if (type === "release") {
+          xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
+          released = true;
+          return;
+        }
+        if (type !== "placement_gate" && type !== "capture_commit_gate") return;
+        if (gateStarted) return;
+        gateStarted = true;
+        player.pausePerformance();
+        void client
+          .xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col })
+          .then((reply) => { gateReply = reply; })
+          .finally(() => {
+            // 明确失败才中止；UNKNOWN_COMMIT 先继续，最后用盘面自证
+            if (gateReply && gateReply.committed === false && gateReply.reason !== "UNKNOWN_COMMIT") player.cancelPerformance();
+            else player.resumePerformance();
+          });
       });
       carried = false;
       player.setCarrying(false);
-      if (!placed) return { ok: false, reason: "PLACE_FAILED" };
-      const token = (ctx as { token?: string } | undefined)?.token ?? xiangqiTokenRef;
-      const res = await client.xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col });
-      if (!res.committed) return { ok: false, reason: String(res.reason ?? "NOT_COMMITTED"), ...res };
-      return { ok: true, committed: true, revision: Number(res.revision) || 0, captured: (res.captured as string | null) ?? null, placeClip };
+      const reply = gateReply as Record<string, unknown> | null;
+      const committed = !!reply?.committed;
+      if (!committed) {
+        // 提交没成功（含 ACK 丢失）：先看盘面是不是其实已经前进
+        const advanced = await waitForRevision(step.expected_revision, 3000);
+        if (!advanced) {
+          if (released) xiangqiBoard.endCarry(piece.id, { row: piece.row, col: piece.col });
+          return { ok: false, reason: String(reply?.reason ?? (placed ? "NOT_COMMITTED" : "PLACE_FAILED")), ...(reply ?? {}) };
+        }
+      }
+      released = false; // 已经落定，finally 不要再把棋子拉回原格
+      return { ok: true, committed: true, revision: Number(reply?.revision) || xiangqiView?.revision || 0, captured: (reply?.captured as string | null) ?? null, placeClip: placement.clip };
     } finally {
       // 抢占/取消/异常：不提交棋步，棋子放回原格，退出抱棋（安全放置）
-      if (carried) {
+      if (carried || released) {
         xiangqiBoard.endCarry(piece.id, { row: piece.row, col: piece.col });
         player.setCarrying(false);
       }
@@ -1184,6 +1233,9 @@ async function boot() {
     client.startGomoku(`gm${Date.now()}`);
   });
 
+  syncXiangqiButton();
+  const sidePicker = document.getElementById("xiangqi-side");
+  const closeSidePicker = () => { if (sidePicker) sidePicker.hidden = true; };
   xiangqiButton?.addEventListener("click", () => {
     if (!client.connected) { chat.setError("还没有连上大脑服务，稍等一下再开局"); return; }
     if (readOnly) { chat.setError("另一个页面正在执行角色，这里只读"); return; }
@@ -1193,7 +1245,19 @@ async function boot() {
       speak(xiangqiView.status === "playing" ? "这局先下到这里。" : "收起来了。", 1800);
       return;
     }
-    client.startXiangqi("red");
+    if (sidePicker) sidePicker.hidden = false;
+  });
+  sidePicker?.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement | null;
+    const side = target?.closest<HTMLElement>("[data-side]")?.dataset.side;
+    if (!side) { if (target === sidePicker) closeSidePicker(); return; }
+    closeSidePicker();
+    if (side === "cancel") return; // 取消不发开局
+    if (readOnly || !client.connected) { chat.setError("这个页面现在不能开局"); return; }
+    client.startXiangqi(side === "black" ? "black" : "red");
+  });
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSidePicker();
   });
 
   startButton?.addEventListener("click", () => {
@@ -1384,7 +1448,7 @@ async function boot() {
       chat.setThinking(false);
     },
     onReadOnly: (ro) => {
-      readOnly = ro;controls.readOnly(ro);
+      readOnly = ro;controls.readOnly(ro);syncXiangqiButton();
       if(ro){currentExecutor?.cancel();stopMotion();}
       chat.setError(ro ? "另一个页面正在执行角色，这里只读" : null);
     },
@@ -1430,6 +1494,7 @@ async function boot() {
         scoop.setArenaHalf(stage.roomHalf);
       }
       xiangqiBoard.update(view);
+      syncXiangqiButton();
     },
     onGomoku: (value) => {
       gomokuView = (value as GomokuView) ?? null;

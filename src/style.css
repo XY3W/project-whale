@@ -312,3 +312,37 @@ canvas { display: block; touch-action: none; -webkit-tap-highlight-color: transp
 @media(max-width:819px){.left-dock{top:max(8px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left));width:162px;padding:10px;border-radius:15px;max-height:50vh}.dock-heading{gap:6px;padding-bottom:8px}.dock-mark{width:27px;height:27px;border-radius:8px}.dock-heading strong{font-size:12px}.dock-heading small{font-size:10px}.dock-section{padding:8px 0}.dock-action{font-size:11px;padding:8px 3px}.dock-debug{font-size:11px;margin-bottom:8px}.world-controls{right:8px;top:max(8px,env(safe-area-inset-top));max-width:calc(100vw - 184px);justify-content:flex-end}.world-controls button{font-size:12px;padding:6px}.world-controls input{width:48px}.game-chip{bottom:auto;top:52vh;left:8px;font-size:11px;max-width:calc(100vw - 16px);white-space:normal}}
 
 .memory-dialog .disclosure-btn{border:1px solid #bbcee4;background:#edf5fe;color:#315c89;font-weight:600;border-radius:10px}.memory-dialog .disclosure-btn:hover{background:#dcecff}
+
+/* 开局前的执色选择：只在点"象棋开局"时出现，取消不发任何请求 */
+.side-picker {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 10, 18, 0.55);
+  z-index: 40;
+}
+.side-picker[hidden] { display: none; }
+.side-picker-card {
+  width: min(320px, 86vw);
+  padding: 18px 18px 14px;
+  border-radius: 14px;
+  background: #141b28;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.45);
+  color: #e7ecf6;
+}
+.side-picker-card p { margin: 6px 0 14px; font-size: 12px; color: #9aa7bd; }
+.side-picker-actions { display: flex; gap: 8px; }
+.side-picker-actions button {
+  flex: 1;
+  padding: 9px 0;
+  border-radius: 9px;
+  border: none;
+  background: #3d62ad;
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+.side-picker-actions button.ghost { background: rgba(255, 255, 255, 0.08); color: #c4ccdb; }

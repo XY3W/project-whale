@@ -27,5 +27,16 @@
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
+    <div class="side-picker" id="xiangqi-side" hidden>
+      <div class="side-picker-card" role="dialog" aria-label="选择执色">
+        <strong>这盘棋你执哪一方？</strong>
+        <p>执红先行，执黑让她先走。</p>
+        <div class="side-picker-actions">
+          <button type="button" data-side="red">执红</button>
+          <button type="button" data-side="black">执黑</button>
+          <button type="button" data-side="cancel" class="ghost">取消</button>
+        </div>
+      </div>
+    </div>
   </body>
 </html>

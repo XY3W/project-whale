@@ -86,6 +86,8 @@ export class LayeredMotionPlayer {
   private soloName: string | null = null;
   private soloPaused = false;
   private soloLoop = false;
+  /** 互动片段暂停：落到等待点后先停住，等服务端确认再继续（棋步提交对账） */
+  private perfPaused = false;
   /** 抱棋模式：基底层换成 chess_* 一套，走路不再摆臂 */
   private carryMode = false;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
@@ -347,9 +349,15 @@ export class LayeredMotionPlayer {
     return this.perform(name,events,type=>onContact(Number(type.split(':')[1])),'both_arms');
   }
 
+  /** 暂停/继续当前互动片段（不推进动作时钟，事件也不再触发） */
+  pausePerformance() { if (this.perf) this.perfPaused = true; }
+  resumePerformance() { this.perfPaused = false; }
+  get performancePaused(): boolean { return this.perfPaused; }
+
   /** 取消当前互动片段：淡出后按未完成收尾 */
   cancelPerformance(): boolean {
     if (!this.perf || this.perf.ending) return false;
+    this.perfPaused = false;
     this.perf.cancelled = true;
     this.perf.ending = true;
     return true;
@@ -581,6 +589,7 @@ export class LayeredMotionPlayer {
         perf.action.setEffectiveWeight(0);
         perf.action.paused = false;
         this.perf = null;
+        this.perfPaused = false;
         // 片段期间改过抱棋状态：收尾时落到对应的静姿
         if (!this.moveKind) this.setBase(this.carryMode ? 'chess_hold' : 'idle_stand');
         this.weights();
@@ -603,7 +612,11 @@ export class LayeredMotionPlayer {
       if (!this.soloPaused) this.mixer.update(dt);
       return;
     }
-    if (this.perf) { this.advancePerformance(dt); return; }
+    if (this.perf) {
+      if (this.perfPaused) { this.applyHolds(0); return; }
+      this.advancePerformance(dt);
+      return;
+    }
     let remaining=Math.max(0,dt);
     let guard=0;
     while(remaining>1e-9 && guard++<64){

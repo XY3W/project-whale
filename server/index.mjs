@@ -922,6 +922,12 @@ function skillCandidate(task) {
 
 function eventNote(events) {
   const types = [...new Set((events ?? []).map((e) => e.type))];
+  if (types.includes("xiangqi_started")) {
+    const yours = (events ?? []).find((e) => e.type === "xiangqi_started")?.yourTurn;
+    return yours
+      ? "本轮触发：xiangqi_started。新开一局、你执红先行：按 xiangqi 段落的规则想好第一着，调用 xiangqi_move 落子；没有别的用户指令。"
+      : "本轮触发：xiangqi_started。新开一局、你执黑、用户先走：只简短确认一句你在等，不要调用 xiangqi_move，也不要替用户走红子。";
+  }
   const candidate = (events ?? []).find((e) => e.type === "skill_candidate");
   const head = types.length ? `本轮触发：${types.join(" / ")}。` : "";
   if (candidate) {
@@ -1572,8 +1578,13 @@ wss.on("connection", (ws, req) => {
         broadcastState();
         console.log(`[xiangqi] 开局 ${board.gameId}（用户执${board.userSide === "red" ? "红" : "黑"}）`);
         persist();
-        if (board.gameId !== previous && board.turn === board.characterSide) {
-          noteGameEvent("xiangqi_started", board, { trigger: "user_button" });
+        // 新开一局就唤起一次模型：她执红先走就规划第一着；用户执红时只确认、不抢第一着。
+        // gameId 变了才算新局，重复点开局不会重复触发。
+        if (board.gameId !== previous) {
+          noteGameEvent("xiangqi_started", board, {
+            trigger: "user_button",
+            yourTurn: board.turn === board.characterSide,
+          });
         }
         break;
       }
