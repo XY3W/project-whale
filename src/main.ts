@@ -233,6 +233,8 @@ async function boot() {
   const timerPanel = new TimerPanel((id, at) => client.skipTimer(id, at));
   let taskActive = false;
   let readOnly = false;
+  /** 用户这一手还没被服务端确认时，锁住棋盘点击，避免同 revision 连点 */
+  let xiangqiMovePending = false;
   let stateApplied = false;
   let basinApplied = false;
   let lastBasinRevision = -1;
@@ -378,6 +380,8 @@ async function boot() {
         }
         const selected = xiangqiBoard.selection;
         if (mine && selected && xiangqiBoard.legalTargets(selected).some((t) => t.row === at.row && t.col === at.col)) {
+          if (xiangqiMovePending) return; // 上一手还没回执，别连发
+          xiangqiMovePending = true;
           client.xiangqiMove({
             gameId: xiangqiView.gameId,
             pieceId: selected,
@@ -1493,6 +1497,7 @@ async function boot() {
         basin.setArenaHalf(stage.roomHalf);
         scoop.setArenaHalf(stage.roomHalf);
       }
+      xiangqiMovePending = false;
       xiangqiBoard.update(view);
       syncXiangqiButton();
     },
@@ -1521,6 +1526,8 @@ async function boot() {
     },
     onConnection: (ok) => {
       if (!ok) {
+        xiangqiMovePending = false;
+        syncXiangqiButton();
         chat.setError("与大脑的连接断开，正在重连…");
         chat.setThinking(false);
         taskActive = false;
@@ -1533,6 +1540,7 @@ async function boot() {
         errorActive = false;
         chat.setError(null);
         setError(false);
+        syncXiangqiButton();
         taskActive = false;
       }
     },
