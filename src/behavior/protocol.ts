@@ -11,6 +11,10 @@ export type ReasonCode =
   | "PRECONDITION_FAILED"
   | "SUPERSEDED"
   | "CLIENT_DISCONNECTED"
+  | "NOT_ALIGNED"
+  | "ILLEGAL_MOVE"
+  | "STALE_REVISION"
+  | "NO_PIECE"
   | "CANCELLED"
   | "TIMEOUT"
   | "DISPLACEMENT_MISMATCH"
@@ -57,6 +61,9 @@ export type Step =
   | { action: "walk_adjust"; distance_m: number }
   | { action: "dig"; game_id: string; row: number; col: number; expected_revision: number }
   | { action: "place_stone"; game_id: string; row: number; col: number; expected_revision: number }
+  | { action: "xiangqi_move"; game_id: string; piece_id: string; to_row: number; to_col: number; expected_revision: number }
+  | { action: "stow_scoop"; object_id: "rice_scoop" }
+  | { action: "unstow_scoop"; object_id: "rice_scoop" }
   | { action: "parallel"; items: Step[] };
 
 export interface Plan {
@@ -84,6 +91,8 @@ export interface Locomotion {
   dig?: DigBridge;
   /** 可选：五子棋落子能力 */
   stone?: StoneBridge;
+  /** 可选：象棋搬棋：走近 → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
+  xiangqiMove?(step: { game_id: string; piece_id: string; to_row: number; to_col: number; expected_revision: number }, ctx: { token?: string }): Promise<{ ok: boolean; committed?: boolean; revision?: number; reason?: string; captured?: string | null; [k: string]: unknown }>;
   /** 可选：走到指定世界坐标（宿主算转向与步数） */
   walkTo?(x: number, z: number, toleranceM: number): Promise<{ ok: boolean; distance_m?: number; position?: { x: number; z: number }; error?: string; [k: string]: unknown }>;
 }

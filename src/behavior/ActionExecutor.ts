@@ -52,6 +52,8 @@ export class ActionExecutor {
   private readonly now: () => number;
 
   private readonly loco: Locomotion;
+  /** 服务端为本次象棋搬棋签发的一次性 token（execute_plan 下发） */
+  xiangqiToken: string | undefined;
 
   constructor(loco: Locomotion, opts: ExecutorOptions) {
     this.loco = loco;
@@ -444,6 +446,17 @@ export class ActionExecutor {
       }
 
       // 走到指定坐标：转向/步数由宿主算好，模型只给目标点
+      case "xiangqi_move": {
+        const bridge = this.loco.xiangqiMove;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const raced = await this.withTimeout(bridge(step as never, { token: this.xiangqiToken }), 300000);
+        if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
+        const outcome = raced.value;
+        if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");
+        if (!outcome.ok) return done("failed", outcome as unknown as Record<string, unknown>, (outcome.reason as "NOT_ALIGNED") ?? "NOT_ALIGNED");
+        return done("succeeded", outcome as unknown as Record<string, unknown>, "OK");
+      }
+
       case "walk_to": {
         const walkTo = this.loco.walkTo;
         if (!walkTo) return done("unsupported", null, "CAPABILITY_DISABLED");

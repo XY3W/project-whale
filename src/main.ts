@@ -24,7 +24,7 @@ import { planApproach, signedDeltaDeg } from "./prop/align";
 import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView, GomokuView, XiangqiView } from "./behavior/protocol.ts";
 import { MinesweeperBoard } from "./game/MinesweeperBoard";
 import { GomokuBoard, gomokuCellAt, gomokuCellCenter } from "./game/GomokuBoard";
-import { XiangqiBoard, xqPointAt, XQ_HALF } from "./game/XiangqiBoard";
+import { XiangqiBoard, xqPoint, xqPointAt, XQ_HALF } from "./game/XiangqiBoard";
 import { ProgressMonitor } from "./behavior/progress.ts";
 
 const MODEL = CHARACTER_MODEL;
@@ -132,6 +132,8 @@ async function boot() {
   let gomokuView: GomokuView | null = null;
   let xiangqiView: XiangqiView | null = null;
   let xiangqiArmy: XiangqiView | null = null;
+  /** execute_plan 下发的单次搬运 token */
+  let xiangqiTokenRef: string | null = null;
 
   /** 五子棋状态条（和扫雷共用样式，互斥显示） */
   const gomokuChip = document.createElement("div");
@@ -1036,6 +1038,57 @@ async function boot() {
   };
   loco.dig = digBridge;
 
+  /** 象棋搬棋：走近 0.85m → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
+  loco.xiangqiMove = async (step, ctx) => {
+    const piece = xiangqiView?.pieces.find((p) => p.id === step.piece_id);
+    if (!piece) return { ok: false, reason: "NO_PIECE" };
+    const from = xqPoint(piece.row, piece.col);
+    const to = xqPoint(step.to_row, step.to_col);
+    const bearing = (a: { x: number; z: number }, b: { x: number; z: number }) => (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI;
+    const walkToPoint = async (x: number, z: number) => {
+      const steps = [1.89, 1.71, 1.53, 1.35, 1.17, 0.99, 0.81, 0.63, 0.45, 0.27, 0.09];
+      const adjusts = [0.08, 0.06, 0.04, 0.02];
+      await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
+      for (let i = 0; i < 14; i++) {
+        const d = Math.hypot(x - root.position.x, z - root.position.z);
+        if (d <= 0.03) break;
+        const w = steps.find((v) => v <= d + 1e-6);
+        if (w !== undefined) { await loco.walk!(w); continue; }
+        const a = adjusts.find((v) => v <= d + 1e-6);
+        if (a === undefined || !loco.adjust) break;
+        await loco.adjust(a);
+      }
+      await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
+    };
+    // 站位：从棋子朝角色方向退 0.85m
+    const dx = root.position.x - from.x;
+    const dz = root.position.z - from.z;
+    const dist = Math.hypot(dx, dz) || 1;
+    const stand = { x: from.x + (dx / dist) * 0.85, z: from.z + (dz / dist) * 0.85 };
+    await walkToPoint(stand.x, stand.z);
+    await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, from)));
+    const picked = await player.perform("chess_pickup", [{ time: 0.4, type: "summon_start" }, { time: 1.2, type: "grasp" }], (type) => {
+      if (type === "grasp") xiangqiBoard.beginCarry(piece.id, root);
+    });
+    if (!picked) return { ok: false, reason: "PICKUP_FAILED" };
+    // 抱到目标旁：仍站在距目标 0.85m 的位置
+    const dx2 = root.position.x - to.x;
+    const dz2 = root.position.z - to.z;
+    const d2 = Math.hypot(dx2, dz2) || 1;
+    const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
+    await walkToPoint(stand2.x, stand2.z);
+    await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
+    const placed = await player.perform("chess_place", [{ time: 0.4, type: "release" }, { time: 1.2, type: "settle" }], (type) => {
+      if (type === "release") xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
+    });
+    if (!placed) return { ok: false, reason: "PLACE_FAILED" };
+    const token = (ctx as { token?: string } | undefined)?.token ?? xiangqiTokenRef;
+    const res = await client.xiangqiCommit({ token, expectedRevision: step.expected_revision, toRow: step.to_row, toCol: step.to_col });
+    if (!res.committed) return { ok: false, reason: String(res.reason ?? "NOT_COMMITTED"), ...res };
+    return { ok: true, committed: true, revision: Number(res.revision) || 0, captured: (res.captured as string | null) ?? null };
+  };
+
+
   gomokuButton?.addEventListener("click", () => {
     if (!client.connected) {
       chat.setError("还没有连上大脑服务，稍等一下再开局");
@@ -1097,7 +1150,8 @@ async function boot() {
   // 每次运行独立执行器：过期 run 的取消不会复活，也不会影响新 run
   let currentExecutor: ActionExecutor | null = null;
   const makeExecutor = () => {
-    const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
+    const ex = new ActionExecutor(loco, { half: stage.roomHalf, margin: 0.3 });
+    ex.xiangqiToken = xiangqiTokenRef ?? undefined;
     ex.onCancel(stopMotion);
     currentExecutor = ex;
     return ex;
@@ -1150,6 +1204,7 @@ async function boot() {
     onTimers: (list, serverNow) => timerPanel.update(list, serverNow),
     onTimerFired: (_name, message) => { chat.addMessage("whale", message); speak(message); },
     onPlan: (msg) => {
+      xiangqiTokenRef = msg.xiangqiToken ?? null;
       chat.endReasoning(msg.taskId);
       if(msg.planId&&seenPlans.has(msg.planId))return;
       if(msg.planId){seenPlans.add(msg.planId);if(seenPlans.size>200)seenPlans.delete(seenPlans.values().next().value!);}

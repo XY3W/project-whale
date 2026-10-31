@@ -59,6 +59,8 @@ export class XiangqiBoard {
   private loaded = false;
   private lastMovePulse = 0;
   private lastGameId: string | null = null;
+  /** 正在被抱着的棋子：暂时脱离盘面同步 */
+  private carried = new Set<string>();
 
   private readonly groundTop: THREE.Mesh | null;
 
@@ -182,6 +184,7 @@ export class XiangqiBoard {
     const alive = new Set<string>();
     for (const piece of view.pieces) {
       alive.add(piece.id);
+      if (this.carried.has(piece.id)) continue;
       let obj = this.instances.get(piece.id);
       if (!obj) {
         const layout = this.layout.get(piece.id);
@@ -284,6 +287,34 @@ export class XiangqiBoard {
         this.markers.push(ring);
       }
     }
+  }
+
+  /** 魔法吸附：棋子挂到角色身上（世界变换由 attach 保持），盘面同步暂停 */
+  beginCarry(pieceId: string, parent: THREE.Object3D, local = new THREE.Vector3(0, 0.45, 0.36)) {
+    const obj = this.instances.get(pieceId);
+    if (!obj) return false;
+    this.carried.add(pieceId);
+    parent.attach(obj);
+    obj.position.copy(local);
+    obj.quaternion.identity();
+    return true;
+  }
+
+  /** 送出：棋子回到棋盘层，之后由 tick 缓动到目标交点 */
+  endCarry(pieceId: string, target?: { row: number; col: number }) {
+    const obj = this.instances.get(pieceId);
+    if (!obj) return;
+    this.group.attach(obj);
+    if (target) {
+      const p = xqPoint(target.row, target.col);
+      this.targets.set(pieceId, { pos: new THREE.Vector3(p.x, 0, p.z), quat: new THREE.Quaternion() });
+    }
+    this.carried.delete(pieceId);
+    this.markerKey = "";
+  }
+
+  isCarried(pieceId: string) {
+    return this.carried.has(pieceId);
   }
 
   /** 选中棋子抬高 4.5cm（悬停感），不发光 */

@@ -13,6 +13,8 @@ export interface PlanMessage {
   digAuthId?: string | null;
   /** 服务端为这次 place_stone 发放的授权 id */
   stoneAuthId?: string | null;
+  /** 服务端为这次 xiangqi_move 签发的一次性 token */
+  xiangqiToken?: string | null;
   speech: string;
   plan: { steps: unknown[] };
 }
@@ -58,6 +60,7 @@ export class BrainClient {
   private digSeq = 0;
   private digWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
   private stoneWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
+  private xiangqiWaiters = new Map<string, (msg: Record<string, unknown>) => void>();
   /** 技能面板的订阅者；和 on() 的整套 handlers 分开，避免被覆盖 */
   private skillsListeners = new Set<(payload: unknown) => void>();
   private takeover: ReturnType<typeof setInterval> | null = null;
@@ -163,6 +166,11 @@ export class BrainClient {
         case "xiangqi_state":
           this.handlers.onXiangqi?.(msg.board);
           break;
+        case "xiangqi_result": {
+          const resolve = this.xiangqiWaiters.get(String(msg.token ?? ""));
+          if (resolve) { this.xiangqiWaiters.delete(String(msg.token ?? "")); resolve(msg as Record<string, unknown>); }
+          break;
+        }
         case "skill_event":
           for (const fn of this.skillsListeners) fn(msg);
           this.handlers.onSkillEvent?.(msg);
@@ -271,6 +279,19 @@ export class BrainClient {
   /** 用户走子（己方回合） */
   xiangqiMove(payload: { gameId: string; pieceId: string; toRow: number; toCol: number; expectedRevision: number; moveId?: string }) {
     return this.send("xiangqi_move", { ...payload, leaseEpoch: this.leaseEpoch });
+  }
+
+  /** 象棋搬棋提交：带上服务端签发的 token，等复检结果 */
+  xiangqiCommit(payload: Record<string, unknown>, timeoutMs = 8000): Promise<Record<string, unknown>> {
+    const token = String(payload.token ?? "");
+    return new Promise((resolve) => {
+      if (!token) { resolve({ ok: false, reason: "NO_AUTH" }); return; }
+      this.xiangqiWaiters.set(token, resolve);
+      this.send("xiangqi_commit", { ...payload, leaseEpoch: this.leaseEpoch });
+      setTimeout(() => {
+        if (this.xiangqiWaiters.delete(token)) resolve({ ok: false, reason: "UNKNOWN_COMMIT" });
+      }, timeoutMs);
+    });
   }
 
   /** 结束/收起象棋 */
