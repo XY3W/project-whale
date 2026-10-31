@@ -17,6 +17,16 @@ export function placementFor(
     : { clip: "chess_place", victim: null, events: [{ time: 0.4, type: "release" }, { time: 1.2, type: "placement_gate" }, { time: 1.3, type: "land_confirmed" }] };
 }
 
+const MOVE_DURATION_MS = 420;
+type TargetPose = {
+  pos: THREE.Vector3;
+  quat: THREE.Quaternion;
+  /** 这一跳的起点与开始时间：弧线按时间推进，低帧率也一定落到地面 */
+  from?: { pos: THREE.Vector3; quat: THREE.Quaternion };
+  t0?: number;
+  /** 新目标还没起跳：第一次 tick 时才记录起点，避免落稳后又被重启 */
+  pending?: boolean;
+};
 export const XQ_CELL = 1.15;
 export const XQ_HALF = 5.75;
 export const XQ_ROWS = 10;
@@ -63,7 +73,7 @@ export class XiangqiBoard {
   private templates = new Map<string, THREE.Object3D>();
   private layout = new Map<string, LayoutPiece>();
   private instances = new Map<string, THREE.Object3D>();
-  private targets = new Map<string, { pos: THREE.Vector3; quat: THREE.Quaternion }>();
+  private targets = new Map<string, TargetPose>();
   private markers: THREE.Mesh[] = [];
   private markerKey = "";
   private view: XiangqiView | null = null;
@@ -72,6 +82,7 @@ export class XiangqiBoard {
   private selected: string | null = null;
   private loaded = false;
   private lastMovePulse = 0;
+  private lastRevision = -1;
   /** 被吃掉的棋子：先缩小淡出再移除，别在提交瞬间"啪"地凭空消失 */
   private readonly fading: Array<{ id: string; obj: THREE.Object3D; t: number }> = [];
   private lastTickAt = 0;
@@ -163,6 +174,11 @@ export class XiangqiBoard {
       this.lastGameId = view.gameId;
       this.lastMovePulse = performance.now();
       this.selected = null;
+    } else if (view.revision !== this.lastRevision) {
+      // 每一手都要重新点亮"最近一步"，不是只有换局才亮
+      this.lastRevision = view.revision;
+      this.lastMovePulse = performance.now();
+      this.markerKey = "";
     }
     this.syncPieces(view);
     this.syncMarkers(view);
@@ -190,6 +206,7 @@ export class XiangqiBoard {
 
   select(pieceId: string | null) {
     this.selected = pieceId;
+    this.liftSelected(pieceId); // 取消选择也要把棋子放回地面
     if (this.view) this.syncMarkers(this.view);
   }
 
@@ -228,10 +245,19 @@ export class XiangqiBoard {
       const point = xqPoint(piece.row, piece.col);
       const layout = this.layout.get(piece.id);
       const rotation = layout?.rotationY ?? (piece.side === "red" ? 0 : Math.PI);
-      const target = {
+      const target: TargetPose = {
         pos: new THREE.Vector3(point.x, piece.id === this.selected ? 0.045 : 0, point.z),
         quat: new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), rotation),
       };
+      const previous = this.targets.get(piece.id);
+      if (previous && previous.pos.distanceTo(target.pos) < 1e-6) {
+        // 目标没变：沿用这一跳的进度（包括"已经落稳"）
+        target.from = previous.from;
+        target.t0 = previous.t0;
+        target.pending = previous.pending;
+      } else {
+        target.pending = true; // 新目标，下一帧起跳
+      }
       this.targets.set(piece.id, target);
       if (!obj.userData.settled) {
         obj.position.copy(target.pos);
@@ -309,19 +335,33 @@ export class XiangqiBoard {
     const dt = this.lastTickAt ? Math.min(0.25, (now - this.lastTickAt) / 1000) : 0;
     this.lastTickAt = now;
     this.advanceFades(dt);
-    const t = Math.min(0.16, (now - this.lastMovePulse) / 600);
-    const arc = Math.sin(Math.min(1, t) * Math.PI) * 0.32;
     for (const [id, obj] of this.instances) {
       if (this.carried.has(id)) continue; // 抱着的棋子由 followCarry 独占，缓动不能再拉它
       const target = this.targets.get(id);
       if (!target) continue;
-      obj.position.lerp(target.pos, 0.22);
-      if (obj.position.distanceTo(target.pos) > 0.004) {
-        obj.position.y = Math.max(obj.position.y, arc * Math.min(1, t + 0.2));
-      } else {
-        obj.position.copy(target.pos);
+      // 每枚棋子自己的一跳：0→1 按真实时间推进，到 1 精确落地
+      if (target.pending) {
+        target.from = { pos: obj.position.clone(), quat: obj.quaternion.clone() };
+        target.t0 = now;
+        target.pending = false;
       }
-      obj.quaternion.slerp(target.quat, 0.25);
+      if (!target.from) {
+        // 已经落稳：保持精确贴住目标（选中抬高也只改目标高度）
+        obj.position.copy(target.pos);
+        obj.quaternion.copy(target.quat);
+        continue;
+      }
+      const u = Math.min(1, (now - (target.t0 ?? now)) / MOVE_DURATION_MS);
+      const ease = u * u * (3 - 2 * u);
+      obj.position.lerpVectors(target.from.pos, target.pos, ease);
+      obj.position.y += Math.sin(u * Math.PI) * 0.3;
+      obj.quaternion.slerpQuaternions(target.from.quat, target.quat, ease);
+      if (u >= 1) {
+        obj.position.copy(target.pos);
+        obj.quaternion.copy(target.quat);
+        target.from = undefined;
+        target.t0 = undefined;
+      }
     }
     // 合法目标环轻微脉动
     const pulse = 0.75 + 0.25 * Math.sin(now / 320);

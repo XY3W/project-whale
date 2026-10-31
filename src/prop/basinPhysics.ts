@@ -53,7 +53,7 @@ export interface StepResult {
 }
 
 export interface Impact {id:string;pair:string[];normalSpeed:number;point:{x:number;y:number;z:number}|null;}
-type Shared={world:RAPIER.World;queue:RAPIER.EventQueue;ids:Map<number,string>;accumulator:number;sequence:number;last:Map<string,number>;time:number;};
+type Shared={world:RAPIER.World;queue:RAPIER.EventQueue;ids:Map<number,string>;accumulator:number;sequence:number;last:Map<string,number>;time:number;owner?:BasinPhysics;};
 let shared:Shared|null=null;
 let impactListener:((event:Impact)=>void)|null=null;
 export function onPropImpact(fn:(event:Impact)=>void){impactListener=fn;}
@@ -99,19 +99,31 @@ export class BasinPhysics {
   private readonly stillAnchor = new THREE.Vector3();
   private readonly stillRotation = new THREE.Quaternion();
   private readonly shape: "cylinder" | "box" | "basin";
+  private wallBodies: any[] = [];
+  private arenaHalf = ARENA_HALF;
+  private ownsWorld = false;
 
   private constructor(hull: Float32Array, half: number, shape: "cylinder" | "box" | "basin" = "cylinder", sharedId?:string) {
     this.hull = hull;
     this.shape = shape;
     this.sharedId=sharedId;
-    if(sharedId&&shared){this.world=shared.world;return;}
+    if(sharedId&&shared){this.world=shared.world;shared.owner=shared.owner??this;return;}
     const gravity = { x: 0, y: -9.81, z: 0 };
     this.world = new RAPIER.World(gravity);
     this.world.timestep = STEP;
-    if(sharedId)shared={world:this.world,queue:new RAPIER.EventQueue(true),ids:new Map(),accumulator:0,sequence:0,last:new Map(),time:0};
+    if(sharedId)shared={world:this.world,queue:new RAPIER.EventQueue(true),ids:new Map(),accumulator:0,sequence:0,last:new Map(),time:0,owner:this};
+    this.ownsWorld = true;
+    this.wallBodies = [];
     const ground = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, FLOOR_Y - 0.1, 0));
     this.world.createCollider(RAPIER.ColliderDesc.cuboid(half + 1, 0.1, half + 1).setFriction(0.9), ground);
-    // 空气墙：四面固定挡板，把盆关在场地里（角色边界是 half，墙再往外半米）
+    this.buildWalls(half);
+  }
+
+  /** 空气墙：四面固定挡板，把盆关在场地里（角色边界是 half，墙再往外半米） */
+  private buildWalls(half: number) {
+    for (const body of this.wallBodies ?? []) this.world.removeRigidBody(body);
+    this.wallBodies = [];
+    this.arenaHalf = half;
     const thickness = 0.5;
     const wallHalfHeight = 1.5;
     const walls = [
@@ -128,8 +140,20 @@ export class BasinPhysics {
         RAPIER.ColliderDesc.cuboid(wall.hx, wallHalfHeight, wall.hz).setRestitution(0.2).setFriction(0.4),
         body,
       );
+      this.wallBodies.push(body);
     }
   }
+
+  /** 场地换尺寸（象棋 11.5m）：重建空气墙，道具才不会在棋盘上飞出旧边界 */
+  setArenaHalf(half: number): boolean {
+    if (!Number.isFinite(half) || half <= 0) return false;
+    if (!this.ownsWorld) return false;
+    if (Math.abs(half - this.arenaHalf) < 1e-6) return false;
+    this.buildWalls(half);
+    return true;
+  }
+
+  get arenaHalfSize(): number { return this.arenaHalf; }
 
   /** 碰撞体形状：盆用空心圆台近似，饭勺这类细长物品用外接长方体 */
   static async create(hull: Float32Array, half = ARENA_HALF, shape: "cylinder" | "box" | "basin" = "cylinder", sharedId?:string): Promise<BasinPhysics> {

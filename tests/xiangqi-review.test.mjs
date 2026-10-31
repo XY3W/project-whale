@@ -8,6 +8,18 @@ import { XiangqiService } from '../server/xiangqi-service.mjs';
 import { xiangqiContext } from '../server/public-state.mjs';
 import { toolStartMessages } from '../server/llm.mjs';
 
+
+/** 一份完整的公开盘面（用于棋盘类回归） */
+function boardView() {
+  const game = createGame({ gameId: 'review-board' });
+  return {
+    gameId: game.gameId, ruleset: 'CCA2020', revision: 0, status: 'playing', turn: 'red',
+    userSide: 'red', characterSide: 'black', check: false, result: null, lastMove: null,
+    pieces: [...game.pieces.values()].map(({ id, side, kind, row, col }) => ({ id, side, kind, row, col })),
+    legalMoves: [],
+  };
+}
+
 const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'whale-xq-review-')), 'xiangqi.json');
 
 // ---------- R06：循环由防守方走回重复局面时，长将也要判将军方负 ----------
@@ -208,4 +220,49 @@ test('能力：xiangqi_move 不能放进 parallel，也不能嵌套', async () =
     () => validatePlan({ type: 'execute_plan', steps: [{ action: 'parallel', items: [{ action: 'parallel', items: [{ action: 'wait', duration_s: 0.2 }] }] }] }),
     /嵌套/,
   );
+});
+
+// ---------- R09：用户走子必须真的落到地面 ----------
+
+test('落子弧线按时间推进，最终精确落地；取消选择也把棋子放回地面', async () => {
+  const THREE = await import('three');
+  const { XiangqiBoard } = await import('../src/game/XiangqiBoard.ts');
+  const board = new XiangqiBoard(new THREE.Scene());
+  const layout = JSON.parse(fs.readFileSync('public/models/xiangqi-v1/initial_layout.json', 'utf8'));
+  for (const p of layout) {
+    board.layout.set(p.pieceId, p);
+    board.templates.set(p.template, new THREE.Group());
+  }
+  const view = JSON.parse(JSON.stringify(boardView()));
+  board.update(view);
+  // 走一手：红兵 (6,0) → (5,0)
+  const moved = JSON.parse(JSON.stringify(view));
+  moved.revision = view.revision + 1;
+  moved.pieces.find((p) => p.id === 'red_soldier_1').row = 5;
+  board.update(moved);
+  for (let i = 0; i < 240; i++) board.tick(1000 + i * 16.667);
+  const obj = board.instances.get('red_soldier_1');
+  assert.equal(+obj.position.y.toFixed(6), 0, '240 帧之后必须落在地面，不能浮在 0.055');
+  assert.equal(+obj.position.z.toFixed(3), +((5 - 4.5) * 1.15).toFixed(3));
+  // 选中抬高、取消落回
+  board.select('red_rook_1');
+  assert.equal(+board.targets.get('red_rook_1').pos.y.toFixed(3), 0.045);
+  board.select(null);
+  assert.equal(+board.targets.get('red_rook_1').pos.y.toFixed(3), 0);
+});
+
+// ---------- R01：场地尺寸只有一个来源 ----------
+
+test('场地：象棋 11.5m 时角色可走范围跟着放大，退出复原', async () => {
+  const { walkableHalfOf } = await import('../src/core/arena.ts');
+  const { stageHalfNow, walkableHalfNow } = await import('../server/arena.mjs');
+  assert.equal(walkableHalfOf(4), 3.7);
+  assert.equal(walkableHalfOf(5.75), 5.45);
+  assert.equal(stageHalfNow(false), 4);
+  assert.equal(stageHalfNow(true), 5.75);
+  assert.equal(walkableHalfNow(false), 3.7);
+  assert.equal(walkableHalfNow(true), 5.45);
+  // 客户端与服务端必须是同一组数字
+  assert.equal(walkableHalfOf(4), walkableHalfNow(false));
+  assert.equal(walkableHalfOf(5.75), walkableHalfNow(true));
 });

@@ -310,6 +310,11 @@ export class PropItem {
   }
 
   setGrip(grip:"inward"|"outward"){this.grip=grip;this.bump();}
+  /** 场地换尺寸时同步物理空气墙（象棋 11.5m），否则道具还会撞在 8m 的旧墙上 */
+  setArenaHalf(half: number): boolean {
+    return this.physics.setArenaHalf(half);
+  }
+
   /** 装上右腰挂点（bone + 相对矩阵），来自象棋目录 bindings.rightWaist */
   setWaistTarget(bone: THREE.Bone, matrix: THREE.Matrix4) { this.waistBone = bone; this.waistAttach = matrix.clone(); }
   get waistReady(): boolean { return !!this.waistAttach; }

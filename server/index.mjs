@@ -21,6 +21,7 @@ import { GameService } from "./game.mjs";
 import { GomokuService } from "./gomoku-service.mjs";
 import { XiangqiService } from "./xiangqi-service.mjs";
 import { issueXiangqiAuth, pendingXiangqiCleanup } from "./xiangqi-auth.mjs";
+import { stageHalfNow, walkableHalfNow } from "./arena.mjs";
 import { RED as XIANGQI_RED, BLACK as XIANGQI_BLACK, publicGame as xiangqiPublic, legalMoves as xiangqiLegalMoves } from "./xiangqi.mjs";
 import { createSpeechTidy } from "./speech.mjs";
 import { SkillRegistry } from "./skills.mjs";
@@ -154,15 +155,23 @@ for (const raw of Array.isArray(loaded.props) ? loaded.props : loaded.basin ? [l
 }
 let lastSave = 0;
 
+/**
+ * 场地半边长跟着棋局走：象棋 11.5m（半 5.75），其他游戏/空闲 8m（半 4）。
+ * 夹取、上下文、道具物理都用它，避免"渲染放大了、角色还被 3.7 夹着"。
+ */
+const stageHalf = () => stageHalfNow(!!xiangqi.public());
+const walkableHalf = () => walkableHalfNow(!!xiangqi.public());
+
 /** 客户端上报的快照是位姿与槽位的唯一实时来源；越界坐标夹回可走范围 */
 function applyClientSnapshot(snap) {
   if (!snap) return false;
   let changed = false;
   let propsChanged = false;
   if (Number.isFinite(snap.x) && Number.isFinite(snap.z) && Number.isFinite(snap.yawDeg)) {
+    const half = walkableHalf();
     character = {
-      x: Math.max(-3.7, Math.min(3.7, snap.x)),
-      z: Math.max(-3.7, Math.min(3.7, snap.z)),
+      x: Math.max(-half, Math.min(half, snap.x)),
+      z: Math.max(-half, Math.min(half, snap.z)),
       yawDeg: snap.yawDeg,
       updatedAt: Date.now(),
     };
@@ -717,8 +726,8 @@ function modelContext(task, phase, extra = {}) {
     disabledCapabilities: [...describeDisabled(),...(RUNTIME_V2.has(task.originWs?.runtimeVersion)?[]:[{id:"set_basin_grip",reason:"执行页面需刷新到playful-v2-count32"},{id:"knock_basin",reason:"执行页面需刷新到playful-v2-count32"}])],
     capabilityVersion: CAPABILITY_VERSION,
     world: {
-      walkableHalf: 3.7,
-      stageHalf: 4,
+      walkableHalf: walkableHalf(),
+      stageHalf: stageHalf(),
       coordinateSystem: "glTF +Y up, +Z forward; yaw=0 指向 +Z",
     },
     characterState: characterContext(character),

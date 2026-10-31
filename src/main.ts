@@ -5,6 +5,7 @@ import { PropAudio } from "./audio/PropAudio";
 import { mountControls } from "./ui/Controls";
 import { stepPropWorld, onPropImpact } from "./prop/basinPhysics";
 import { Stage } from "./core/Stage";
+import { walkableHalfOf } from "./core/arena";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { enableMultiWeight } from "./character/multiWeight";
 import { LayeredMotionPlayer } from "./character/LayeredMotionPlayer";
@@ -31,7 +32,8 @@ const MODEL = CHARACTER_MODEL;
 const BASIN_ASSET_DIR = "/models/playful-v2";
 const BASIN_MODEL = "/models/playful-v2/steel_basin_v2.glb";
 const SCOOP_MODEL = "/models/playful-v2/rice_scoop_straight_v3.glb";
-const AREA_HALF = 3.7;
+// 场地半边长：渲染、逐帧夹取、快照回填、接近规划、道具物理都取 src/core/arena.ts
+
 const DEBUG = new URLSearchParams(location.search).has("debug");
 const round3 = (v: number) => Math.round(v * 1000) / 1000;
 
@@ -343,6 +345,11 @@ async function boot() {
   canvas.addEventListener("pointercancel", () => {
     downAt = null;
   });
+  window.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (!xiangqiBoard.selection) return;
+    xiangqiBoard.select(null);
+  });
   canvas.addEventListener("pointerup", (e) => {
     if (!downAt) return;
     const moved = Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y);
@@ -375,10 +382,11 @@ async function boot() {
           xiangqiBoard.select(null);
           return;
         }
-        if (!mine) {
-          xiangqiBoard.select(null);
-          return;
-        }
+        // 点到空位、非法目标或别人的子：取消选择（不再让棋子悬在半空）
+        xiangqiBoard.select(null);
+      } else if (xiangqiBoard.selection) {
+        xiangqiBoard.select(null);
+        return;
       }
     }
 
@@ -753,7 +761,7 @@ async function boot() {
       basin: { x: basin.position.x, z: basin.position.z },
       yawDeg: degYaw(),
       reference: { x: basinReference.position[0], z: basinReference.position[2] },
-      half: AREA_HALF,
+      half: walkableHalfOf(stage.roomHalf),
       margin: 0.12,
     });
     if ("error" in plan) return { error: plan.error, reach: round3(plan.reach) };
@@ -858,7 +866,7 @@ async function boot() {
           basin: { x: item.position.x, z: item.position.z },
           yawDeg: degYaw(),
           reference,
-          half: AREA_HALF,
+          half: walkableHalfOf(stage.roomHalf),
           margin: 0.12,
         });
         if (!("error" in plan)) {
@@ -887,7 +895,7 @@ async function boot() {
               basin: { x: item.position.x, z: item.position.z },
               yawDeg: degYaw(),
               reference,
-              half: AREA_HALF,
+              half: walkableHalfOf(stage.roomHalf),
               margin: 0.12,
             });
             if ("error" in retry) break;
@@ -1384,8 +1392,9 @@ async function boot() {
     onSnapshot: (s) => {
       if (stateApplied) return;
       stateApplied = true;
-      root.position.x = THREE.MathUtils.clamp(s.x, -AREA_HALF, AREA_HALF);
-      root.position.z = THREE.MathUtils.clamp(s.z, -AREA_HALF, AREA_HALF);
+      const half = walkableHalfOf(stage.roomHalf);
+      root.position.x = THREE.MathUtils.clamp(s.x, -half, half);
+      root.position.z = THREE.MathUtils.clamp(s.z, -half, half);
       root.rotation.y = (s.yawDeg * Math.PI) / 180;
     },
     onGame: (value) => {
@@ -1409,12 +1418,16 @@ async function boot() {
         void xiangqiBoard.load().then(() => xiangqiBoard.update(xiangqiView));
       }
       if (view) {
-        // 象棋上桌：收起其他棋盘，场地放到 11.5m
+        // 象棋上桌：收起其他棋盘，场地放到 11.5m（渲染、夹取、物理一起改）
         if (gomokuView) { gomokuView = null; gomokuBoard.update(null); }
         if (gameBoard) { gameBoard = null; board.update(null as never); renderChip(null); }
         stage.setArena(XQ_HALF * 2);
+        basin.setArenaHalf(stage.roomHalf);
+        scoop.setArenaHalf(stage.roomHalf);
       } else {
         stage.resetArena();
+        basin.setArenaHalf(stage.roomHalf);
+        scoop.setArenaHalf(stage.roomHalf);
       }
       xiangqiBoard.update(view);
     },
@@ -1565,8 +1578,9 @@ async function boot() {
       roamTimer = Math.max(roamTimer, 2 + Math.random() * 3);
     }
 
-    root.position.x = THREE.MathUtils.clamp(root.position.x, -AREA_HALF, AREA_HALF);
-    root.position.z = THREE.MathUtils.clamp(root.position.z, -AREA_HALF, AREA_HALF);
+    const walkable = walkableHalfOf(stage.roomHalf);
+    root.position.x = THREE.MathUtils.clamp(root.position.x, -walkable, walkable);
+    root.position.z = THREE.MathUtils.clamp(root.position.z, -walkable, walkable);
 
     if (bubble.classList.contains("show")) {
       if (performance.now() > bubbleUntil) bubble.classList.remove("show");
