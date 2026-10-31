@@ -33,6 +33,10 @@ export interface ApproachPlan {
   finalYawDeg: number;
   /** 站位到盆的距离，等于参考半径 */
   reach: number;
+  /** 走完 distanceM 后还需要用 walk_adjust 补的零头（0.9 档位之间的残差） */
+  adjustM?: number;
+  /** true = 精确解不存在（贴墙/角），用“连线站位 + 微调补齐”的近似解 */
+  approx?: boolean;
 }
 
 export type ApproachError = "TOO_CLOSE" | "TOO_FAR" | "NO_SUPPORTED_DISTANCE" | "OUT_OF_BOUNDS" | "TURN_OVER_180";
@@ -105,7 +109,37 @@ export function planApproach(req: ApproachRequest): ApproachPlan | { error: Appr
     }
   }
 
-  if (!best) return { error: "NO_SUPPORTED_DISTANCE", reach, direct };
+  if (!best) {
+    // 精确解不存在时（典型：盆贴墙/贴角，两个交点都落在可行走范围外，或没有档位能同时满足）：
+    // 沿“以盆为圆心、半径 reach”的圆采样，找一个在场地内、且步行距离能用
+    // walk（0.09+0.18n）+ walk_adjust（≤0.18 残差）凑出来的站位。
+    const distances = supportedDistances();
+    let fallback: ApproachPlan | null = null;
+    let fallbackScore = Infinity;
+    for (let i = 0; i < 72; i++) {
+      const ang = (i / 72) * Math.PI * 2;
+      const stand = { x: basin.x + Math.sin(ang) * reach, z: basin.z + Math.cos(ang) * reach };
+      if (Math.abs(stand.x) > req.half - margin || Math.abs(stand.z) > req.half - margin) continue;
+      const D = Math.hypot(stand.x - character.x, stand.z - character.z);
+      if (D < 0.09) continue;
+      const distanceM = distances.filter((d) => d <= D + 1e-9).at(-1);
+      if (distanceM === undefined) continue;
+      const adjustM = D - distanceM;
+      if (adjustM > 0.18 + 1e-9) continue;
+      const walkBearing = bearingDeg(character, stand);
+      const finalYawDeg = normalizeDeg(bearingDeg(stand, basin) - offsetBearing);
+      const turn1Deg = signedDeltaDeg(req.yawDeg, walkBearing);
+      const turn2Deg = signedDeltaDeg(walkBearing, finalYawDeg);
+      if (Math.abs(turn1Deg) > 180 || Math.abs(turn2Deg) > 180) continue;
+      const score = Math.abs(turn1Deg) + Math.abs(turn2Deg) + adjustM * 40;
+      if (score < fallbackScore) {
+        fallbackScore = score;
+        fallback = { turn1Deg, distanceM, stand, turn2Deg, finalYawDeg, reach, adjustM, approx: true };
+      }
+    }
+    if (!fallback) return { error: "NO_SUPPORTED_DISTANCE", reach, direct };
+    return fallback;
+  }
   // 转向必须能由单次 turn 完成（|deg| <= 180），否则拆成两次
   if (Math.abs(best.turn1Deg) > 180 || Math.abs(best.turn2Deg) > 180) {
     return { error: "TURN_OVER_180", reach, direct };

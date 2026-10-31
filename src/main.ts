@@ -614,6 +614,19 @@ async function boot() {
     const def = basinCatalog.props?.[objectId as "basin" | "rice_scoop"];
     return def ? { x: def.pickupReference.position[0], z: def.pickupReference.position[2] } : { x: basinReference.position[0], z: basinReference.position[2] };
   };
+  /** 把对齐误差翻译成一句可执行的提示，模型不用自己推导 yawErrorDeg 的符号 */
+  const alignHint = (distanceError: number, yawErrorDeg: number) => {
+    const fmt = (v: number) => (Math.round(v * 10) / 10).toString();
+    // 距离差明显时先说距离：1.7m 之外光转身是没用的
+    if (distanceError > 0.1) return `离盆还差 ${fmt(distanceError)}m：先用 walk_to_basin 走近（它会算好站位），再 pickup。`;
+    if (distanceError < -0.1) return `离盆太近 ${fmt(-distanceError)}m：先退开一点，再 pickup。`;
+    if (Math.abs(yawErrorDeg) > 2) {
+      return `站位够了，朝向差 ${fmt(Math.abs(yawErrorDeg))}°：turn(angle_deg=${fmt(yawErrorDeg)}) 之后再 pickup（正数左转、负数右转）。所需朝向由盆的摆放决定，不一定是朝盆心。`;
+    }
+    if (distanceError > 0.02) return `朝向没问题，但离盆还差 ${fmt(distanceError)}m：再靠近一点。`;
+    if (distanceError < -0.02) return `朝向没问题，但离盆太近 ${fmt(-distanceError)}m：退开一点。`;
+    return "站位和朝向都满足，可以直接 pickup。";
+  };
   const alignInfo = (objectId = "basin") => {
     // 有落地变体的物品（饭勺）：站位点和朝向都由物品姿态唯一确定，
     // 判据是“离站位点多远 + 朝向差多少”，不是径向距离。用径向判断的话，
@@ -626,6 +639,7 @@ async function boot() {
         distanceError: Math.round(standError * 10000) / 10000,
         yawErrorDeg: Math.round(yawErrorDeg * 1000) / 1000,
         ok: standError <= 0.02 && Math.abs(yawErrorDeg) <= 2,
+        hint: alignHint(standError, yawErrorDeg),
       };
     }
     const item = itemOf(objectId) ?? basin;
@@ -642,6 +656,7 @@ async function boot() {
       distanceError: Math.round(distanceError * 10000) / 10000,
       yawErrorDeg: Math.round(yawErrorDeg * 1000) / 1000,
       ok: Math.abs(distanceError) <= 0.02 && Math.abs(yawErrorDeg) <= 2,
+      hint: alignHint(distanceError, yawErrorDeg),
     };
   };
 
@@ -678,7 +693,7 @@ async function boot() {
       yawDeg: degYaw(),
       reference: { x: basinReference.position[0], z: basinReference.position[2] },
       half: AREA_HALF,
-      margin: 0.3,
+      margin: 0.12,
     });
     if ("error" in plan) return { error: plan.error, reach: round3(plan.reach) };
     return {
@@ -686,6 +701,7 @@ async function boot() {
       recommended: {
         turn_deg: round3(plan.turn1Deg),
         walk_m: plan.distanceM,
+        ...(plan.adjustM && plan.adjustM > 0.005 ? { adjust_m: round3(plan.adjustM) } : {}),
         final_turn_deg: round3(plan.turn2Deg),
         stand: { x: round3(plan.stand.x), z: round3(plan.stand.z) },
         final_yaw_deg: round3(plan.finalYawDeg),
@@ -782,7 +798,7 @@ async function boot() {
           yawDeg: degYaw(),
           reference,
           half: AREA_HALF,
-          margin: 0.3,
+          margin: 0.12,
         });
         if (!("error" in plan)) {
           // 走近一次后可能还差一点（残差、恢复位置的时序），再按新位姿小修一到两次
@@ -790,6 +806,16 @@ async function boot() {
           for (let attempt = 0; attempt < 3 && !check.ok; attempt++) {
             if (Math.abs(plan.turn1Deg) > 0.01) await checked(loco.turn!(plan.turn1Deg));
             if (plan.distanceM > 0) await checked(loco.walk!(plan.distanceM));
+            // 档位残差用 walk_adjust 补齐（近似解才有 adjustM）
+            if (plan.adjustM && plan.adjustM > 0.005 && loco.adjust) {
+              let rest = plan.adjustM;
+              for (let k = 0; k < 6 && rest >= 0.02 - 1e-9; k++) {
+                const adj = Math.min(0.08, Math.floor(rest / 0.02) * 0.02);
+                if (adj <= 0) break;
+                await checked(loco.adjust(adj));
+                rest -= adj;
+              }
+            }
             if (Math.abs(plan.turn2Deg) > 0.01) await checked(loco.turn!(plan.turn2Deg));
             // 等一帧再读，避免收步/转身归一化还没落到读数上
             await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
@@ -801,7 +827,7 @@ async function boot() {
               yawDeg: degYaw(),
               reference,
               half: AREA_HALF,
-              margin: 0.3,
+              margin: 0.12,
             });
             if ("error" in retry) break;
             plan = retry;
