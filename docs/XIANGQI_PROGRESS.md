@@ -50,6 +50,20 @@
 5. **完整棋例**：长将/长捉/循环/自然限着目前只有 `adjudicateRepeat` 的保守占位（三次重复→不判和，仅标记），**不能宣称已完整符合 CCA2020 棋例**；逐例裁决待补；
 6. **LLM 闭环实测**：能力、提示词、事件已就绪，但还没有真实模型 + 真人对局跑通「她走一着 → review → 等用户」的完整回合。
 
-## 当前可否开局
+### ⑥ 角色搬棋（第一版跑通）
+
+链路：`execute_plan.xiangqiToken` → 执行器 `xiangqi_move` → 宿主走位（0.85m 站位，0.09+0.18n 拆步 + walk_adjust 补零）→ `chess_pickup`（0.4s 召唤 / 1.2s grasp 时把同一枚棋子挂到角色身上）→ 抱到目标旁 → `chess_place`（0.4s release 交回棋盘、1.2s settle）→ `xiangqi_commit` 带 token 复检。
+
+**真实链路验证**（本地服务 + 浏览器，headless ~1.5fps）：
+
+```
+[plan] t100 turn=1 steps=xiangqi_move
+[xiangqi] 搬运授权 xq-t100-...-g1 black_cannon_1 (2,1)→(3,1) rev=1
+[xiangqi] 她落子 black_cannon_1 → (3,1) rev=2
+```
+
+服务端确认这一着已 committed、revision 前进、盘面更新——走近、吸附、送出、提交整条链路成立。
+
+仍未接：`chess_carry_start/walk/stop`（抱棋时仍在用普通走路摆臂）、右腰挂勺、抢占/安全放置、完整棋例。
 
 服务端可开局、可走子、可提交，但**前端还没有象棋入口**，UI 不显示棋盘。按交接文档「素材数值通过不代表正式执行器已上线」，这一版只算服务端切片，不能当作象棋游戏已交付。
