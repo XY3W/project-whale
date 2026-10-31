@@ -1,0 +1,15 @@
+{
+  "assetVersion": "xiangqi-assets-v1",
+  "generatedAt": "2026-10-31T07:52:25.835813+00:00",
+  "baseCharacterSha256": "673ff7b1b3e53e9af954d0d000460666e81fdfd860576d7e0e34cc6afc2d8538",
+  "sourceRigSha256": "705c2f620d617eac36f9728379a7c7b3823d2ab42f25c772088dd4018c5b1b50",
+  "newActions": 16,
+  "totalClips": 61,
+  "templates": 14,
+  "initialPieces": 32,
+  "modelBytes": 40181428,
+  "motionOnlyBytes": 2644316,
+  "authoringFilesLocalOnly": true,
+  "runtimeIntegrationVerified": false,
+  "userVisualAcceptance": "piece proportions and river lettering confirmed; integrated gameplay pending"
+}

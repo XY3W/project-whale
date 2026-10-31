@@ -1,0 +1,450 @@
+[
+  {
+    "pieceId": "black_rook_1",
+    "side": "black",
+    "kind": "rook",
+    "template": "piece_black_4",
+    "row": 0,
+    "col": 0,
+    "position": [
+      -4.6,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_horse_1",
+    "side": "black",
+    "kind": "horse",
+    "template": "piece_black_3",
+    "row": 0,
+    "col": 1,
+    "position": [
+      -3.4499999999999997,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_elephant_1",
+    "side": "black",
+    "kind": "elephant",
+    "template": "piece_black_2",
+    "row": 0,
+    "col": 2,
+    "position": [
+      -2.3,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_advisor_1",
+    "side": "black",
+    "kind": "advisor",
+    "template": "piece_black_1",
+    "row": 0,
+    "col": 3,
+    "position": [
+      -1.15,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_general_1",
+    "side": "black",
+    "kind": "general",
+    "template": "piece_black_0",
+    "row": 0,
+    "col": 4,
+    "position": [
+      0.0,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_advisor_2",
+    "side": "black",
+    "kind": "advisor",
+    "template": "piece_black_1",
+    "row": 0,
+    "col": 5,
+    "position": [
+      1.15,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_elephant_2",
+    "side": "black",
+    "kind": "elephant",
+    "template": "piece_black_2",
+    "row": 0,
+    "col": 6,
+    "position": [
+      2.3,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_horse_2",
+    "side": "black",
+    "kind": "horse",
+    "template": "piece_black_3",
+    "row": 0,
+    "col": 7,
+    "position": [
+      3.4499999999999997,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_rook_2",
+    "side": "black",
+    "kind": "rook",
+    "template": "piece_black_4",
+    "row": 0,
+    "col": 8,
+    "position": [
+      4.6,
+      0,
+      -5.175
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_cannon_1",
+    "side": "black",
+    "kind": "cannon",
+    "template": "piece_black_5",
+    "row": 2,
+    "col": 1,
+    "position": [
+      -3.4499999999999997,
+      0,
+      -2.875
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_cannon_2",
+    "side": "black",
+    "kind": "cannon",
+    "template": "piece_black_5",
+    "row": 2,
+    "col": 7,
+    "position": [
+      3.4499999999999997,
+      0,
+      -2.875
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_soldier_1",
+    "side": "black",
+    "kind": "soldier",
+    "template": "piece_black_6",
+    "row": 3,
+    "col": 0,
+    "position": [
+      -4.6,
+      0,
+      -1.7249999999999999
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_soldier_2",
+    "side": "black",
+    "kind": "soldier",
+    "template": "piece_black_6",
+    "row": 3,
+    "col": 2,
+    "position": [
+      -2.3,
+      0,
+      -1.7249999999999999
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_soldier_3",
+    "side": "black",
+    "kind": "soldier",
+    "template": "piece_black_6",
+    "row": 3,
+    "col": 4,
+    "position": [
+      0.0,
+      0,
+      -1.7249999999999999
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_soldier_4",
+    "side": "black",
+    "kind": "soldier",
+    "template": "piece_black_6",
+    "row": 3,
+    "col": 6,
+    "position": [
+      2.3,
+      0,
+      -1.7249999999999999
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "black_soldier_5",
+    "side": "black",
+    "kind": "soldier",
+    "template": "piece_black_6",
+    "row": 3,
+    "col": 8,
+    "position": [
+      4.6,
+      0,
+      -1.7249999999999999
+    ],
+    "rotationY": 3.141592653589793
+  },
+  {
+    "pieceId": "red_rook_1",
+    "side": "red",
+    "kind": "rook",
+    "template": "piece_red_4",
+    "row": 9,
+    "col": 0,
+    "position": [
+      -4.6,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_horse_1",
+    "side": "red",
+    "kind": "horse",
+    "template": "piece_red_3",
+    "row": 9,
+    "col": 1,
+    "position": [
+      -3.4499999999999997,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_elephant_1",
+    "side": "red",
+    "kind": "elephant",
+    "template": "piece_red_2",
+    "row": 9,
+    "col": 2,
+    "position": [
+      -2.3,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_advisor_1",
+    "side": "red",
+    "kind": "advisor",
+    "template": "piece_red_1",
+    "row": 9,
+    "col": 3,
+    "position": [
+      -1.15,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_general_1",
+    "side": "red",
+    "kind": "general",
+    "template": "piece_red_0",
+    "row": 9,
+    "col": 4,
+    "position": [
+      0.0,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_advisor_2",
+    "side": "red",
+    "kind": "advisor",
+    "template": "piece_red_1",
+    "row": 9,
+    "col": 5,
+    "position": [
+      1.15,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_elephant_2",
+    "side": "red",
+    "kind": "elephant",
+    "template": "piece_red_2",
+    "row": 9,
+    "col": 6,
+    "position": [
+      2.3,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_horse_2",
+    "side": "red",
+    "kind": "horse",
+    "template": "piece_red_3",
+    "row": 9,
+    "col": 7,
+    "position": [
+      3.4499999999999997,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_rook_2",
+    "side": "red",
+    "kind": "rook",
+    "template": "piece_red_4",
+    "row": 9,
+    "col": 8,
+    "position": [
+      4.6,
+      0,
+      5.175
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_cannon_1",
+    "side": "red",
+    "kind": "cannon",
+    "template": "piece_red_5",
+    "row": 7,
+    "col": 1,
+    "position": [
+      -3.4499999999999997,
+      0,
+      2.875
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_cannon_2",
+    "side": "red",
+    "kind": "cannon",
+    "template": "piece_red_5",
+    "row": 7,
+    "col": 7,
+    "position": [
+      3.4499999999999997,
+      0,
+      2.875
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_soldier_1",
+    "side": "red",
+    "kind": "soldier",
+    "template": "piece_red_6",
+    "row": 6,
+    "col": 0,
+    "position": [
+      -4.6,
+      0,
+      1.7249999999999999
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_soldier_2",
+    "side": "red",
+    "kind": "soldier",
+    "template": "piece_red_6",
+    "row": 6,
+    "col": 2,
+    "position": [
+      -2.3,
+      0,
+      1.7249999999999999
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_soldier_3",
+    "side": "red",
+    "kind": "soldier",
+    "template": "piece_red_6",
+    "row": 6,
+    "col": 4,
+    "position": [
+      0.0,
+      0,
+      1.7249999999999999
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_soldier_4",
+    "side": "red",
+    "kind": "soldier",
+    "template": "piece_red_6",
+    "row": 6,
+    "col": 6,
+    "position": [
+      2.3,
+      0,
+      1.7249999999999999
+    ],
+    "rotationY": 0
+  },
+  {
+    "pieceId": "red_soldier_5",
+    "side": "red",
+    "kind": "soldier",
+    "template": "piece_red_6",
+    "row": 6,
+    "col": 8,
+    "position": [
+      4.6,
+      0,
+      1.7249999999999999
+    ],
+    "rotationY": 0
+  }
+]

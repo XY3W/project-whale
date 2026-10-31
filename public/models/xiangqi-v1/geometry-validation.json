@@ -1,0 +1,2251 @@
+{
+  "checksPassed": true,
+  "skinErrors": [
+    {
+      "clip": "chess_pickup",
+      "time": 1.2,
+      "maxVertexErrorM": 1.3084458112650638e-7,
+      "rmsM": 2.2114016495556477e-8
+    },
+    {
+      "clip": "chess_carry_walk",
+      "time": 0.23333333333333334,
+      "maxVertexErrorM": 1.3084455719392217e-7,
+      "rmsM": 2.2264362296614067e-8
+    },
+    {
+      "clip": "chess_carry_walk",
+      "time": 0.9333333333333333,
+      "maxVertexErrorM": 0.000021735903900931566,
+      "rmsM": 7.80156248104369e-7
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.1,
+      "maxVertexErrorM": 1.2919606491848108e-7,
+      "rmsM": 1.9695514458921386e-8
+    }
+  ],
+  "samples": [
+    {
+      "clip": "chess_hold",
+      "time": 0,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_carry_walk",
+      "time": 0.4,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461970747825928,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 0,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 0.2,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825472215,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 0.4,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825470503,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 0.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 0.8,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825467023,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 1,
+      "gripRegionOverlapVertices": 111,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 1.2,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825446971,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 1.4,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 1.6,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_pickup",
+      "time": 1.8,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 0,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 0.2,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825472215,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 0.4,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825470503,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 0.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 0.8,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825467023,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 1,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 1.2,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825446971,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 1.3,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825446904,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 1.4,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 1.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_place",
+      "time": 1.8,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 0,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 0.2,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825472215,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 0.4,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825470503,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 0.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 0.8,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825467023,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.1,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.2,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825446971,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.4,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.5,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_capture_place",
+      "time": 1.8,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 0,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 0.2,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825472215,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 0.4,
+      "gripRegionOverlapVertices": 1005,
+      "bodyFloorMinM": 0.0007461460825470503,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 0.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 0.8,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825467023,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 1,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825473951,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 1.2,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825446971,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 1.4,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    },
+    {
+      "clip": "chess_safe_setdown",
+      "time": 1.6,
+      "gripRegionOverlapVertices": 0,
+      "bodyFloorMinM": 0.0007461460825460489,
+      "scoopFloorMinM": 0.11443082396334975,
+      "deepPieceIntersectionVertices": 0,
+      "deepDominantBones": {},
+      "deepBounds": null
+    }
+  ],
+  "initialBoardApproaches": [
+    {
+      "pieceId": "black_rook_1",
+      "candidates": [
+        {
+          "x": -5.201040780867304,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -4.92528092663421,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -4.6,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -4.274719073365789,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -3.998959219132695,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_horse_1",
+      "candidates": [
+        {
+          "x": -4.051040780867305,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -3.77528092663421,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -3.4499999999999997,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -3.1247190733657897,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -2.848959219132695,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_elephant_1",
+      "candidates": [
+        {
+          "x": -2.9010407808673047,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -2.6252809266342103,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -2.3,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -1.9747190733657896,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -1.698959219132695,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_advisor_1",
+      "candidates": [
+        {
+          "x": -1.7510407808673047,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -1.4752809266342104,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -1.15,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -0.8247190733657896,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -0.5489592191326952,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_general_1",
+      "candidates": [
+        {
+          "x": -0.6010407808673048,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -0.32528092663421043,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -1.0409498084731052e-16,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 0.3252809266342102,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 0.6010407808673047,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_advisor_2",
+      "candidates": [
+        {
+          "x": 0.5489592191326951,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 0.8247190733657894,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 1.15,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 1.4752809266342102,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 1.7510407808673047,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_elephant_2",
+      "candidates": [
+        {
+          "x": 1.698959219132695,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 1.9747190733657893,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 2.3,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 2.62528092663421,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 2.9010407808673047,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_horse_2",
+      "candidates": [
+        {
+          "x": 2.848959219132695,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 3.1247190733657892,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 3.4499999999999997,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 3.7752809266342098,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 4.051040780867305,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_rook_2",
+      "candidates": [
+        {
+          "x": 3.998959219132695,
+          "z": -4.573959219132695,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 4.274719073365789,
+          "z": -4.389702375338402,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 4.6,
+          "z": -4.324999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 4.92528092663421,
+          "z": -4.389702375338402,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 5.201040780867304,
+          "z": -4.5739592191326945,
+          "yaw": 3.9269908169872414
+        }
+      ]
+    },
+    {
+      "pieceId": "black_cannon_1",
+      "candidates": [
+        {
+          "x": -3.4499999999999997,
+          "z": -3.725000023841858,
+          "yaw": 0
+        },
+        {
+          "x": -3.77528092663421,
+          "z": -3.6602976246615984,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -4.051040780867305,
+          "z": -3.476040780867305,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -4.235297624661598,
+          "z": -3.2002809266342105,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": -4.300000023841857,
+          "z": -2.875,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": -4.235297624661598,
+          "z": -2.5497190733657895,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": -3.77528092663421,
+          "z": -2.0897023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -3.4499999999999997,
+          "z": -2.024999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -3.1247190733657897,
+          "z": -2.0897023753384016,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -2.664702375338402,
+          "z": -2.549719073365789,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": -2.599999976158142,
+          "z": -2.875,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": -2.6647023753384014,
+          "z": -3.2002809266342105,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": -2.848959219132695,
+          "z": -3.4760407808673044,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -3.124719073365789,
+          "z": -3.660297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "black_cannon_2",
+      "candidates": [
+        {
+          "x": 3.4499999999999997,
+          "z": -3.725000023841858,
+          "yaw": 0
+        },
+        {
+          "x": 3.1247190733657892,
+          "z": -3.6602976246615984,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 2.848959219132695,
+          "z": -3.476040780867305,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 2.6647023753384014,
+          "z": -3.2002809266342105,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": 2.599999976158142,
+          "z": -2.875,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": 2.6647023753384014,
+          "z": -2.5497190733657895,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": 3.1247190733657892,
+          "z": -2.0897023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 3.4499999999999997,
+          "z": -2.024999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 3.7752809266342098,
+          "z": -2.0897023753384016,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 4.235297624661598,
+          "z": -2.549719073365789,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": 4.300000023841857,
+          "z": -2.875,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": 4.235297624661598,
+          "z": -3.2002809266342105,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": 4.051040780867305,
+          "z": -3.4760407808673044,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 3.7752809266342107,
+          "z": -3.660297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "black_soldier_1",
+      "candidates": [
+        {
+          "x": -4.6,
+          "z": -2.5750000238418576,
+          "yaw": 0
+        },
+        {
+          "x": -4.92528092663421,
+          "z": -2.510297624661598,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -5.201040780867304,
+          "z": -2.326040780867305,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -5.201040780867304,
+          "z": -1.1239592191326953,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -4.92528092663421,
+          "z": -0.9397023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -4.6,
+          "z": -0.874999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -4.274719073365789,
+          "z": -0.9397023753384015,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -3.998959219132695,
+          "z": -1.1239592191326948,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": -3.8147023753384017,
+          "z": -1.3997190733657892,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": -3.7499999761581417,
+          "z": -1.7249999999999996,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": -3.8147023753384017,
+          "z": -2.0502809266342106,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": -4.274719073365789,
+          "z": -2.510297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "black_soldier_2",
+      "candidates": [
+        {
+          "x": -2.3,
+          "z": -2.5750000238418576,
+          "yaw": 0
+        },
+        {
+          "x": -2.6252809266342103,
+          "z": -2.510297624661598,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -3.085297624661598,
+          "z": -2.05028092663421,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": -3.1500000238418577,
+          "z": -1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": -3.085297624661598,
+          "z": -1.3997190733657896,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": -2.9010407808673047,
+          "z": -1.1239592191326953,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -2.6252809266342103,
+          "z": -0.9397023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -2.3,
+          "z": -0.874999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -1.9747190733657896,
+          "z": -0.9397023753384015,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -1.698959219132695,
+          "z": -1.1239592191326948,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": -1.514702375338402,
+          "z": -1.3997190733657892,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": -1.449999976158142,
+          "z": -1.7249999999999996,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": -1.5147023753384017,
+          "z": -2.0502809266342106,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": -1.698959219132695,
+          "z": -2.3260407808673045,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -1.974719073365789,
+          "z": -2.510297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "black_soldier_3",
+      "candidates": [
+        {
+          "x": 0,
+          "z": -2.5750000238418576,
+          "yaw": 0
+        },
+        {
+          "x": -0.3252809266342103,
+          "z": -2.510297624661598,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -0.6010407808673047,
+          "z": -2.326040780867305,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -0.7852976246615982,
+          "z": -2.05028092663421,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": -0.8500000238418579,
+          "z": -1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": -0.7852976246615982,
+          "z": -1.3997190733657896,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": -0.6010407808673048,
+          "z": -1.1239592191326953,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -0.32528092663421043,
+          "z": -0.9397023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -1.0409498084731052e-16,
+          "z": -0.874999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 0.3252809266342102,
+          "z": -0.9397023753384015,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 0.6010407808673047,
+          "z": -1.1239592191326948,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": 0.785297624661598,
+          "z": -1.3997190733657892,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": 0.8500000238418579,
+          "z": -1.7249999999999996,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": 0.7852976246615981,
+          "z": -2.0502809266342106,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": 0.601040780867305,
+          "z": -2.3260407808673045,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 0.3252809266342109,
+          "z": -2.510297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "black_soldier_4",
+      "candidates": [
+        {
+          "x": 2.3,
+          "z": -2.5750000238418576,
+          "yaw": 0
+        },
+        {
+          "x": 1.9747190733657896,
+          "z": -2.510297624661598,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 1.698959219132695,
+          "z": -2.326040780867305,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 1.5147023753384015,
+          "z": -2.05028092663421,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": 1.449999976158142,
+          "z": -1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": 1.5147023753384015,
+          "z": -1.3997190733657896,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": 1.698959219132695,
+          "z": -1.1239592191326953,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 1.9747190733657893,
+          "z": -0.9397023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 2.3,
+          "z": -0.874999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 2.62528092663421,
+          "z": -0.9397023753384015,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 2.9010407808673047,
+          "z": -1.1239592191326948,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": 3.0852976246615977,
+          "z": -1.3997190733657892,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": 3.1500000238418577,
+          "z": -1.7249999999999996,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": 3.0852976246615977,
+          "z": -2.0502809266342106,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": 2.6252809266342108,
+          "z": -2.510297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "black_soldier_5",
+      "candidates": [
+        {
+          "x": 4.6,
+          "z": -2.5750000238418576,
+          "yaw": 0
+        },
+        {
+          "x": 4.274719073365789,
+          "z": -2.510297624661598,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 3.8147023753384013,
+          "z": -2.05028092663421,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": 3.7499999761581417,
+          "z": -1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": 3.8147023753384013,
+          "z": -1.3997190733657896,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": 3.998959219132695,
+          "z": -1.1239592191326953,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 4.274719073365789,
+          "z": -0.9397023753384016,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 4.6,
+          "z": -0.874999976158142,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 4.92528092663421,
+          "z": -0.9397023753384015,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 5.201040780867304,
+          "z": -1.1239592191326948,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": 5.201040780867305,
+          "z": -2.3260407808673045,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 4.92528092663421,
+          "z": -2.510297624661598,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_rook_1",
+      "candidates": [
+        {
+          "x": -4.6,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -4.92528092663421,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -5.201040780867304,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -3.998959219132695,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -4.274719073365789,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_horse_1",
+      "candidates": [
+        {
+          "x": -3.4499999999999997,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -3.77528092663421,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -4.051040780867305,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -2.848959219132695,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -3.124719073365789,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_elephant_1",
+      "candidates": [
+        {
+          "x": -2.3,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -2.6252809266342103,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -2.9010407808673047,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -1.698959219132695,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -1.974719073365789,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_advisor_1",
+      "candidates": [
+        {
+          "x": -1.15,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -1.4752809266342102,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -1.7510407808673047,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -0.548959219132695,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -0.824719073365789,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_general_1",
+      "candidates": [
+        {
+          "x": 0,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -0.3252809266342103,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -0.6010407808673047,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 0.601040780867305,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 0.3252809266342109,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_advisor_2",
+      "candidates": [
+        {
+          "x": 1.15,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 0.8247190733657896,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 0.5489592191326952,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 1.7510407808673047,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 1.4752809266342108,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_elephant_2",
+      "candidates": [
+        {
+          "x": 2.3,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 1.9747190733657896,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 1.698959219132695,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 2.9010407808673047,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 2.6252809266342108,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_horse_2",
+      "candidates": [
+        {
+          "x": 3.4499999999999997,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 3.1247190733657892,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 2.848959219132695,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 4.051040780867305,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 3.7752809266342107,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_rook_2",
+      "candidates": [
+        {
+          "x": 4.6,
+          "z": 4.324999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 4.274719073365789,
+          "z": 4.389702375338402,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 3.998959219132695,
+          "z": 4.5739592191326945,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 5.201040780867305,
+          "z": 4.573959219132695,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 4.92528092663421,
+          "z": 4.389702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_cannon_1",
+      "candidates": [
+        {
+          "x": -3.4499999999999997,
+          "z": 2.024999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -3.77528092663421,
+          "z": 2.0897023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -4.235297624661598,
+          "z": 2.5497190733657895,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": -4.300000023841857,
+          "z": 2.875,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": -4.235297624661598,
+          "z": 3.2002809266342105,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": -4.051040780867305,
+          "z": 3.476040780867305,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -3.77528092663421,
+          "z": 3.6602976246615984,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -3.4499999999999997,
+          "z": 3.725000023841858,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -3.1247190733657897,
+          "z": 3.6602976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -2.848959219132695,
+          "z": 3.476040780867305,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": -2.664702375338402,
+          "z": 3.200280926634211,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": -2.599999976158142,
+          "z": 2.875,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": -2.6647023753384014,
+          "z": 2.5497190733657895,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": -3.124719073365789,
+          "z": 2.089702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_cannon_2",
+      "candidates": [
+        {
+          "x": 3.4499999999999997,
+          "z": 2.024999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 3.1247190733657892,
+          "z": 2.0897023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 2.6647023753384014,
+          "z": 2.5497190733657895,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": 2.599999976158142,
+          "z": 2.875,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": 2.6647023753384014,
+          "z": 3.2002809266342105,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": 2.848959219132695,
+          "z": 3.476040780867305,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 3.1247190733657892,
+          "z": 3.6602976246615984,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 3.4499999999999997,
+          "z": 3.725000023841858,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 3.7752809266342098,
+          "z": 3.6602976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 4.051040780867305,
+          "z": 3.476040780867305,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": 4.235297624661598,
+          "z": 3.200280926634211,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": 4.300000023841857,
+          "z": 2.875,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": 4.235297624661598,
+          "z": 2.5497190733657895,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": 3.7752809266342107,
+          "z": 2.089702375338402,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_soldier_1",
+      "candidates": [
+        {
+          "x": -4.6,
+          "z": 0.874999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -4.92528092663421,
+          "z": 0.9397023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -5.201040780867304,
+          "z": 1.123959219132695,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -5.201040780867304,
+          "z": 2.3260407808673045,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -4.92528092663421,
+          "z": 2.510297624661598,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -4.6,
+          "z": 2.5750000238418576,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -4.274719073365789,
+          "z": 2.5102976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -3.8147023753384017,
+          "z": 2.0502809266342106,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": -3.7499999761581417,
+          "z": 1.725,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": -3.8147023753384017,
+          "z": 1.3997190733657894,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": -3.998959219132695,
+          "z": 1.1239592191326953,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -4.274719073365789,
+          "z": 0.9397023753384018,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_soldier_2",
+      "candidates": [
+        {
+          "x": -2.3,
+          "z": 0.874999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -2.6252809266342103,
+          "z": 0.9397023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -2.9010407808673047,
+          "z": 1.123959219132695,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -3.085297624661598,
+          "z": 1.3997190733657896,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": -3.1500000238418577,
+          "z": 1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": -3.085297624661598,
+          "z": 2.05028092663421,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": -2.6252809266342103,
+          "z": 2.510297624661598,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -2.3,
+          "z": 2.5750000238418576,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": -1.9747190733657896,
+          "z": 2.5102976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": -1.698959219132695,
+          "z": 2.326040780867305,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": -1.514702375338402,
+          "z": 2.0502809266342106,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": -1.449999976158142,
+          "z": 1.725,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": -1.5147023753384017,
+          "z": 1.3997190733657894,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": -1.698959219132695,
+          "z": 1.1239592191326953,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": -1.974719073365789,
+          "z": 0.9397023753384018,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_soldier_3",
+      "candidates": [
+        {
+          "x": 0,
+          "z": 0.874999976158142,
+          "yaw": 0
+        },
+        {
+          "x": -0.3252809266342103,
+          "z": 0.9397023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": -0.6010407808673047,
+          "z": 1.123959219132695,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": -0.7852976246615982,
+          "z": 1.3997190733657896,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": -0.8500000238418579,
+          "z": 1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": -0.7852976246615982,
+          "z": 2.05028092663421,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": -0.6010407808673048,
+          "z": 2.3260407808673045,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": -0.32528092663421043,
+          "z": 2.510297624661598,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": -1.0409498084731052e-16,
+          "z": 2.5750000238418576,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 0.3252809266342102,
+          "z": 2.5102976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 0.6010407808673047,
+          "z": 2.326040780867305,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": 0.785297624661598,
+          "z": 2.0502809266342106,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": 0.8500000238418579,
+          "z": 1.725,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": 0.7852976246615981,
+          "z": 1.3997190733657894,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": 0.601040780867305,
+          "z": 1.1239592191326953,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 0.3252809266342109,
+          "z": 0.9397023753384018,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_soldier_4",
+      "candidates": [
+        {
+          "x": 2.3,
+          "z": 0.874999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 1.9747190733657896,
+          "z": 0.9397023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 1.698959219132695,
+          "z": 1.123959219132695,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 1.5147023753384015,
+          "z": 1.3997190733657896,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": 1.449999976158142,
+          "z": 1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": 1.5147023753384015,
+          "z": 2.05028092663421,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": 1.698959219132695,
+          "z": 2.3260407808673045,
+          "yaw": 2.356194490192345
+        },
+        {
+          "x": 1.9747190733657893,
+          "z": 2.510297624661598,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 2.3,
+          "z": 2.5750000238418576,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 2.62528092663421,
+          "z": 2.5102976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 3.0852976246615977,
+          "z": 2.0502809266342106,
+          "yaw": 4.319689898685965
+        },
+        {
+          "x": 3.1500000238418577,
+          "z": 1.725,
+          "yaw": 4.71238898038469
+        },
+        {
+          "x": 3.0852976246615977,
+          "z": 1.3997190733657894,
+          "yaw": 5.105088062083414
+        },
+        {
+          "x": 2.9010407808673047,
+          "z": 1.1239592191326953,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 2.6252809266342108,
+          "z": 0.9397023753384018,
+          "yaw": 5.890486225480862
+        }
+      ]
+    },
+    {
+      "pieceId": "red_soldier_5",
+      "candidates": [
+        {
+          "x": 4.6,
+          "z": 0.874999976158142,
+          "yaw": 0
+        },
+        {
+          "x": 4.274719073365789,
+          "z": 0.9397023753384016,
+          "yaw": 0.39269908169872414
+        },
+        {
+          "x": 3.998959219132695,
+          "z": 1.123959219132695,
+          "yaw": 0.7853981633974483
+        },
+        {
+          "x": 3.8147023753384013,
+          "z": 1.3997190733657896,
+          "yaw": 1.1780972450961724
+        },
+        {
+          "x": 3.7499999761581417,
+          "z": 1.7249999999999999,
+          "yaw": 1.5707963267948966
+        },
+        {
+          "x": 3.8147023753384013,
+          "z": 2.05028092663421,
+          "yaw": 1.9634954084936207
+        },
+        {
+          "x": 4.274719073365789,
+          "z": 2.510297624661598,
+          "yaw": 2.748893571891069
+        },
+        {
+          "x": 4.6,
+          "z": 2.5750000238418576,
+          "yaw": 3.141592653589793
+        },
+        {
+          "x": 4.92528092663421,
+          "z": 2.5102976246615984,
+          "yaw": 3.5342917352885173
+        },
+        {
+          "x": 5.201040780867304,
+          "z": 2.326040780867305,
+          "yaw": 3.9269908169872414
+        },
+        {
+          "x": 5.201040780867305,
+          "z": 1.1239592191326953,
+          "yaw": 5.497787143782138
+        },
+        {
+          "x": 4.92528092663421,
+          "z": 0.9397023753384018,
+          "yaw": 5.890486225480862
+        }
+      ]
+    }
+  ],
+  "carryLowSilhouetteXZ": [
+    [
+      -0.33819255465502024,
+      0.011521404846752611
+    ],
+    [
+      -0.33778822645077755,
+      0.007208424645846388
+    ],
+    [
+      -0.3369138302507161,
+      0.003067488220359002
+    ],
+    [
+      -0.3367876317320592,
+      0.002610448801114655
+    ],
+    [
+      -0.14109157627210753,
+      -0.6271495506671894
+    ],
+    [
+      -0.1392239243283237,
+      -0.6272186323238738
+    ],
+    [
+      0.13922403151847362,
+      -0.6272187934359357
+    ],
+    [
+      0.14109174305811495,
+      -0.6271496519371434
+    ],
+    [
+      0.26865732428095973,
+      -0.009040700188696614
+    ],
+    [
+      0.2694943611084318,
+      0.005243165207333011
+    ],
+    [
+      0.2685928142573282,
+      0.01100183174376575
+    ],
+    [
+      0.2674506373858762,
+      0.0164017622343863
+    ],
+    [
+      0.2507720791247112,
+      0.07105479180559114
+    ],
+    [
+      0.20705729551336513,
+      0.1235848135961954
+    ],
+    [
+      0.20592602917862068,
+      0.12494176541186537
+    ],
+    [
+      0.1649050373264666,
+      0.17076430061910827
+    ],
+    [
+      0.09639099608597047,
+      0.19798117880083
+    ],
+    [
+      0.08474032047343319,
+      0.20041383707700466
+    ],
+    [
+      0.021013806494954643,
+      0.20303010369781443
+    ],
+    [
+      -0.022387814283631523,
+      0.20302574695531433
+    ],
+    [
+      -0.08145957678569281,
+      0.19975685913050759
+    ],
+    [
+      -0.08724516800334528,
+      0.19917811215549797
+    ],
+    [
+      -0.16087807666363513,
+      0.17076420661730193
+    ],
+    [
+      -0.3154594116225089,
+      0.059486871933550844
+    ],
+    [
+      -0.3183192088425355,
+      0.057093953261553365
+    ],
+    [
+      -0.3209837354073905,
+      0.05449995814134329
+    ],
+    [
+      -0.3234273080939872,
+      0.051729903294928825
+    ],
+    [
+      -0.32562641369853285,
+      0.048810436153649134
+    ],
+    [
+      -0.3264245955129713,
+      0.04765909142018518
+    ],
+    [
+      -0.32855138921236526,
+      0.044314271862102676
+    ],
+    [
+      -0.33036547854471976,
+      0.04086825550674704
+    ],
+    [
+      -0.3313352314509699,
+      0.038869965542441536
+    ],
+    [
+      -0.3329540593643978,
+      0.03503647265430202
+    ],
+    [
+      -0.33509980192949196,
+      0.02964652802810424
+    ],
+    [
+      -0.33656907362988137,
+      0.025071301816720695
+    ],
+    [
+      -0.3375800309742274,
+      0.020496060916561434
+    ],
+    [
+      -0.3381229383682508,
+      0.01596489169042571
+    ]
+  ],
+  "prototypeArenaM": [
+    11.5,
+    11.5
+  ],
+  "navigation": [
+    {
+      "pieceId": "black_rook_1",
+      "statesVisited": 44677,
+      "end": {
+        "x": 0.4500000000000002,
+        "z": 0
+      },
+      "gridM": 0.05,
+      "note": "forward-only geometric reachability with in-place turns checked at midpoint; actual host steering and turn animation remain integration work"
+    },
+    {
+      "pieceId": "black_cannon_1",
+      "statesVisited": 53083,
+      "end": {
+        "x": 0.4500000000000002,
+        "z": 0
+      },
+      "gridM": 0.05,
+      "note": "forward-only geometric reachability with in-place turns checked at midpoint; actual host steering and turn animation remain integration work"
+    },
+    {
+      "pieceId": "black_soldier_3",
+      "statesVisited": 22826,
+      "end": {
+        "x": 0.4500000000000002,
+        "z": 0
+      },
+      "gridM": 0.05,
+      "note": "forward-only geometric reachability with in-place turns checked at midpoint; actual host steering and turn animation remain integration work"
+    }
+  ],
+  "gripRegionPolicy": "Hands and forearm cuffs are contact regions and reported separately; a stylized grip may overlap the rim. This check does not assert zero cuff penetration.",
+  "scope": "Sampled mesh geometry and initial-board reachability. Does not validate arbitrary future chess layouts, host steering, contact acknowledgements or interrupt recovery."
+}

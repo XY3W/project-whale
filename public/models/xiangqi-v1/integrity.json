@@ -1,0 +1,29 @@
+{
+  "baseFile": "public/models/blink-material-v2/character_material_only.glb",
+  "baseSha256": "673ff7b1b3e53e9af954d0d000460666e81fdfd860576d7e0e34cc6afc2d8538",
+  "oldClipCount": 45,
+  "newClipCount": 61,
+  "newClips": [
+    "stow_scoop",
+    "unstow_scoop",
+    "chess_pickup",
+    "chess_hold",
+    "chess_carry_start",
+    "chess_carry_walk",
+    "chess_carry_stop",
+    "chess_place",
+    "chess_capture_place",
+    "chess_safe_setdown",
+    "chess_recover",
+    "chess_carry_adjust_01",
+    "chess_carry_adjust_02",
+    "chess_carry_adjust_04",
+    "chess_carry_adjust_06",
+    "chess_carry_adjust_08"
+  ],
+  "nodesUnchanged": true,
+  "meshSkinAndMaterialsUnchanged": true,
+  "oldAnimationsUnchanged": true,
+  "baseBinaryPrefixUnchanged": true,
+  "motionOnlyBytes": 2644316
+}

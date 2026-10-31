@@ -1,0 +1,209 @@
+{
+  "measuredPieceBounds": [
+    {
+      "template": "piece_black_0",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_black_1",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_black_2",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_black_3",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_black_4",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_black_5",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_black_6",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_0",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_1",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_2",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_3",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_4",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_5",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    },
+    {
+      "template": "piece_red_6",
+      "sizeM": [
+        0.9224352836608887,
+        0.25530001521110535,
+        0.9224352836608887
+      ]
+    }
+  ],
+  "minimumBoardEdgeClearanceM": 0.11378235294117678,
+  "newActionCount": 16,
+  "totalClips": 61,
+  "maxPalmErrorM": 6.934386861613162e-8,
+  "maxForearmTiltDeg": 0.00004449131591894209,
+  "maxWristDirectionDeg": 0.00007437637738440778,
+  "maxWaistMatrixError": 1.046635463852752e-7,
+  "maxHandTransferMatrixError": 0.00000434935458226704,
+  "maxBoneScaleError": 0.000033915039370668865,
+  "maxSourceMatrixError": 0.0005337835964340093,
+  "seams": [
+    {
+      "from": "chess_pickup",
+      "to": "chess_hold",
+      "maxMatrixError": 0
+    },
+    {
+      "from": "chess_hold",
+      "to": "chess_carry_start",
+      "maxMatrixError": 2.446931546273845e-13
+    },
+    {
+      "from": "chess_carry_start",
+      "to": "chess_carry_walk",
+      "maxMatrixError": 0.000233499234223479
+    },
+    {
+      "from": "chess_carry_walk",
+      "to": "chess_carry_walk",
+      "maxMatrixError": 0.000058612310287885216
+    },
+    {
+      "from": "chess_carry_walk",
+      "to": "chess_carry_stop",
+      "maxMatrixError": 0.000058612310287885216
+    },
+    {
+      "from": "chess_carry_stop",
+      "to": "chess_place",
+      "maxMatrixError": 0.00004712770876225819
+    },
+    {
+      "from": "chess_place",
+      "to": "chess_hold",
+      "maxMatrixError": 0
+    },
+    {
+      "from": "chess_safe_setdown",
+      "to": "chess_hold",
+      "maxMatrixError": 0
+    },
+    {
+      "from": "chess_recover",
+      "to": "chess_hold",
+      "maxMatrixError": 0
+    }
+  ],
+  "supportChecks": [
+    {
+      "clip": "chess_carry_start",
+      "maxSupportStepM": 0.000034192687990202345
+    },
+    {
+      "clip": "chess_carry_walk",
+      "maxSupportStepM": 2.5808380705122788e-8
+    },
+    {
+      "clip": "chess_carry_stop",
+      "maxSupportStepM": 0.00003418740924297029
+    },
+    {
+      "clip": "chess_carry_adjust_01",
+      "maxSupportStepM": 0.00002137107836773342
+    },
+    {
+      "clip": "chess_carry_adjust_02",
+      "maxSupportStepM": 0.000042735632449606856
+    },
+    {
+      "clip": "chess_carry_adjust_04",
+      "maxSupportStepM": 0.00008546567747077213
+    },
+    {
+      "clip": "chess_carry_adjust_06",
+      "maxSupportStepM": 0.00012819013327720105
+    },
+    {
+      "clip": "chess_carry_adjust_08",
+      "maxSupportStepM": 0.00017091272715587038
+    }
+  ],
+  "initialPieceCount": 32,
+  "templateCount": 14
+}

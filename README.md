@@ -3,6 +3,12 @@
 让 LLM 驱动的 3D 桌宠。方向是**预生成动画 + LLM 选择 + 分层叠加**：
 模型只决定“现在做什么动作”，动作质量由美术保证。
 
+## 当前开发交接
+
+2026-10-31：中国象棋请从[开发交接入口](docs/XIANGQI_DEVELOPMENT_HANDOFF.md)开始，配套[正式方案](docs/XIANGQI_PLAN.md)、[素材契约](docs/XIANGQI_ASSET_HANDOFF.md)与[提示词增补](docs/llm-design/XIANGQI_PROMPT_ADDENDUM.md)。独立素材验收页：`/xiangqi-assets.html`。共享Mac开发与部署遵守[版本管理约定](docs/VERSION_MANAGEMENT.md)。
+
+下方早期模型/功能说明保留作历史背景；当前代码和本轮交接优先，不能据此判断最新功能是否存在。
+
 ## 运行
 
 ```bash
