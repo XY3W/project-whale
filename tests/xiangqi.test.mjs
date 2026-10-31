@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   createGame, legalMoves, allLegalMoves, move, inCheck, position, publicGame,
   serializeGame, restoreGame, initialPieces, pseudoMoves, signature, inPalace, crossedRiver,
-  ROWS, COLS,
+  ROWS, COLS, adjudicateRepeat, naturalLimit,
 } from "../server/xiangqi.mjs";
 
 const game = () => createGame({ gameId: "xq1", userSide: "red" });
@@ -246,4 +246,50 @@ test("持久化：序列化/恢复后盘面、回合、revision 一致", () => {
   assert.equal(back.turn, "black");
   assert.equal(back.pieces.size, 32);
   assert.ok(signature(back) === signature(g));
+});
+
+test("棋例裁决：长将判负、普通三次重复判和", () => {
+  const board = new Array(90).fill(null);
+  const permanent = { status: "playing", board, turn: "black", moves: [] };
+  const sig = signature(permanent);
+  const history = (n) => [sig, "a#red", sig, "b#red", sig].slice(0, n);
+  // 只重复了两次：不够
+  assert.equal(adjudicateRepeat({ ...permanent, moves: [{ side: "black", check: true }] }, [sig, "a#red"]), null);
+  // 三次重复 + 黑方每步都在将军 → 黑方判负
+  const perpetual = {
+    ...permanent,
+    moves: Array.from({ length: 6 }, (_, i) => ({ side: i % 2 === 0 ? "red" : "black", check: i % 2 === 1 })),
+  };
+  const verdict = adjudicateRepeat(perpetual, history(5));
+  assert.equal(verdict.reason, "perpetual_check");
+  assert.equal(verdict.loser, "black");
+  assert.equal(verdict.winner, "red");
+  // 三次重复但双方都没将军 → 和棋
+  const quietBoard = board.slice();
+  const quiet = { ...permanent, board: quietBoard, turn: "red", moves: Array.from({ length: 4 }, (_, i) => ({ side: i % 2 === 0 ? "red" : "black", check: false })) };
+  const quietSig = signature(quiet);
+  const drawn = adjudicateRepeat(quiet, [quietSig, "c#black", quietSig, "d#black", quietSig]);
+  assert.equal(drawn.reason, "repetition");
+  assert.equal(drawn.winner, null);
+});
+
+test("自然限着：连续 60 回合无吃子判和，有吃子就重新计", () => {
+  const make = (n, captureAt = -1) => ({
+    status: "playing",
+    moves: Array.from({ length: n }, (_, i) => ({ side: i % 2 ? "black" : "red", captured: i === captureAt ? "red_soldier_1" : null })),
+  });
+  assert.equal(naturalLimit(make(119)), false);
+  assert.equal(naturalLimit(make(120)), true);
+  assert.equal(naturalLimit(make(180, 100)), false, "第 100 手吃过子，只数了 79 手");
+  assert.equal(naturalLimit(make(221, 100)), true);
+});
+
+test("走子记录带上走子方与将军标记（棋例裁决的依据）", () => {
+  const game = createGame("g-rec");
+  const before = game.moves.length;
+  move(game, "red_cannon_1", 6, 1);
+  const last = game.moves.at(-1);
+  assert.equal(game.moves.length, before + 1);
+  assert.equal(last.side, "red");
+  assert.equal(typeof last.check, "boolean");
 });

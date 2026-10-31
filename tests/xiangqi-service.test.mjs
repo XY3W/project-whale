@@ -133,3 +133,32 @@ test('新授权签发后，旧 token 立刻作废（抢占/重来不能把旧棋
   assert.equal(fresh.ok, true);
   assert.equal(fresh.committed, true);
 });
+
+test("三次重复：双方来回动马，第 8 手判和，不能再走", () => {
+  const svc = new XiangqiService(tmp());
+  svc.start({ requestId: "r-rep", userSide: "red" });
+  const play = (pieceId, row, col) => {
+    const g = svc.public();
+    const expectedRevision = g.revision;
+    if (g.turn === g.userSide) {
+      return svc.userMove({ moveId: `m-${expectedRevision}`, gameId: g.gameId, pieceId, toRow: row, toCol: col, expectedRevision });
+    }
+    const auth = svc.beginMove({ pieceId, toRow: row, toCol: col, expectedRevision, generation: 1 });
+    assert.equal(auth.ok, true, `beginMove ${pieceId}: ${auth.reason}`);
+    return svc.commitMove({ token: auth.token, revision: auth.revision });
+  };
+  for (let round = 0; round < 2; round++) {
+    play("red_horse_1", 7, 2);
+    play("black_horse_1", 2, 2);
+    play("red_horse_1", 9, 1);
+    play("black_horse_1", 0, 1);
+  }
+  const board = svc.public();
+  assert.equal(board.status, "drawn");
+  assert.equal(board.result.reason, "repetition");
+  assert.equal(board.result.winner, null);
+  // 判和之后不能再走
+  const after = svc.userMove({ moveId: "m-late", gameId: board.gameId, pieceId: "red_horse_1", toRow: 7, toCol: 2, expectedRevision: board.revision });
+  assert.equal(after.ok, false);
+  assert.equal(after.reason, "GAME_OVER");
+});

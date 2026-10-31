@@ -284,7 +284,7 @@ export function move(game, pieceId, toRow, toCol) {
   game.board = next.board;
   game.pieces = next.pieces;
   game.revision += 1;
-  const record = { pieceId, from, to: { row: toRow, col: toCol }, captured: captured ? captured.id : null, revision: game.revision };
+  const record = { pieceId, from, to: { row: toRow, col: toCol }, captured: captured ? captured.id : null, revision: game.revision, side: piece.side };
   game.moves.push(record);
   game.lastMove = record;
 
@@ -298,6 +298,7 @@ export function move(game, pieceId, toRow, toCol) {
     game.status = "won";
     game.result = { winner: mover, reason: opponentInCheck ? "checkmate" : "stalemate" };
   }
+  record.check = opponentInCheck;
   game.result = game.status === "won" ? game.result : null;
   return { ok: true, record, captured: captured?.id ?? null, check: opponentInCheck, status: game.status, result: game.result ?? null };
 }
@@ -318,18 +319,37 @@ export function position(game) {
 }
 
 /**
- * 重复/长将的近似裁决（CCA2020 完整棋例需要逐例裁决，这里先做保守实现并标注）。
- * - 同一局面（含走子方）出现 3 次：若期间一方每步都在将军，则连续将军的一方判负；
- *   否则判和。
+ * 重复局面的裁决。CCA2020 的完整棋例（长将/长捉/长兑/长拦……）需要逐例裁决，
+ * 这里实现其中可精确判定的两类，其余按和棋处理并在返回值里标明：
+ * - 长将：三次重复且循环里该方每一步都在将军 → 连续将军的一方判负；
+ * - 其他三次重复 → 和棋。
+ * 长捉暂未判定（docs/XIANGQI_PROGRESS.md 里标为未完成，不能对外宣称完整棋例）。
  */
-export function adjudicateRepeat(positions) {
-  // positions: 历史局面签名数组（含当前），由服务层维护
-  if (!Array.isArray(positions) || positions.length < 3) return null;
-  const counts = new Map();
-  for (const key of positions) counts.set(key, (counts.get(key) ?? 0) + 1);
-  const repeated = [...counts].find(([, n]) => n >= 3);
-  if (!repeated) return null;
-  return { threefold: true };
+export function adjudicateRepeat(game, history) {
+  if (!game || game.status !== "playing") return null;
+  if (!Array.isArray(history)) return null;
+  const current = signature(game);
+  const seen = [];
+  for (let i = 0; i < history.length; i++) if (history[i] === current) seen.push(i);
+  if (seen.length < 3) return null;
+  // 只回看最后一次循环：从倒数第三次出现到现在
+  const cycle = game.moves.slice(seen[seen.length - 3]);
+  const mover = cycle.at(-1)?.side;
+  const own = mover ? cycle.filter((m) => m.side === mover) : [];
+  if (mover && own.length >= 2 && own.every((m) => m.check)) {
+    return { threefold: true, reason: "perpetual_check", winner: other(mover), loser: mover };
+  }
+  return { threefold: true, reason: "repetition", winner: null };
+}
+
+/** 自然限着：连续 60 回合（双方各 60 步、共 120 手）没有吃子 → 和棋 */
+export function naturalLimit(game) {
+  if (!game || game.status !== "playing") return false;
+  let lastCapture = -1;
+  for (let i = game.moves.length - 1; i >= 0; i--) {
+    if (game.moves[i].captured) { lastCapture = i; break; }
+  }
+  return game.moves.length - lastCapture - 1 >= 120;
 }
 
 /** 局面签名：棋盘 + 轮到谁（用于重复检测） */

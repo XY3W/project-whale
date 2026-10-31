@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   RULESET, RED, BLACK, createGame, legalMoves, move as applyMove, position,
-  publicGame, restoreGame, serializeGame, signature, other,
+  publicGame, restoreGame, serializeGame, signature, other, adjudicateRepeat, naturalLimit,
 } from "./xiangqi.mjs";
 
 const TOKEN_TTL_MS = 5 * 60 * 1000;
@@ -101,6 +101,7 @@ export class XiangqiService {
     }
     if (result.ok) {
       this.history.push(signature(this.game));
+      this.adjudicate();
       this.save();
     }
     return { ...result, board: this.public() };
@@ -164,9 +165,30 @@ export class XiangqiService {
     auth.response = response;
     if (result.ok) {
       this.history.push(signature(this.game));
+      this.adjudicate();
       this.save();
     }
     return { ...response, board: this.public() };
+  }
+
+  /**
+   * 走完一手就裁决棋例：长将判负、其余三次重复判和、自然限着判和。
+   * 返回本次裁决结果（没触发就是 null）。
+   */
+  adjudicate() {
+    if (!this.game || this.game.status !== "playing") return null;
+    const repeat = adjudicateRepeat(this.game, this.history);
+    if (repeat) {
+      this.game.status = repeat.winner ? "won" : "drawn";
+      this.game.result = { winner: repeat.winner, reason: repeat.reason };
+      return this.game.result;
+    }
+    if (naturalLimit(this.game)) {
+      this.game.status = "drawn";
+      this.game.result = { winner: null, reason: "natural_limit" };
+      return this.game.result;
+    }
+    return null;
   }
 
   /** 用户认输 / 结束 */
