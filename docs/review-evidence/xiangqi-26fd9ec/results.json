@@ -1,0 +1,264 @@
+{
+  "baseline": "26fd9ec",
+  "scope": "isolated deterministic probes, not full browser or production gameplay",
+  "findings": {
+    "perpetualCheck": {
+      "moves": [
+        {
+          "side": "red",
+          "check": true,
+          "to": {
+            "row": 2,
+            "col": 5
+          }
+        },
+        {
+          "side": "black",
+          "check": false,
+          "to": {
+            "row": 0,
+            "col": 4
+          }
+        },
+        {
+          "side": "red",
+          "check": true,
+          "to": {
+            "row": 2,
+            "col": 4
+          }
+        },
+        {
+          "side": "black",
+          "check": false,
+          "to": {
+            "row": 0,
+            "col": 5
+          }
+        },
+        {
+          "side": "red",
+          "check": true,
+          "to": {
+            "row": 2,
+            "col": 5
+          }
+        },
+        {
+          "side": "black",
+          "check": false,
+          "to": {
+            "row": 0,
+            "col": 4
+          }
+        },
+        {
+          "side": "red",
+          "check": true,
+          "to": {
+            "row": 2,
+            "col": 4
+          }
+        },
+        {
+          "side": "black",
+          "check": false,
+          "to": {
+            "row": 0,
+            "col": 5
+          }
+        }
+      ],
+      "actual": {
+        "threefold": true,
+        "reason": "repetition",
+        "winner": null
+      },
+      "expected": "red loses for the repeated checks, rather than a draw"
+    },
+    "restart": {
+      "before": {
+        "status": "drawn",
+        "decisions": 4,
+        "history": 9
+      },
+      "after": {
+        "status": "playing",
+        "decisions": 0,
+        "history": 1
+      }
+    },
+    "waistSnapshot": {
+      "raw": {
+        "object_id": "rice_scoop",
+        "state": "worn",
+        "holder": null,
+        "position": [
+          0,
+          0.35,
+          0
+        ],
+        "quaternion": [
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "cleaned": {
+        "state": "held",
+        "holder": "right_hand"
+      },
+      "slots": {
+        "left_hand": null,
+        "right_hand": "rice_scoop",
+        "head": null
+      }
+    },
+    "promptGate": {
+      "noGame": false,
+      "playing": true,
+      "finished": true
+    },
+    "landing": {
+      "after240Frames": [
+        -4.6,
+        0.055498023256517606,
+        0.5750000000000002
+      ],
+      "expectedY": 0
+    },
+    "cancelSelection": {
+      "selected": null,
+      "targetY": 0.045
+    },
+    "bridge": {
+      "outcome": {
+        "ok": true,
+        "committed": true,
+        "revision": 2,
+        "captured": null,
+        "placeClip": "chess_capture_place"
+      },
+      "events": [
+        {
+          "type": "perform",
+          "clip": "chess_pickup",
+          "pickupDistance": 1.7278961195627467
+        },
+        {
+          "type": "summon_start",
+          "time": 0.4
+        },
+        {
+          "type": "grasp",
+          "time": 1.2
+        },
+        {
+          "type": "beginCarry",
+          "time": 1.2
+        },
+        {
+          "type": "animation_complete",
+          "clip": "chess_pickup",
+          "time": 1.8
+        },
+        {
+          "type": "carrying",
+          "on": true
+        },
+        {
+          "type": "perform",
+          "clip": "chess_capture_place"
+        },
+        {
+          "type": "release",
+          "time": 0.4
+        },
+        {
+          "type": "endCarry",
+          "time": 0.4,
+          "target": {
+            "row": 1,
+            "col": 0
+          }
+        },
+        {
+          "type": "capture_commit_gate",
+          "time": 1.1
+        },
+        {
+          "type": "land_confirmed",
+          "time": 1.5
+        },
+        {
+          "type": "animation_complete",
+          "clip": "chess_capture_place",
+          "time": 1.8
+        },
+        {
+          "type": "carrying",
+          "on": false
+        },
+        {
+          "type": "commit",
+          "time": 1.8
+        }
+      ]
+    },
+    "cancelledBridge": {
+      "outcome": {
+        "ok": false,
+        "reason": "CANCELLED"
+      },
+      "events": [
+        {
+          "type": "perform",
+          "clip": "chess_pickup",
+          "pickupDistance": 6.923916882805569
+        },
+        {
+          "type": "summon_start",
+          "time": 0.4
+        },
+        {
+          "type": "grasp",
+          "time": 1.2
+        },
+        {
+          "type": "beginCarry",
+          "time": 1.2
+        },
+        {
+          "type": "animation_complete",
+          "clip": "chess_pickup",
+          "time": 1.8
+        },
+        {
+          "type": "carrying",
+          "on": true
+        },
+        {
+          "type": "endCarry",
+          "time": 1.8,
+          "target": {
+            "row": 0,
+            "col": 0
+          }
+        },
+        {
+          "type": "carrying",
+          "on": false
+        }
+      ]
+    },
+    "staleGameAuthorization": {
+      "requestedGameId": "previous-unrelated-game",
+      "currentGameIdDifferent": true,
+      "issued": true
+    },
+    "parallelXiangqi": {
+      "accepted": true
+    }
+  }
+}
