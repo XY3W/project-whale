@@ -6,7 +6,7 @@ import path from 'node:path';
 import { createGame, move, signature, adjudicateRepeat } from '../server/xiangqi.mjs';
 import { XiangqiService } from '../server/xiangqi-service.mjs';
 import { xiangqiContext } from '../server/public-state.mjs';
-import { toolStartMessages } from '../server/llm.mjs';
+import { toolStartMessages, planningMessages, reviewMessages, filterXiangqiHistory } from '../server/llm.mjs';
 
 
 /** 一份完整的公开盘面（用于棋盘类回归） */
@@ -130,6 +130,69 @@ test('提示词：终局只留最小结果，不再带盘面和候选着法', ()
   assert.equal(ctx.xiangqi.result.reason, 'repetition');
   assert.equal(ctx.xiangqi.rows, undefined, '终局不该再带盘面');
   assert.equal(ctx.xiangqi.legalMoves, undefined, '终局不该再带旧候选');
+});
+
+test('棋谱：从开局到当前的已提交走子按顺序进入所有模型提示，恢复和终局正确', () => {
+  const file = tmp();
+  let svc = new XiangqiService(file);
+  svc.start({ userSide: 'red' });
+  assert.deepEqual(svc.promptView().moveHistory, []);
+  for (const [id, row, col] of [['red_soldier_1',5,0], ['black_soldier_1',4,0], ['red_soldier_1',4,0]]) {
+    assert.equal(move(svc.game, id, row, col).ok, true);
+  }
+  svc.save();
+  svc = new XiangqiService(file);
+  const history = svc.promptView().moveHistory;
+  assert.equal(history.length, 3);
+  assert.deepEqual(history.map(m => m.revision), [1,2,3]);
+  assert.deepEqual(history.map(m => m.side), ['red','black','red']);
+  assert.deepEqual(history[0].from, {row:6,col:0});
+  assert.deepEqual(history[2].to, {row:4,col:0});
+  assert.equal(history[2].captured, 'black_soldier_1');
+  assert.equal(svc.public().moveHistory, undefined, '普通客户端快照不携带完整棋谱');
+  const began = svc.beginMove({ pieceId:'black_soldier_2', toRow:4, toCol:2, expectedRevision:3 });
+  assert.equal(began.ok, true);
+  assert.equal(svc.promptView().moveHistory.length, 3, '未提交的动作不能进入棋谱');
+  const view = xiangqiContext(svc.promptView());
+  for (const render of [toolStartMessages, planningMessages, reviewMessages]) {
+    const messages = render({ xiangqi:view, skills:{index:[]} });
+    const user = messages.find(m => m.role === 'user').content;
+    assert.ok(user.includes('"moveHistory"'));
+    assert.ok(user.includes('"captured":"black_soldier_1"'));
+  }
+  svc.game.status = 'won'; svc.game.result = {winner:'red',reason:'checkmate'};
+  assert.equal(svc.promptView().moveHistory, undefined);
+  for (const render of [toolStartMessages, planningMessages, reviewMessages]) {
+    const messages = render({ xiangqi:xiangqiContext(svc.promptView()), skills:{index:[]} });
+    assert.ok(messages.every(m => !m.content.includes('moveHistory')), '终局不发送棋谱');
+  }
+  svc.start({userSide:'red', requestId:'new-game'});
+  assert.deepEqual(svc.promptView().moveHistory, [], '换局不能带上旧棋谱');
+});
+
+test('工具多轮：结束或换局后过滤之前注入的棋谱，不修改原始消息', () => {
+  const context = {xiangqi:{gameId:'old', status:'playing', moveHistory:[{pieceId:'red_soldier_1'}]}};
+  const messages = [
+    {role:'user', content:`REQUEST_CONTEXT_JSON:\n${JSON.stringify(context)}\n\n工具说明`},
+    {role:'tool', content:JSON.stringify({world:{xiangqi:{...context.xiangqi, moveHistory:[...context.xiangqi.moveHistory,{pieceId:'black_soldier_1'}]}}})},
+  ];
+  const live = filterXiangqiHistory(messages, 'old');
+  assert.ok(!live[0].content.includes('moveHistory'), '较旧快照不重复发送棋谱');
+  assert.ok(live[1].content.includes('red_soldier_1'), '保留最新快照的完整棋谱');
+  assert.ok(live[1].content.includes('black_soldier_1'), '包含刚提交的最新一步');
+  const newest = {...context.xiangqi, revision:3, moveHistory:[{pieceId:'red_soldier_1'},{pieceId:'black_soldier_1'},{pieceId:'red_soldier_2'}]};
+  const refreshed = filterXiangqiHistory(messages, 'old', newest);
+  assert.ok(refreshed[0].content.includes('red_soldier_2'), '每轮以当前权威棋谱刷新上下文');
+  assert.ok(!refreshed[1].content.includes('moveHistory'), '旧工具结果不重复发送');
+  assert.ok(filterXiangqiHistory(messages, null, null).every(m => !m.content.includes('moveHistory')));
+  assert.equal(filterXiangqiHistory([{role:'tool', content:'{"world":{"xiangqi":{"moveHistory":[...'}], null)[0].content,
+    '[过期棋局的压缩快照已移除]');
+  for (const id of [null, 'new-game']) {
+    const filtered = filterXiangqiHistory(messages, id);
+    assert.ok(filtered.every(m => !m.content.includes('moveHistory')));
+    assert.ok(filtered[0].content.endsWith('\n\n工具说明'));
+  }
+  assert.ok(messages[0].content.includes('red_soldier_1'));
 });
 
 test('盘面编码：红方大写、黑方小写，同一行能分清敌我', () => {

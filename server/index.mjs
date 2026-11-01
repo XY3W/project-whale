@@ -28,7 +28,7 @@ import { createSpeechTidy } from "./speech.mjs";
 import { SkillRegistry } from "./skills.mjs";
 import { createFailureLog, describeFailures } from "./failures.mjs";
 import { runScript } from "./sandbox.mjs";
-import { toolStartMessages } from "./llm.mjs";
+import { toolStartMessages, filterXiangqiHistory } from "./llm.mjs";
 import { PROTOCOL as LLM_PROTOCOL } from "./llm.mjs";
 import { toolDefinitions } from "./tools.mjs";
 import { BLACK as GOMOKU_BLACK, WHITE as GOMOKU_WHITE, STONE_TOLERANCE_M, cellCenter as gomokuCellCenter } from "./gomoku.mjs";
@@ -772,7 +772,7 @@ function modelContext(task, phase, extra = {}) {
       note: task.skillNote ?? null,
     },
     gomoku: gomokuContext(gomoku.public(), character, GOMOKU_BLACK),
-    xiangqi: xiangqiContext(xiangqi.public(), character, slotsOf(props), session.pendingXiangqi ?? null),
+    xiangqi: xiangqiContext(xiangqi.promptView(), character, slotsOf(props), session.pendingXiangqi ?? null),
     ...(selfPlay ? { history: [], historyOmitted: true } : contextBudget({ history: recent })),
     memory: selfPlay?[]:relevantMemory(store.state,task.ownerScope),
     ...extra,
@@ -1060,7 +1060,7 @@ function worldSnapshot() {
   return {
     board: boardContext(board, character),
     gomoku: gomokuContext(g, character, GOMOKU_BLACK),
-    xiangqi: xiangqiContext(xiangqi.public(), character, slotsOf(props), session.pendingXiangqi ?? null),
+    xiangqi: xiangqiContext(xiangqi.promptView(), character, slotsOf(props), session.pendingXiangqi ?? null),
     characterState: characterContext(character),
     props: propsContext(props),
     position: { x: Math.round(character.x * 1000) / 1000, z: Math.round(character.z * 1000) / 1000 },
@@ -1149,12 +1149,15 @@ async function runToolLoop(task, ws) {
         endTask("budget exceeded");
         return;
       }
-      const budget = estimateRequest({messages: [...task.messages, {role: "system", content: JSON.stringify(TOOLS)}], maxInputTokens: MAX_INPUT_TOKENS});
+      if (turn === MAX_TOOL_TURNS) task.messages.push({role:"user", content:"已达到动作次数上限，请根据最后结果结束并说明情况，不要再执行动作。"});
+      const liveChessId = xiangqi.status === 'playing' ? xiangqi.game?.gameId : null;
+      const currentChess = xiangqiContext(xiangqi.promptView(), character, slotsOf(props), session.pendingXiangqi ?? null);
+      const modelMessages = filterXiangqiHistory(task.messages, liveChessId, currentChess);
+      const budget = estimateRequest({messages: [...modelMessages, {role: "system", content: JSON.stringify(TOOLS)}], maxInputTokens: MAX_INPUT_TOKENS});
       if (!budget.ok) throw new ModelError("CONTEXT_TOO_LARGE", "请求超过输入预算", 0);
       if (task.origin === "event" && !claimAutoCall()) { endTask("autonomous call budget"); return; }
-      if (turn === MAX_TOOL_TURNS) task.messages.push({role:"user", content:"已达到动作次数上限，请根据最后结果结束并说明情况，不要再执行动作。"});
       send(ws, "reasoning_start", { taskId: task.id });
-      const out = await callModel(task.messages, task.abort?.signal, (text) => {
+      const out = await callModel(modelMessages, task.abort?.signal, (text) => {
         if (session.task === task && !task.abort?.signal.aborted) send(ws, "reasoning_delta", { taskId: task.id, text });
       }, { tools: TOOLS });
       noteLlmActivity();

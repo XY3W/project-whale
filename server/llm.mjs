@@ -120,8 +120,44 @@ const xiangqiLive = (view) => !!view && view.status === "playing";
 /** 终局后只留最小结果（谁赢、怎么结束、最后一手），不再给整套盘面与候选着法 */
 function slimXiangqi(view) {
   if (!view || view.status === "playing") return view;
-  const { rows, legalMoves, pieces, slots, currentCell, ...rest } = view;
+  const { rows, legalMoves, pieces, slots, currentCell, moveHistory, ...rest } = view;
   return rest;
+}
+
+/** 棋谱只保留最新快照的一份；结束或换局后不再发送旧棋谱。 */
+export function filterXiangqiHistory(messages, liveGameId, currentView) {
+  let retained = currentView?.status === 'playing' && Array.isArray(currentView.moveHistory);
+  const clean = (value) => {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { for (const child of value) clean(child); return; }
+    if (value.xiangqi && typeof value.xiangqi === 'object' && Array.isArray(value.xiangqi.moveHistory)) {
+      if (!liveGameId || value.xiangqi.gameId !== liveGameId || value.xiangqi.status !== 'playing' || retained)
+        delete value.xiangqi.moveHistory;
+      else retained = true;
+    }
+    for (const child of Object.values(value).reverse()) clean(child);
+  };
+  return messages.map((_, index) => messages[messages.length - 1 - index]).map(message => {
+    if (typeof message.content !== 'string') return message;
+    const isContext = message.role === 'user' && message.content.startsWith('REQUEST_CONTEXT_JSON:\n');
+    if (!isContext && message.role !== 'tool') return message;
+    const prefix = isContext ? 'REQUEST_CONTEXT_JSON:\n' : '';
+    const end = isContext ? message.content.indexOf('\n', prefix.length) : -1;
+    const raw = isContext ? message.content.slice(prefix.length, end < 0 ? undefined : end) : message.content;
+    try {
+      const value = JSON.parse(raw); clean(value);
+      // Refresh the initial context, so a later model call sees every move
+      // even if the game changed after this tool loop started.
+      if (isContext && currentView !== undefined) value.xiangqi = currentView ? slimXiangqi(currentView) : null;
+      return { ...message, content: prefix + JSON.stringify(value) + (isContext && end >= 0 ? message.content.slice(end) : '') };
+    } catch {
+      // A compacted tool result can be truncated JSON. Do not leak a partial
+      // stale chess record into a subsequent request after the game ends.
+      if (message.role === 'tool' && message.content.includes('"moveHistory"'))
+        return { ...message, content: '[过期棋局的压缩快照已移除]' };
+      return message;
+    }
+  }).reverse();
 }
 
 function contextBlock(ctx) {

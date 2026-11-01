@@ -89,6 +89,7 @@ for (const protocol of ['json', 'tools']) test(`${protocol}: every legal user ch
   await until(() => f.requests.some(req => requestContext(req).xiangqi?.revision === 1));
   const turn = f.requests.find(req => requestContext(req).xiangqi?.revision === 1);
   assert.equal(requestContext(turn).xiangqi.yourTurn, true);
+  assert.deepEqual(requestContext(turn).xiangqi.moveHistory.map(m => m.pieceId), ['red_soldier_1']);
   assert.match(JSON.stringify(turn.messages), /当前权威棋盘已经轮到你/);
   c.send('xiangqi_move', payload); await sleep(600);
   assert.equal(f.requests.length, 2, 'Exactly one new thinking request for this legal move');
@@ -106,6 +107,8 @@ for (const protocol of ['json', 'tools']) test(`${protocol}: every legal user ch
   c.send('xiangqi_move', { gameId: start.board.gameId, pieceId: 'red_soldier_2', toRow: 5, toCol: 2,
     expectedRevision: 2, moveId: 'user-move-2', leaseEpoch: c.epoch });
   await until(() => f.requests.some(req => requestContext(req).xiangqi?.revision === 3));
+  const history = requestContext(f.requests.find(req => requestContext(req).xiangqi?.revision === 3)).xiangqi.moveHistory;
+  assert.deepEqual(history.map(m => m.pieceId), ['red_soldier_1', 'black_soldier_1', 'red_soldier_2']);
   assert.equal(f.requests.filter(req => requestContext(req).xiangqi?.revision === 3).length, 1, 'The next legal move must wake exactly one new turn');
   assert(!f.logs.includes('[autoplay] tick'), 'Chess must not be replaced by autonomous minesweeper');
   const stored = JSON.parse(fs.readFileSync(path.join(f.dir, 'data/brain-state.json')));
@@ -115,6 +118,7 @@ test('A restored game waiting for the character wakes once on executor hello; re
   const f = await fixture(t, { restored: true }); const c = await f.connect();
   await until(() => f.requests.length === 1);
   assert.equal(requestContext(f.requests[0]).xiangqi.revision, 1);
+  assert.equal(requestContext(f.requests[0]).xiangqi.moveHistory[0].pieceId, 'red_soldier_1');
   assert.equal(requestContext(f.requests[0]).xiangqi.yourTurn, true);
   c.send('hello'); c.send('hello'); const observer = await f.connect(); observer.send('hello');
   await sleep(600); assert.equal(f.requests.length, 1);
