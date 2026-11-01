@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { fitShadowBounds } from "./shadowBounds";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { configureCameraInput } from "./cameraInput";
@@ -24,6 +25,8 @@ export class Stage {
   readonly groundTop!: THREE.Mesh;
   /** 地板原本的装饰网格贴图，棋盘关掉时要还原 */
   readonly groundMap!: THREE.Texture;
+  /** 主光：阴影范围要跟着场地尺寸重算，否则放大的场角会没有影子 */
+  private keyLight!: THREE.DirectionalLight;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -82,11 +85,14 @@ export class Stage {
     this.scene.add(hemi);
 
     const key = new THREE.DirectionalLight(0xfff0e2, 2.2);
-    key.position.set(3.8, 2.2, 1.9);
+    // 把灯拉远（方向不变）：阴影相机架在灯的位置上，灯太近时场地远端会落到
+    // 近平面前面，那块地方就没有影子。3 倍距离后整个场地都在近平面之后。
+    const keyTarget = new THREE.Vector3(0, 0.65, 0);
+    key.position.copy(keyTarget).add(new THREE.Vector3(3.8, 1.55, 1.9).multiplyScalar(3));
     key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048);
     key.shadow.camera.near = 0.5;
-    // 覆盖整个 6x6 场地：之前只框住角色，走到边上就没有影子
+    // 阴影相机范围由 fitShadowBounds 按场地尺寸算，见 applyShadowBounds()
     key.shadow.camera.far = 14;
     key.shadow.camera.left = -4.2;
     key.shadow.camera.right = 4.2;
@@ -96,8 +102,10 @@ export class Stage {
     key.shadow.bias = -0.0004;
     key.shadow.normalBias = 0.022;
     key.shadow.radius = 3;
-    key.target.position.set(0, 0.65, 0);
+    key.target.position.copy(keyTarget);
     this.scene.add(key, key.target);
+    this.keyLight = key;
+    this.applyShadowBounds();
 
     const rim = new THREE.DirectionalLight(0x8ab4ff, 1.6);
     rim.position.set(-2.4, 1.9, -2.7);
@@ -186,7 +194,30 @@ export class Stage {
         mesh.geometry = new THREE.PlaneGeometry(size, size);
       }
     }
+    this.applyShadowBounds();
     this.setRoomCamera();
+  }
+
+  /**
+   * 按当前场地尺寸重算主光阴影相机：把场地四角投到灯光视图空间反算正交范围。
+   * 场地放大到 11.5m 后仍然是全覆盖，不会出现"某个角落没有影子"。
+   */
+  private applyShadowBounds() {
+    if (!this.keyLight) return;
+    const fit = fitShadowBounds({
+      lightPosition: [this.keyLight.position.x, this.keyLight.position.y, this.keyLight.position.z],
+      target: [this.keyLight.target.position.x, this.keyLight.target.position.y, this.keyLight.target.position.z],
+      roomHalf: this.roomHalf,
+    });
+    const camera = this.keyLight.shadow.camera;
+    camera.left = -fit.extent;
+    camera.right = fit.extent;
+    camera.top = fit.extent;
+    camera.bottom = -fit.extent;
+    camera.near = fit.near;
+    camera.far = fit.far;
+    camera.updateProjectionMatrix();
+    this.keyLight.shadow.needsUpdate = true;
   }
 
   /** 还原默认 8m 场地 */
