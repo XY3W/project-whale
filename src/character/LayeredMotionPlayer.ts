@@ -296,7 +296,7 @@ export class LayeredMotionPlayer {
     if (this.soloAction) this.stopSolo();
     if (!Number.isFinite(meters) || this.moveKind) return false;
     const n = Math.round((meters - 0.144) / 0.32);
-    if (n < 1 || n > 11) return false;
+    if (n < 1 || n > 64) return false;
     if (Math.abs(0.144 + 0.32 * n - meters) > 1e-6) return false;
     this.moveKind = 'run';
     this.halted = false;

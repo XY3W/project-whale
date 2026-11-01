@@ -32,13 +32,13 @@ function stepSchema(cap) {
   const required = ["action"];
   for (const [name, param] of Object.entries(cap.params ?? {})) {
     properties[name] = paramSchema(param);
-    required.push(name);
+    if (!param.optional) required.push(name);
   }
   return { type: "object", properties, required, additionalProperties: false };
 }
 
 export function capabilityStepSchemas() {
-  return CAPABILITIES.map(stepSchema);
+  return CAPABILITIES.filter(cap => cap.enabled && !cap.legacy).map(stepSchema);
 }
 
 /** 一步动作的联合（run_plan.steps 的元素） */

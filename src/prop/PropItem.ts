@@ -184,6 +184,19 @@ export class PropItem {
 
   private bump() { this.revision++; }
 
+  /** 拾取范围由调用方校验；瞬时挂手不依赖落地朝向或拾取动画。 */
+  pickupInstant(): boolean {
+    if (this.state !== 'resting' || this.actionId || !this.bone) return false;
+    this.physics.stop();
+    this.state = 'held';
+    this.mode = 'hand';
+    this.grip = 'inward';
+    this.setMorph(0);
+    this.followBone(this.bone, this.attach);
+    this.settled();
+    return true;
+  }
+
   /** 状态发生实质性变化（落地/扶正完成）时通知宿主立刻上报，别被上报节流吞掉 */
   private settled() {
     this.bump();

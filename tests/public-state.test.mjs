@@ -71,6 +71,8 @@ test("模型上下文：物品只给公开字段和可用动作", () => {
   const ctx = propsContext(props);
   assert.equal(ctx.slots.right_hand, "rice_scoop");
   const s = ctx.objects.find((o) => o.object_id === "rice_scoop");
+  assert.equal(s.pickup_range_m, 0.8);
+  assert.equal(s.position3d.length, 3);
   assert.ok(s.actions.includes("pickup"));
   assert.ok(!s.actions.includes("wear"), "饭勺不能佩戴");
   assert.ok(!("quaternion" in s), "不把内部姿态塞进提示词");

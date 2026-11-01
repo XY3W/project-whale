@@ -22,9 +22,9 @@ export function planWalkLegs(distance: number, { allowRun = true } = {}): Leg[] 
   let rest = Math.max(0, distance);
   if (allowRun && distance >= RUN_APPROACH_THRESHOLD) {
     while (rest >= RUN_LADDER[0] - 1e-9) {
-      const fits = RUN_LADDER.filter((d) => d <= rest + 1e-9);
-      if (!fits.length) break;
-      const meters = fits[fits.length - 1];
+      const cycles = Math.min(64, Math.floor((rest - 0.144 + 1e-9) / 0.32));
+      if (cycles < 1) break;
+      const meters = Math.round((0.144 + 0.32 * cycles) * 1000) / 1000;
       legs.push({ kind: "run", meters });
       rest -= meters;
     }

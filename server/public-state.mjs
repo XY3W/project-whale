@@ -7,6 +7,7 @@
  */
 import {digAim} from "../shared/dig-aim.mjs";
 import { OBJECTS } from "./capabilities.mjs";
+import { PICKUP_RANGE_M } from "../shared/pickup-range.mjs";
 import { DIG_TOLERANCE_M, SIZE, cellAt, cellCenter } from "./minesweeper.mjs";
 import { BLACK, GOMOKU_CELL_M, GOMOKU_SIZE, WIN_LENGTH } from "./gomoku.mjs";
 
@@ -89,11 +90,13 @@ export function propsContext(props, slots = slotsOf(props)) {
       holder: prop.holder,
       grip:prop.grip??null,
       position: [round3(prop.position[0]), round3(prop.position[2])],
+      position3d: prop.position.map(round3),
+      pickup_range_m: PICKUP_RANGE_M,
       upright: prop.upright,
       ...(prop.pickupStand ? { pickupStand: prop.pickupStand } : {}),
       ...(prop.variant ? { pickupVariant: prop.variant } : {}),
       availability:{
-        pickup:{enabled:prop.state==='resting',reason:prop.state==='resting'?'requires_nearby_alignment':'not_on_ground'},
+        pickup:{enabled:prop.state==='resting',reason:prop.state==='resting'?'requires_pickup_range_and_free_hand':'not_on_ground'},
         throw:{enabled:prop.state==='held'&&(prop.object_id!=='basin'||prop.grip!=='outward'),reason:prop.state!=='held'?'not_held':prop.grip==='outward'?'requires_explicit_inward_grip':null},
         ...(prop.object_id==='basin'?{
           set_basin_grip:{enabled:prop.state==='held',reason:prop.state==='held'?null:'requires_left_hand'},

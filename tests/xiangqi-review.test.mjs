@@ -289,6 +289,7 @@ test('落子：到等待点先暂停，提交回执回来后才继续下降收�
     };
     const loco = {
       async turn() {}, async walk() {}, async adjust() {},
+      async walkTo(x, z, tolerance) { events.push({ type: 'move_to', x, z, tolerance }); return { ok: true }; },
     };
     const player = {
       paused: false, cancelled: false,
@@ -321,12 +322,12 @@ test('落子：到等待点先暂停，提交回执回来后才继续下降收�
     const waitForRevision = async () => false;
     const factory = new Function(
       'loco', 'root', 'degYaw', 'signedDeltaDeg', 'xiangqiBoard', 'player', 'xqPoint', 'placementFor',
-      'client', 'xiangqiView', 'xiangqiTokenRef', 'waitForRevision', 'planWalkLegs', bridgeJs + '\nreturn loco.xiangqiMove;',
+      'client', 'xiangqiView', 'xiangqiTokenRef', 'waitForRevision', 'planWalkLegs', 'PICKUP_RANGE_M', bridgeJs + '\nreturn loco.xiangqiMove;',
     );
     const move = factory(loco, root, () => 0, (a, b) => ((b - a + 540) % 360) - 180, board, player, (r, c) => ({ x: c, z: r }), () => ({
       clip: 'chess_place', victim: null,
       events: [{ time: 0.4, type: 'release' }, { time: 1.2, type: 'placement_gate' }, { time: 1.3, type: 'land_confirmed' }],
-    }), client, view, 'tok', waitForRevision, meters => [{ kind: 'walk', meters }]);
+    }), client, view, 'tok', waitForRevision, meters => [{ kind: 'walk', meters }], 0.8);
     const outcome = await move(
       { game_id: 'g1', piece_id: piece.id, to_row: 1, to_col: 0, expected_revision: 1 },
       { token: 'tok', isCancelled: () => cancelled },
@@ -335,6 +336,8 @@ test('落子：到等待点先暂停，提交回执回来后才继续下降收�
   };
 
   const ok = await runBridge({ capture: true });
+  assert.ok(ok.events.some(e => e.type === 'beginCarry'), '拾取时直接挂到角色');
+  assert.ok(!ok.events.some(e => e.type === 'perform' && e.clip === 'chess_pickup'), '不播放拾取动画');
   const commitAt = ok.events.findIndex((e) => e.type === 'commit');
   const completeAt = ok.events.findIndex((e) => e.type === 'animation_complete' && e.clip === 'chess_place');
   const pauseAt = ok.events.findIndex((e) => e.type === 'pause');

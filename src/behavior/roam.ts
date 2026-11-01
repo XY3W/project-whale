@@ -15,7 +15,7 @@ export interface RoamInput {
 const EDGE_ZERO = 0.5; // 距边缘该距离内权重为 0
 const EDGE_FULL = 2.0; // 距边缘该距离以上权重为 1
 const WALK_CLEARANCE = 0.25; // 走完后与边缘保留的余量
-const DISTANCES = [0.27, 0.45, 0.63];
+const DISTANCES = [0.8, 1.12, 1.44];
 
 /** 从当前位置沿 heading 前进，到场地边界的距离（米） */
 export function freeDistance(x: number, z: number, heading: number, half: number): number {

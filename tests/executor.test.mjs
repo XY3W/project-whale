@@ -303,6 +303,7 @@ function makeBasinLoco() {
     reset: () => calls.push("reset"),
     snapshot: () => ({ ...view }),
     alignment: () => alignment,
+    pickupInstant: () => { calls.push("pickup_instant"); view.state = "held"; view.holder = "hand"; view.available = false; view.revision++; return { ok: true }; },
     align: async () => {
       calls.push("align");
       pos.x = 0.2;
@@ -329,14 +330,13 @@ function makeBasinLoco() {
   return { loco, view, calls, setAlignment: (a) => { alignment = a; } };
 }
 
-test("钢盆：未对准时 pickup 失败且不播放动画", async () => {
+test("钢盆：无需朝向对齐，可直接拾取", async () => {
   const { loco, calls, setAlignment } = makeBasinLoco();
-  setAlignment({ distanceError: 0.15, yawErrorDeg: 0.2, ok: false });
+  setAlignment({ distanceError: 0.15, yawErrorDeg: 60, ok: false });
   const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   const result = await ex.run({ steps: [{ action: "pickup", object_id: "basin" }] });
-  assert.equal(result.status, "failed");
-  assert.equal(result.steps[0].reasonCode, "NOT_ALIGNED");
-  assert.ok(!calls.includes("pickup_basin"), "没对准就不能播拾取动画");
+  assert.equal(result.status, "completed");
+  assert.deepEqual(calls, ["pickup_instant"]);
 });
 
 test("钢盆：walk_to_basin → pickup → wear → unwear → throw 全链路", async () => {
@@ -352,7 +352,7 @@ test("钢盆：walk_to_basin → pickup → wear → unwear → throw 全链路"
     ],
   });
   assert.equal(result.status, "completed");
-  assert.deepEqual(calls, ["align", "pickup_basin", "wear_basin", "unwear_basin", "throw_basin"]);
+  assert.deepEqual(calls, ["align", "pickup_instant", "wear_basin", "unwear_basin", "throw_basin"]);
   assert.equal(result.steps[4].actual.basin.state, "flying");
   assert.equal(view.state, "flying");
 });
@@ -388,29 +388,24 @@ test("钢盆：parallel 里不允许放物品动作", async () => {
   assert.equal(result.status, "failed");
 });
 
-test("钢盆：侧躺时先扶正再拾取，证据里带挪动量", async () => {
+test("钢盆：侧躺时无需扶正，直接拾取", async () => {
   const { loco, calls, view } = makeBasinLoco();
   view.upright = false;
   const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   const result = await ex.run({ steps: [{ action: "pickup", object_id: "basin" }] });
   assert.equal(result.status, "completed");
-  assert.deepEqual(calls, ["upright", "pickup_basin"]);
-  assert.equal(result.steps[0].actual.upright.moved, 0.12);
-  assert.equal(result.steps[0].actual.basin.state, "held");
+  assert.deepEqual(calls, ["pickup_instant"]);
+  assert.equal(view.state, "held");
 });
 
-test("钢盆：扶正失败（挪动过远）就不播拾取动画", async () => {
-  const { loco, calls, view } = makeBasinLoco();
-  view.upright = false;
-  loco.basin.upright = async () => {
-    calls.push("upright");
-    return { ok: false, moved: 0.8, rotatedDeg: 120 };
-  };
+test("拾取超出范围时明确失败", async () => {
+  const { loco, view } = makeBasinLoco();
+  loco.basin.pickupInstant = () => ({ok:false, reason:"OUT_OF_RANGE", distance_m:1, range_m:.8});
   const ex = new ActionExecutor(loco, { half: 4, margin: 0.3 });
   const result = await ex.run({ steps: [{ action: "pickup", object_id: "basin" }] });
   assert.equal(result.status, "failed");
-  assert.equal(result.steps[0].reasonCode, "NOT_ALIGNED");
-  assert.deepEqual(calls, ["upright"]);
+  assert.equal(result.steps[0].actual.reason, "OUT_OF_RANGE");
+  assert.equal(view.state, "resting");
 });
 
 test("钢盆：walk_to_basin 不再要求盆已经正放", async () => {
@@ -552,4 +547,12 @@ test("stow_scoop 没有勺子时报 PRECONDITION_FAILED，不会假装成功", a
   assert.equal(r.steps[0].status, "failed");
   assert.equal(r.steps[0].reasonCode, "PRECONDITION_FAILED");
   assert.equal(r.steps[0].actual.detail.error, "NO_SCOOP");
+});
+
+test("move_to 坐标与可选朝向传入宿主", async () => {
+ const {loco}=makeMoveLoco(); let args;
+ loco.walkTo=async (...a)=>{args=a;return {ok:true,position:{x:a[0],z:a[1]}};};
+ const ex=new ActionExecutor(loco,{half:4,margin:.3});
+ const r=await ex.run({steps:[{action:"move_to",x:1,y:0,z:2,facing_deg:90}]});
+ assert.deepEqual(args,[1,2,.1,90]);assert.equal(r.status,"completed");
 });

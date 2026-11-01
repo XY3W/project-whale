@@ -5,14 +5,15 @@ import { createEventDeduper } from "../server/events.mjs";
 
 test("注册表：enabled 清单与 disabled 落盘一致", () => {
   const ids = describeCapabilities().map((c) => c.id);
-  assert.ok(ids.includes("walk"));
+  assert.ok(ids.includes("move_to"));
+  assert.ok(!ids.includes("walk"));
   assert.ok(ids.includes("pickup"));
   assert.ok(ids.includes("throw"));
-  assert.ok(ids.includes("walk_to_basin"));
-  assert.ok(ids.includes("run"));
+  assert.ok(!ids.includes("walk_to_basin"));
+  assert.ok(!ids.includes("run"));
   assert.ok(ids.includes("dig"));
   assert.ok(!ids.includes("sit"));
-  assert.equal(CAPABILITY_VERSION, "cap-playful-v2-count32");
+  assert.equal(CAPABILITY_VERSION, "cap-coordinate-movement-v1");
 });
 
 test("距离：0.45 通过，0.5/0.449/字符串拒绝", () => {
@@ -90,11 +91,17 @@ test("事件去重：同 eventId 只发一次，revision 变化可再发", () =>
 
 test("输出契约由注册表生成，不含禁用能力", () => {
   const c = outputContract();
-  assert.ok(c.includes("0.09"));
-  assert.ok(c.includes('"action":"walk"'));
+  assert.ok(c.includes("move_to"));
+  assert.ok(!c.includes('"action":"walk"'));
   assert.ok(c.includes('"action":"pickup"'));
-  assert.ok(c.includes("walk_to_basin"));
-  assert.ok(c.includes('"action":"run"'));
+  assert.ok(!c.includes("walk_to_basin"));
+  assert.ok(!c.includes('"action":"run"'));
   assert.ok(c.includes('"action":"dig"'));
   assert.ok(c.includes("finish_task"));
+});
+
+test("move_to 只接受地面世界坐标和可选朝向", () => {
+  assert.deepEqual(validateStep({ action:"move_to",x:1,y:0,z:-1,facing_deg:90 }), {action:"move_to",x:1,y:0,z:-1,facing_deg:90});
+  assert.throws(() => validateStep({action:"move_to",x:1,y:1,z:1}), /坐标无效/);
+  assert.throws(() => validateStep({action:"move_to",x:1,y:0,z:1,facing_deg:181}), /facing_deg/);
 });

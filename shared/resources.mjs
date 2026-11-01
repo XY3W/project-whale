@@ -1,6 +1,6 @@
 export function resources(step) {
   switch(step.action){
-    case 'turn':case 'walk':case 'run':case 'walk_adjust':return ['body_locomotion'];
+    case 'turn':case 'walk':case 'run':case 'walk_adjust':case 'walk_to':case 'move_to':return ['body_locomotion'];
     case 'play':return ['left_arm','right_arm'];
     case 'tail':return ['tail'];case 'wait':return [];
     case 'set_basin_grip':return ['body_locomotion','left_arm','item:basin'];

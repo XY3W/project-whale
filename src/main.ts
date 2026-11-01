@@ -21,6 +21,7 @@ import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
 import { PropItem } from "./prop/PropItem";
+import { PICKUP_RANGE_M, pickupRange } from "./prop/pickupRange";
 import { loadBasinAssets } from "./prop/catalog";
 import { planApproach, signedDeltaDeg } from "./prop/align";
 import type { BasinBridge, BasinView, DigBridge, DigOutcome, GameView, GomokuView, XiangqiView } from "./behavior/protocol.ts";
@@ -287,8 +288,8 @@ async function boot() {
       waist_slot: scoop.mode === "waist" ? "rice_scoop" : null,
     },
     objects: [
-      { ...basin.snapshot(), ...(basin.state === "resting" ? { approachCandidates: approachHint() } : {}) },
-      { ...scoop.snapshot(), ...(scoop.state === "resting" ? { pickupStand: variantStand("rice_scoop") } : {}) },
+      { ...basin.snapshot(), pickup_range_m: PICKUP_RANGE_M },
+      { ...scoop.snapshot(), pickup_range_m: PICKUP_RANGE_M },
     ],
   });
 
@@ -568,15 +569,18 @@ async function boot() {
      * 到指定世界坐标：宿主算转向与步数（远处跑、近处走/微调），模型只给目标点。
      * 落点不止五子棋——任何“先站到某个位置”的需求都能用。
      */
-    walkTo: async (x, z, toleranceM = 0.1) => {
+    walkTo: async (x, z, toleranceM = 0.1, facingDeg) => {
       const epoch = bridgeEpoch;
       const checkCancelled = () => { if (epoch !== bridgeEpoch) throw new Error("CANCELLED"); };
       const from = { x: root.position.x, z: root.position.z };
+      const half = walkableHalfOf(stage.roomHalf);
+      if (Math.abs(x) > half || Math.abs(z) > half) return { ok: false, error: 'BLOCKED', position: from };
       const dx = x - from.x;
       const dz = z - from.z;
       const distance = Math.hypot(dx, dz);
       const tolerance = Math.max(0.02, Math.min(0.5, toleranceM));
       if (distance <= tolerance) {
+        if (facingDeg !== undefined) { await loco.turn!(signedDeltaDeg(degYaw(), facingDeg)); checkCancelled(); }
         return { ok: true, distance_m: +distance.toFixed(3), position: { x: +from.x.toFixed(3), z: +from.z.toFixed(3) }, moved: 0 };
       }
       // atan2 返回弧度，turn 用度：这里必须换算，否则只会转一点点
@@ -584,7 +588,7 @@ async function boot() {
       await loco.turn!(signedDeltaDeg(degYaw(), targetDeg));
       checkCancelled();
       // 目标距离取容差的一半：步长是 0.18/0.02 的量化档位，留足余量才不会“差一点”判失败
-      let rest = Math.max(0, distance - tolerance * 0.5);
+      let rest = distance;
       let moved = 0;
       // 远距离先跑；抱棋时由专用下肢跑动 + 双手托棋层保持姿势。
       for (const leg of planWalkLegs(rest)) {
@@ -611,7 +615,7 @@ async function boot() {
       }
       const after = { x: root.position.x, z: root.position.z };
       const remaining = Math.hypot(x - after.x, z - after.z);
-      if (remaining > tolerance + 0.02) {
+      if (remaining > tolerance + 1e-6) {
         return {
           ok: false,
           error: "NOT_ALIGNED",
@@ -622,6 +626,7 @@ async function boot() {
           hint: `还差 ${remaining.toFixed(2)}m（需要 ≤${tolerance}m），可能被边界挡住或距离档位不够，换个方向或换个目标点`,
         };
       }
+      if (facingDeg !== undefined) { await loco.turn!(signedDeltaDeg(degYaw(), facingDeg)); checkCancelled(); }
       return {
         ok: true,
         distance_m: +remaining.toFixed(3),
@@ -778,30 +783,6 @@ async function boot() {
     };
   };
 
-  // 给模型的站位建议：站位点由“参考半径 + 精确步行距离”两个圆求交得到
-  const approachHint = () => {
-    const plan = planApproach({
-      character: { x: root.position.x, z: root.position.z },
-      basin: { x: basin.position.x, z: basin.position.z },
-      yawDeg: degYaw(),
-      reference: { x: basinReference.position[0], z: basinReference.position[2] },
-      half: walkableHalfOf(stage.roomHalf),
-      margin: 0.12,
-    });
-    if ("error" in plan) return { error: plan.error, reach: round3(plan.reach) };
-    return {
-      reach: round3(plan.reach),
-      recommended: {
-        turn_deg: round3(plan.turn1Deg),
-        walk_m: plan.distanceM,
-        ...(plan.adjustM && plan.adjustM > 0.005 ? { adjust_m: round3(plan.adjustM) } : {}),
-        final_turn_deg: round3(plan.turn2Deg),
-        stand: { x: round3(plan.stand.x), z: round3(plan.stand.z) },
-        final_yaw_deg: round3(plan.finalYawDeg),
-      },
-    };
-  };
-
   const audio=new PropAudio();
   const controls=mountControls(client,audio);
   onPropImpact(event=>audio.play('collision',event.id,Math.min(1,event.normalSpeed*.32)));
@@ -819,6 +800,19 @@ async function boot() {
     items: () => [...items.values()].map((item) => item.snapshot() as unknown as BasinView),
     snapshot: (objectId) => (itemOf(objectId)?.snapshot() as unknown as BasinView) ?? null,
     alignment: (objectId) => alignInfo(objectId),
+    pickupInstant: (objectId) => {
+      const item = itemOf(objectId);
+      if (!item) return { ok: false, reason: 'OBJECT_NOT_FOUND' };
+      const { ok: inRange, distance_m, range_m } = pickupRange(root.getWorldPosition(new THREE.Vector3()), item.position);
+      if (!inRange) return { ok: false, reason: 'OUT_OF_RANGE', distance_m, range_m };
+      if (player.moving || phase !== 'idle' || player.performing || player.carrying)
+        return { ok: false, reason: 'BODY_BUSY', distance_m, range_m };
+      if ([...items.values()].some(other => other !== item && other.state === 'held' && other.bindings.slot === item.bindings.slot))
+        return { ok: false, reason: 'HAND_OCCUPIED', distance_m, range_m };
+      const ok = item.pickupInstant();
+      if (ok) updateBasinHold();
+      return { ok, ...(!ok ? { reason: 'OBJECT_UNAVAILABLE' } : {}), distance_m, range_m };
+    },
     upright: async (objectId) => {
       const epoch=bridgeEpoch;
       const item = itemOf(objectId);
@@ -1138,41 +1132,26 @@ async function boot() {
     const to = xqPoint(step.to_row, step.to_col);
     const bearing = (a: { x: number; z: number }, b: { x: number; z: number }) => (Math.atan2(b.x - a.x, b.z - a.z) * 180) / Math.PI;
     // 空手接近和抱棋搬运都允许跑；近距离与最终残差仍走路/微调。
-    const walkToPoint = async (x: number, z: number, allowRun = false) => {
+    const walkToPoint = async (x: number, z: number) => {
       if (aborted()) return false;
-      await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
-      if (aborted()) return false;
-      const distance = Math.hypot(x - root.position.x, z - root.position.z);
-      for (const leg of planWalkLegs(distance, { allowRun })) {
-        if (aborted()) return false;
-        if (leg.kind === "run") {
-          if (loco.run) await loco.run(leg.meters);
-          else await loco.walk!(leg.meters);
-        } else if (leg.kind === "walk") {
-          await loco.walk!(leg.meters);
-        } else if (loco.adjust) {
-          await loco.adjust(leg.meters);
-        }
-      }
-      if (aborted()) return false;
-      await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, { x, z })));
-      return !aborted();
+      const result = await loco.walkTo!(x, z, 0.02);
+      return result.ok && !aborted();
     };
-    // 站位：从棋子朝角色方向退 0.85m
+    // 在拾取范围内站定，棋子直接挂到双手。
     const dx = root.position.x - from.x;
     const dz = root.position.z - from.z;
     const dist = Math.hypot(dx, dz) || 1;
-    const stand = { x: from.x + (dx / dist) * 0.85, z: from.z + (dz / dist) * 0.85 };
-    if (!(await walkToPoint(stand.x, stand.z, true))) return { ok: false, reason: "CANCELLED" };
+    const stand = { x: from.x + (dx / dist) * 0.75, z: from.z + (dz / dist) * 0.75 };
+    if (!(await walkToPoint(stand.x, stand.z))) return { ok: false, reason: aborted() ? "CANCELLED" : "BLOCKED" };
     await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, from)));
     if (aborted()) return { ok: false, reason: "CANCELLED" };
     let carried = false;
     let released = false;
     try {
-      const picked = await player.perform("chess_pickup", [{ time: 0.4, type: "summon_start" }, { time: 1.2, type: "grasp" }], (type) => {
-        if (type === "grasp") { xiangqiBoard.beginCarry(piece.id, root); carried = true; }
-      });
-      if (!picked) return { ok: false, reason: aborted() ? "CANCELLED" : "PICKUP_FAILED" };
+      if (Math.hypot(root.position.x - from.x, root.position.z - from.z) > PICKUP_RANGE_M)
+        return { ok: false, reason: "OUT_OF_RANGE" };
+      if (!xiangqiBoard.beginCarry(piece.id, root)) return { ok: false, reason: "PICKUP_FAILED" };
+      carried = true;
       if (aborted()) return { ok: false, reason: "CANCELLED" };
       // 双手姿态与行走独立；缺少姿态时回滚棋子，不能假装抱起成功。
       if (!player.setCarrying(true)) return { ok: false, reason: "CARRY_POSE_UNAVAILABLE" };
@@ -1181,7 +1160,7 @@ async function boot() {
       const dz2 = root.position.z - to.z;
       const d2 = Math.hypot(dx2, dz2) || 1;
       const stand2 = { x: to.x + (dx2 / d2) * 0.85, z: to.z + (dz2 / d2) * 0.85 };
-      if (!(await walkToPoint(stand2.x, stand2.z, true))) return { ok: false, reason: "CANCELLED" };
+      if (!(await walkToPoint(stand2.x, stand2.z))) return { ok: false, reason: aborted() ? "CANCELLED" : "BLOCKED" };
       await loco.turn!(signedDeltaDeg(degYaw(), bearing({ x: root.position.x, z: root.position.z }, to)));
       if (aborted()) return { ok: false, reason: "CANCELLED" };
       // 吃子和普通落子是两段交付动作：目标格上有敌子就用 chess_capture_place
@@ -1663,12 +1642,9 @@ async function boot() {
         });
         if (plan) {
           roamBusy = true;
-          void runOwned("roaming", {
-            steps: [
-              { action: "turn", angle_deg: Math.round(plan.angleDeg) },
-              { action: "walk", distance_m: plan.distance },
-            ],
-          }).finally(() => { roamBusy = false; });
+          const heading = root.rotation.y + plan.angleDeg * Math.PI / 180;
+          void runOwned("roaming", { steps: [{ action: "move_to", x: root.position.x + Math.sin(heading) * plan.distance,
+            y: 0, z: root.position.z + Math.cos(heading) * plan.distance }] }).finally(() => { roamBusy = false; });
         }
       }
     } else {

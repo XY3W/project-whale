@@ -53,6 +53,7 @@ export type Step =
   | { action: "wait"; duration_s: number }
   | { action: "walk_to_basin" }
   | { action: "walk_to"; x: number; z: number; tolerance_m: number }
+  | { action: "move_to"; x: number; y: number; z: number; facing_deg?: number }
   | { action: "pickup"; object_id: string }
   | { action: "wear"; object_id: string }
   | { action: "unwear"; object_id: string }
@@ -98,7 +99,7 @@ export interface Locomotion {
   /** 可选：从右腰取回饭勺（unstow_scoop，素材 hand_attach@0.5s） */
   unstowScoop?(): Promise<{ ok: boolean; slot?: string; reason?: string; [k: string]: unknown }>;
   /** 可选：走到指定世界坐标（宿主算转向与步数） */
-  walkTo?(x: number, z: number, toleranceM: number): Promise<{ ok: boolean; distance_m?: number; position?: { x: number; z: number }; error?: string; [k: string]: unknown }>;
+  walkTo?(x: number, z: number, toleranceM: number, facingDeg?: number): Promise<{ ok: boolean; distance_m?: number; position?: { x: number; z: number }; error?: string; [k: string]: unknown }>;
 }
 
 export interface BasinView {
@@ -140,6 +141,7 @@ export interface BasinBridge {
   items(): BasinView[];
   snapshot(objectId: string): BasinView | null;
   alignment(objectId: string): BasinAlignment;
+  pickupInstant(objectId: string): { ok: boolean; reason?: string; distance_m?: number; range_m?: number };
   /** 把静止但姿态不支持的物品摆正；返回实际挪动量 */
   upright(objectId: string): Promise<UprightReport>;
   /** 把指定物品放回场地中心 */

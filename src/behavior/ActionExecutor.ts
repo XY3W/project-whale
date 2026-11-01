@@ -179,7 +179,7 @@ export class ActionExecutor {
       available_m: round(this.forwardRoom(before, yaw)),
       boundary_m: round(limit),
       position: { x: round(before.x), z: round(before.z) },
-      hint: `前方 ${round(this.forwardRoom(before, yaw))}m 就到场地边界（可走范围 ±${round(limit)}m）。先 turn 换个方向，或用更小的 walk/walk_adjust 挪；不要重复同一条走不通的指令。`,
+      hint: `前方 ${round(this.forwardRoom(before, yaw))}m 就到场地边界（可走范围 ±${round(limit)}m）。请用 move_to 选择场地内的新坐标，不要重复不可达指令。`,
     };
   }
 
@@ -470,10 +470,12 @@ export class ActionExecutor {
         return done("succeeded", outcome as unknown as Record<string, unknown>, "OK");
       }
 
+      case "move_to":
       case "walk_to": {
         const walkTo = this.loco.walkTo;
         if (!walkTo) return done("unsupported", null, "CAPABILITY_DISABLED");
-        const raced = await this.withTimeout(walkTo(step.x, step.z, step.tolerance_m ?? 0.1), 180000);
+        const raced = await this.withTimeout(walkTo(step.x, step.z, step.action === "walk_to" ? step.tolerance_m ?? 0.1 : 0.1,
+          step.action === "move_to" ? step.facing_deg : undefined), 180000);
         if (!raced.ok) return done("unknown", { partial: true }, "TIMEOUT");
         const outcome = raced.value;
         if (this.cancelled) return done("cancelled", outcome as unknown as Record<string, unknown>, "CANCELLED");
@@ -493,30 +495,11 @@ export class ActionExecutor {
         if (!view) return done("failed", { object_id: objectId }, "OBJECT_NOT_FOUND");
         if (view.state !== "resting") return done("failed", { object: view }, "BASIN_STATE_MISMATCH");
         if (!view.available) return done("failed", { object: view }, "OBJECT_UNAVAILABLE");
-        const alignment = bridge.alignment(objectId);
-        if (!alignment.ok) return done("failed", { alignment }, "NOT_ALIGNED");
-        // 侧躺或倒扣：先平滑扶正到当前站位的标准姿态，再播拾取（只对盆）
-        let upright: { ok: boolean; moved: number; rotatedDeg: number } | null = null;
-        if (!view.upright && objectId === "basin") {
-          upright = await bridge.upright(objectId);
-          if (!upright.ok) {
-            return done("failed", { upright, object: bridge.snapshot(objectId) }, "NOT_ALIGNED");
-          }
-        }
         if(this.cancelled)return done("cancelled",{object:bridge.snapshot(objectId)},"CANCELLED");
-        // 落地姿态不支持（饭勺平躺以外的姿态）时明确拒绝，不悄悄扶正
-        if (bridge.canStart && !bridge.canStart(objectId, actionId)) {
-          return done("failed", { object: view, error: "POSE_UNSUPPORTED" }, "OBJECT_POSE_UNSUPPORTED");
-        }
-        const raced = await this.withTimeout(bridge.perform(objectId, actionId), 60000);
+        const pickup = bridge.pickupInstant(objectId);
         const after = bridge.snapshot(objectId) as BasinView;
-        if(this.cancelled)return done("cancelled",{basin:after},"CANCELLED");
-        if (!raced.ok) return done("timeout", { basin: after }, "TIMEOUT");
-        if (this.cancelled) return done("cancelled", { basin: after }, "CANCELLED");
-        if (!raced.value || after.state !== "held") {
-          return done("failed", { basin: after, upright }, "BASIN_STATE_MISMATCH");
-        }
-        return done("succeeded", { basin: after, ...(upright ? { upright } : {}) }, "OK");
+        if (!pickup.ok || after.state !== "held") return done("failed", { object: after, ...pickup }, "PRECONDITION_FAILED");
+        return done("succeeded", { object: after, ...pickup }, "OK");
       }
 
       case "wear": {

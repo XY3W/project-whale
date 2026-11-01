@@ -56,10 +56,16 @@ test('分段加起来不超过目标距离，残差在档位以内', () => {
       assert.ok(total <= d + 1e-9, `${d}m 走超了`);
       assert.ok(d - total < 0.02 + 1e-9, `${d}m 残差太大 ${(d - total).toFixed(3)}`);
       for (const leg of legs) {
-        if (leg.kind === 'run') assert.ok(RUN_LADDER.includes(leg.meters));
+        if (leg.kind === 'run') assert.ok(Math.abs((leg.meters - .144) / .32 - Math.round((leg.meters - .144) / .32)) < 1e-6);
         if (leg.kind === 'walk') assert.ok(WALK_LADDER.includes(leg.meters));
         if (leg.kind === 'adjust') assert.ok(ADJUST_LADDER.includes(leg.meters));
       }
     }
   }
+});
+
+test('较远距离只用一个连续正常走路片段，不因旧档位上限反复起停', () => {
+ const legs=planWalkLegs(7.5);
+ assert.equal(legs.filter(x=>x.kind==='run').length,1);
+ assert.ok(legs[0].meters>3.664);
 });

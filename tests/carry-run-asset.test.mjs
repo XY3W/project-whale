@@ -88,3 +88,13 @@ test('真实模型组合抱棋：走、跑、微调和点头都保持双手抓�
     assert.ok(Math.abs(moved - distance) < 1e-6);
   }
 });
+
+test('真实模型长距离正常走路连续复用步态并精确累计位移', async () => {
+  const { player } = await rig();
+  assert.equal(player.runDistance(5.904), true);
+  let moved = 0, frames = 0;
+  while (player.moving && frames++ < 2000) { player.update(1 / 60); moved += player.movementDelta; }
+  assert.ok(frames < 2000);
+  assert.ok(Math.abs(moved - 5.904) < 1e-6);
+  assert.equal(player.state.base, 'idle_stand');
+});

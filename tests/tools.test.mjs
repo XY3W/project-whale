@@ -11,13 +11,14 @@ test("工具清单：run_plan / skill / timer / finish", () => {
 
 test("动作 schema 由能力表生成，数量和 id 一致", () => {
   const schemas = capabilityStepSchemas();
-  assert.equal(schemas.length, CAPABILITIES.length);
-  for (const cap of CAPABILITIES) {
+  const visible = CAPABILITIES.filter(cap => cap.enabled && !cap.legacy);
+  assert.equal(schemas.length, visible.length);
+  for (const cap of visible) {
     const schema = schemas.find((s) => s.properties.action.const === cap.id);
     assert.ok(schema, `缺少 ${cap.id} 的 schema`);
     for (const param of Object.keys(cap.params ?? {})) {
       assert.ok(schema.properties[param], `${cap.id}.${param} 没有生成`);
-      assert.ok(schema.required.includes(param));
+      assert.equal(schema.required.includes(param), !cap.params[param].optional);
     }
   }
 });
@@ -26,9 +27,10 @@ test("数值参数带上 min/max，枚举参数带上 enum", () => {
   const dig = capabilityStepSchemas().find((s) => s.properties.action.const === "dig");
   assert.equal(dig.properties.row.minimum, 0);
   assert.ok(dig.properties.row.maximum >= 15);
-  const walk = capabilityStepSchemas().find((s) => s.properties.action.const === "walk");
-  assert.ok(Array.isArray(walk.properties.distance_m.enum));
-  assert.ok(walk.properties.distance_m.enum.length > 5);
+  const move = capabilityStepSchemas().find((s) => s.properties.action.const === "move_to");
+  assert.equal(move.properties.y.minimum, 0);
+  assert.ok(!move.required.includes("facing_deg"));
+  assert.ok(!capabilityStepSchemas().some(s => s.properties.action.const === "walk"));
 });
 
 test("run_plan 限制 6 步、dig/place_stone 排在最后靠提示词+校验，不在 schema 里写死顺序", () => {

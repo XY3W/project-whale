@@ -2,7 +2,7 @@
 import { parallelConflict } from "../shared/resources.mjs";
 import { SIZE } from "./minesweeper.mjs";
 
-export const CAPABILITY_VERSION = "cap-playful-v2-count32";
+export const CAPABILITY_VERSION = "cap-coordinate-movement-v1";
 
 const DISTANCES = [0.09, 0.27, 0.45, 0.63, 0.81, 0.99, 1.17, 1.35, 1.53, 1.71, 1.89];
 const PLAYS = ["greet", "notice", "nod", "look_left", "look_right", "think"];
@@ -28,13 +28,13 @@ export class ModelError extends Error {
 }
 
 export const CAPABILITIES = [
-  { id: "turn", enabled: true, changesPosition: false, channels: ["motion"], params: { angle_deg: { type: "number", min: -180, max: 180, note: "正=左转" } } },
-  { id: "walk", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: DISTANCES, note: "仅支持 0.09+0.18n" } } },
+  { id: "turn", enabled: true, legacy: true, changesPosition: false, channels: ["motion"], params: { angle_deg: { type: "number", min: -180, max: 180, note: "正=左转" } } },
+  { id: "walk", enabled: true, legacy: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: DISTANCES, note: "仅支持 0.09+0.18n" } } },
   { id: "play", enabled: true, channels: ["upper"], params: { action_id: { enum: PLAYS } } },
   { id: "tail", enabled: true, channels: ["tail"], params: { style: { enum: TAILS }, duration_s: { type: "number", min: 0, max: 10 } } },
   { id: "wait", enabled: true, channels: [], params: { duration_s: { type: "number", min: 0, max: 5 } } },
-  { id: "run", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.464, 0.784, 1.104, 1.424, 1.744, 2.064, 2.384, 2.704, 3.024, 3.344, 3.664] } } },
-  { id: "walk_adjust", enabled: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.02, 0.04, 0.06, 0.08] } } },
+  { id: "run", enabled: true, legacy: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.464, 0.784, 1.104, 1.424, 1.744, 2.064, 2.384, 2.704, 3.024, 3.344, 3.664] } } },
+  { id: "walk_adjust", enabled: true, legacy: true, changesPosition: true, channels: ["motion"], params: { distance_m: { type: "number", enum: [0.02, 0.04, 0.06, 0.08] } } },
   {
     id: "dig",
     enabled: true,
@@ -86,9 +86,15 @@ export const CAPABILITIES = [
     },
   },
   { id: "parallel", enabled: true, channels: ["multi"], params: { items: { maxItems: 3, nested: false } } },
-  { id: "walk_to_basin", enabled: true, changesPosition: true, channels: ["motion"], params: {} },
+  { id: "walk_to_basin", enabled: true, legacy: true, changesPosition: true, channels: ["motion"], params: {} },
+  { id: "move_to", enabled: true, changesPosition: true, channels: ["motion"], params: {
+    x: { type: "number", min: -5.45, max: 5.45, note: "世界坐标 X，米" },
+    y: { type: "number", min: 0, max: 0, note: "当前仅地面，必须为 0" },
+    z: { type: "number", min: -5.45, max: 5.45, note: "世界坐标 Z，米" },
+    facing_deg: { type: "number", min: -180, max: 180, optional: true, note: "可选，到达后的世界朝向：0 朝 +Z，90 朝 +X" },
+  } },
   {
-    id: "walk_to",
+    id: "walk_to", legacy: true,
     enabled: true,
     changesPosition: true,
     channels: ["motion"],
@@ -124,7 +130,7 @@ export function describeDisabled() {
 
 /** 模型可见清单：只含 enabled，且参数说明来自同一注册表 */
 export function describeCapabilities() {
-  return CAPABILITIES.filter((c) => c.enabled).map((c) => ({
+  return CAPABILITIES.filter((c) => c.enabled && !c.legacy).map((c) => ({
     id: c.id,
     changesPosition: c.changesPosition,
     channels: c.channels,
@@ -315,6 +321,15 @@ export function validateStep(step, id = "step") {
     case "walk_to_basin":
       return { action: "walk_to_basin" };
 
+    case "move_to": {
+      const { x, y, z } = step;
+      if (![x, y, z].every(Number.isFinite) || Math.abs(x) > 5.45 || Math.abs(z) > 5.45 || y !== 0)
+        throw new ModelError("INVALID_SCHEMA", `${id} 坐标无效：当前仅支持地面 y=0，x/z 最大绝对值 5.45 米`, 0);
+      const facing = step.facing_deg;
+      if (facing !== undefined && (!Number.isFinite(facing) || Math.abs(facing) > 180))
+        throw new ModelError("INVALID_SCHEMA", `${id} facing_deg 必须是 -180 到 180`, 0);
+      return { action: "move_to", x, y, z, ...(facing === undefined ? {} : { facing_deg: facing }) };
+    }
     case "walk_to": {
       const { x, z } = step;
       if (!Number.isFinite(x) || !Number.isFinite(z) || Math.abs(x) > 3.7 || Math.abs(z) > 3.7) {
@@ -369,9 +384,11 @@ export function validateStep(step, id = "step") {
 
 /** 由注册表生成输出契约文本，避免手写动作清单与注册表漂移 */
 export function outputContract() {
-  const steps = CAPABILITIES.filter((c) => c.enabled && c.id !== "parallel")
+  const steps = CAPABILITIES.filter((c) => c.enabled && !c.legacy && c.id !== "parallel")
     .map((c) => {
       const props = Object.entries(c.params).map(([name, spec]) => {
+        if (spec.optional && spec.type === "number" && spec.min !== undefined && spec.max !== undefined)
+          return `${name}:可选 number [${spec.min},${spec.max}]`;
         if (spec.enum) return `${name}:${JSON.stringify(spec.enum)}`;
         if (spec.type === "number" || spec.type === "integer") {
           if (spec.min !== undefined && spec.max !== undefined) return `${name}:${spec.type} [${spec.min},${spec.max}]`;
