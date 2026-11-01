@@ -1,0 +1,58 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import http from 'node:http';
+import { spawn } from 'node:child_process';
+import WebSocket from 'ws';
+import { ownerIdentity, recordMessage } from '../server/preferences.mjs';
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('HTTP/WS: reload restores >24 messages, complete replies are persisted before delivery, replay does not rerun', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'whale-conversation-'));
+  let cookie;
+  const owner = ownerIdentity({ headers: {} }, { setHeader(_, value) { cookie = value.split(';')[0]; } }, path.join(dir, 'data'));
+  const seed = {};
+  for (let i = 0; i < 151; i++) recordMessage(seed, owner, 's', i % 2 ? 'assistant' : 'user', `saved-${i}`);
+  fs.writeFileSync(path.join(dir, 'data/brain-state.json'), JSON.stringify(seed));
+  const reservation = http.createServer();
+  await new Promise(resolve => reservation.listen(0, '127.0.0.1', resolve));
+  const port = reservation.address().port; await new Promise(resolve => reservation.close(resolve));
+  const proc = spawn(process.execPath, [path.resolve('server/index.mjs')], {
+    cwd: dir, env: { ...process.env, BRAIN_PORT: String(port), DEEPSEEK_API_KEY: '', AUTO_MINESWEEPER: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let logs = ''; proc.stdout.on('data', d => { logs += d; }); proc.stderr.on('data', d => { logs += d; });
+  let ws;
+  t.after(async () => { ws?.terminate(); if (proc.exitCode === null) { proc.kill(); await new Promise(resolve => proc.once('exit', resolve)); } fs.rmSync(dir, { recursive: true, force: true }); });
+  const until = async read => { for (let i = 0; i < 200; i++) { const value = read(); if (value) return value; await sleep(25); } assert.fail('chat fixture timeout'); };
+  await until(() => logs.includes('whale brain on'));
+  const base = `http://127.0.0.1:${port}`;
+  const get = async query => (await fetch(`${base}/api/conversation${query ?? ''}`, { headers: { cookie } })).json();
+  const first = await get(); assert.equal(first.messages.length, 100);
+  const older = await get(`?before=${first.before}`); assert.equal(older.messages.length, 51);
+  assert.equal(older.messages[0].content, 'saved-0');
+  assert.deepEqual((await (await fetch(`${base}/api/conversation`)).json()).messages, []);
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, { headers: { cookie } });
+  const inbox = []; ws.on('message', raw => inbox.push(JSON.parse(String(raw))));
+  await new Promise(resolve => ws.on('open', resolve));
+  const state = await until(() => inbox.find(m => m.type === 'session_state'));
+  const send = data => ws.send(JSON.stringify({ protocolVersion: 1, leaseEpoch: state.leaseEpoch, ...data }));
+  const request = { type: 'user_message', text: '你好，这是恢复测试', clientMessageId: 'reload-test-client-0001', snapshot: { x: 0, z: 0, yawDeg: 0, objects: [] } };
+  send(request);
+  const ack = await until(() => inbox.find(m => m.type === 'chat_message'));
+  const reply = await until(() => inbox.find(m => m.type === 'public_reply'));
+  assert.equal(ack.message.clientMessageId, request.clientMessageId); assert.ok(reply.messageId);
+  const disk = JSON.parse(fs.readFileSync(path.join(dir, 'data/brain-state.json')));
+  assert.equal(disk.messages.find(m => m.messageId === reply.messageId).content, reply.speech);
+  send(request); await sleep(400);
+  assert.equal(inbox.filter(m => m.type === 'public_reply').length, 1);
+  const restored = await get();
+  assert.deepEqual(restored.messages.slice(-2).map(m => m.messageId), [ack.message.messageId, reply.messageId]);
+  assert.equal(restored.messages.at(-1).sequence, reply.sequence);
+  send({ ...request, clientMessageId: 'reload-test-client-0002' });
+  await until(() => inbox.filter(m => m.type === 'public_reply').length === 2);
+  const equalReplies = inbox.filter(m => m.type === 'public_reply');
+  assert.equal(equalReplies[0].speech, equalReplies[1].speech);
+  assert.notEqual(equalReplies[0].messageId, equalReplies[1].messageId, 'same words in different turns are not a duplicate');
+});

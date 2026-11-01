@@ -10,6 +10,7 @@
  */
 import {digAim} from "../shared/dig-aim.mjs";
 import { randomUUID } from "node:crypto";
+import { conversationPage } from './conversation.mjs';
 import { modeView, changeMode } from "./behavior-mode.mjs";
 import { ownerIdentity, recordMessage, propose, editMemory, memoryView, relevantMemory, acceptSummary, recentConversation } from "./preferences.mjs";
 import http from "node:http";
@@ -105,6 +106,14 @@ function serveStatic(req, res) {
 
 const server = http.createServer(async (req,res)=>{
   const owner=ownerIdentity(req,res,path.join(process.cwd(),"data"));
+  if (req.url?.split('?')[0] === '/api/conversation') {
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.method !== 'GET') { res.writeHead(405).end('{}'); return; }
+    const query = new URL(req.url, 'http://localhost').searchParams;
+    res.end(JSON.stringify(conversationPage(store.state, owner, { before: query.get('before'), limit: Number(query.get('limit') ?? 100) })));
+    return;
+  }
   if(req.url?.startsWith('/api/memory')){
     res.setHeader('Content-Type','application/json; charset=utf-8');res.setHeader('Cache-Control','no-store');
     if(req.method==='GET'){res.end(JSON.stringify({memories:memoryView(store.state,owner),recentConversation:recentConversation(store.state,owner),conversationSummary:store.state.summaries?.[owner]?.text??null}));return;}
@@ -277,8 +286,25 @@ function persist() {
 }
 
 function send(ws, type, payload = {}) {
-  if (!ws || ws.readyState !== 1) return;
+  if (!ws) return;
+  // Persist everything actually shown as a public character message, including
+  // autonomous games and timers. Never store reasoning deltas as chat.
+  const text = type === 'public_reply' || type === 'execute_plan' ? payload.speech : type === 'timer_fired' ? payload.message : null;
+  if (ws.ownerScope && typeof text === 'string' && text) {
+    const source = type === 'execute_plan' ? payload.planId ?? `${payload.taskId}:${payload.turnId}`
+      : type === 'timer_fired' ? `${payload.id}:${payload.scheduled_at}` : payload.taskId;
+    // Equal words may be separate utterances. Only explicit delivery identity,
+    // never matching text alone, establishes a replay.
+    const deliveryKey = type === 'public_reply' ? `reply:${randomUUID()}` : `${type}:${source ?? randomUUID()}`;
+    let message = payload.messageId && (store.state.messages ?? []).find(m => m.ownerScope === ws.ownerScope && m.messageId === payload.messageId);
+    if (!message) store.update(st => { message = recordMessage(st, ws.ownerScope, session.id, 'assistant', text,
+      { deliveryKey, origin: session.task?.origin ?? 'event' }); });
+    store.flush();
+    payload = { ...payload, messageId: message.messageId, createdAt: message.createdAt, sequence: message.sequence };
+  }
+  if (ws.readyState !== 1) return payload;
   ws.send(JSON.stringify({ protocolVersion: PROTOCOL, type, ...payload, seq: ++ws._seq }));
+  return payload;
 }
 
 const isLease = (ws) => session.lease === ws;
@@ -625,7 +651,7 @@ let snapshotSeq = 0;
  * 统一的任务入口：用户消息和场地事件走同一套预算、代际与租约规则，
  * 游戏事件不能私建一条不受聊天/预算控制的循环。
  */
-function beginTask({ text, messageId, origin = "user", events = [], snapshot = null, ws }) {
+function beginTask({ text, messageId, clientMessageId = null, origin = "user", events = [], snapshot = null, ws }) {
   const taskId = `t${nextTask++}-${randomUUID().slice(0,8)}`;
   const generation = ++session.generation;
   if (session.budgetTimer) clearTimeout(session.budgetTimer);
@@ -666,7 +692,10 @@ function beginTask({ text, messageId, origin = "user", events = [], snapshot = n
     gameRevision: games.public()?.revision ?? null,
   };
   if(text&&origin==='user'){
-    store.update(st=>{const m=recordMessage(st,session.task.ownerScope,session.id,'user',text);session.task.messageId=m.messageId;});store.flush();
+    let message;
+    store.update(st=>{message=recordMessage(st,session.task.ownerScope,session.id,'user',text,{clientMessageId,origin});session.task.messageId=message.messageId;});store.flush();
+    send(ws, 'chat_message', { message: { messageId: message.messageId, clientMessageId: message.clientMessageId,
+      role: message.role, content: message.content, createdAt: message.createdAt, sequence: message.sequence } });
   }
   persist();
   session.phase = "thinking";
@@ -850,7 +879,6 @@ async function timerOp(task, ws, out = {}) {
     }
     send(ws, "timer_state", { timers: timers.list(ws.ownerScope, ws.timerPage), serverNow: Date.now() });
     send(ws, "public_reply", { taskId: task.id, speech });
-    store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
     return { ok: true, speech, timers: timers.list(ws.ownerScope, ws.timerPage) };
   } catch (err) {
     send(ws, "error", { code: "TIMER_INVALID", message: err.message });
@@ -1068,7 +1096,6 @@ async function executeToolCall(task, ws, call) {
     absorbMemory(task, { memoryProposals: call.args.memory_proposals ?? [], summaryProposal: call.args.summary_proposal ?? null });
     if (speech) {
       send(ws, "public_reply", { taskId: task.id, speech });
-      if (task.origin === "user") store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
     }
     task.outcome = outcome;
     endTask(`finish:${outcome}`);
@@ -1136,7 +1163,6 @@ async function runToolLoop(task, ws) {
         const speech = speechTidy.tidy(out.content ?? "");
         if (speech) {
           send(ws, "public_reply", { taskId: task.id, speech });
-          if (task.origin === "user") store.update((st) => recordMessage(st, task.ownerScope, session.id, "assistant", speech));
         }
         endTask("tool loop: text only");
         return;
@@ -1256,9 +1282,8 @@ function applyOutput(ws, task, out) {
     task.outcome = out.outcome ?? "completed";
     const speech = speechTidy.tidy(out.speech || "");
     if (speech) {
-      send(ws, "public_reply", { taskId: task.id, speech });
-      if(task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",speech));
-      if (task.planId) session.ledger.set(task.planId, { ...session.ledger.get(task.planId), state: "done", reply: speech });
+      const delivery = send(ws, "public_reply", { taskId: task.id, speech });
+      if (task.planId) session.ledger.set(task.planId, { ...session.ledger.get(task.planId), state: "done", reply: speech, replyMessageId: delivery?.messageId });
     }
     persist();
     endTask();
@@ -1297,7 +1322,6 @@ function applyOutput(ws, task, out) {
   const digAuthId = issueDigAuth(task, out.plan);
   const xiangqiAuth = issueXiangqiAuth({ xiangqi, session, task, plan: out.plan });
   const planSpeech = speechTidy.tidy(out.speech || "");
-  if(planSpeech&&task.origin==="user")store.update(st=>recordMessage(st,task.ownerScope,session.id,"assistant",planSpeech));
   if (task.toolsMode) {
     task.pending = { planId: task.planId, resolve: null, timer: null };
   }
@@ -1880,6 +1904,14 @@ wss.on("connection", (ws, req) => {
           return;
         }
         if (!msg.text || typeof msg.text !== "string") return;
+        if (typeof msg.clientMessageId === 'string') {
+          const existing = (store.state.messages ?? []).find(m => m.ownerScope === ws.ownerScope && m.role === 'user' && m.clientMessageId === msg.clientMessageId);
+          if (existing) {
+            send(ws, 'chat_message', { message: { messageId: existing.messageId, clientMessageId: existing.clientMessageId,
+              role: existing.role, content: existing.content, createdAt: existing.createdAt, sequence: existing.sequence } });
+            return; // ACK a replay without interrupting the current task or executing again.
+          }
+        }
         if (session.task?.origin === "timer") { send(ws,"error",{code:"BUSY",message:"定时提醒正在处理，请稍后再发送"}); return; }
         // 用户消息里带着客户端此刻的真实位姿：先刷新，再基于它规划
         applyClientSnapshot(msg.snapshot);
@@ -1893,6 +1925,7 @@ wss.on("connection", (ws, req) => {
         const task = beginTask({
           text: msg.text,
           messageId: null,
+          clientMessageId: typeof msg.clientMessageId === 'string' && /^[a-zA-Z0-9-]{16,80}$/.test(msg.clientMessageId) ? msg.clientMessageId : null,
           origin: "user",
           events: gameEvents.take(),
           snapshot: msg.snapshot ?? null,
@@ -1924,7 +1957,7 @@ wss.on("connection", (ws, req) => {
         const entry = msg.planId ? session.ledger.get(msg.planId) : null;
         if (entry && entry.state === "done") {
           // 重复投递：回放已缓存的回复，不再次执行
-          send(ws, "public_reply", { taskId: task.id, speech: entry.reply ?? "" });
+          send(ws, "public_reply", { taskId: task.id, speech: entry.reply ?? "", messageId: entry.replyMessageId });
           return;
         }
         if (entry && entry.state === "processing") return; // 首次结果正在处理，忽略重复

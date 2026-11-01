@@ -12,9 +12,21 @@ export function ownerIdentity(req, res, dir) {
   if (/^[a-f0-9-]{36}$/.test(id??'') && sig?.length===64 && timingSafeEqual(Buffer.from(sig),Buffer.from(sign(id)))) return id;
   const next=randomUUID(); res.setHeader('Set-Cookie',`whale_owner=${next}.${sign(next)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000`); return next;
 }
-export function recordMessage(st,ownerScope,sessionId,role,content) {
-  const msg={messageId:randomUUID(),ownerScope,sessionId,role,content:String(content).slice(0,8000),createdAt:Date.now()};
-  const cutoff=Date.now()-Number(process.env.MESSAGE_RETENTION_DAYS??30)*86400000;
+export function recordMessage(st,ownerScope,sessionId,role,content,meta={}) {
+  const existing=(st.messages??[]).find(m=>m.ownerScope===ownerScope &&
+    ((meta.deliveryKey&&m.deliveryKey===meta.deliveryKey)||(role==='user'&&meta.clientMessageId&&m.clientMessageId===meta.clientMessageId)));
+  if(existing)return existing;
+  let sequence=Number(st.messageSequence)||0;
+  for(const [i,m] of (st.messages??[]).entries()) {
+    if(!Number.isSafeInteger(m.sequence))m.sequence=i+1;
+    sequence=Math.max(sequence,m.sequence);
+  }
+  st.messageSequence=sequence+1;
+  const msg={messageId:randomUUID(),ownerScope,sessionId,role,content:String(content),createdAt:Date.now(),sequence:st.messageSequence,
+    ...(meta.deliveryKey?{deliveryKey:meta.deliveryKey}:{}),...(meta.clientMessageId?{clientMessageId:meta.clientMessageId}:{}),
+    ...(meta.origin?{origin:meta.origin}:{})};
+  const days=Number(process.env.MESSAGE_RETENTION_DAYS??30);
+  const cutoff=Date.now()-(Number.isFinite(days)&&days>0?days:30)*86400000;
   st.messages=[...(st.messages??[]).filter(m=>m.createdAt>=cutoff),msg]; return msg;
 }
 export function propose(st,owner,proposals,allowedSources) {

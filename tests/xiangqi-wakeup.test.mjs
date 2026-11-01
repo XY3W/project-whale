@@ -53,8 +53,8 @@ async function fixture(t, { protocol = 'json', restored = false, reply = null } 
     await new Promise(resolve => model.close(resolve)); fs.rmSync(dir, { recursive: true, force: true });
   });
   await until(() => logs.includes('whale brain on'));
-  async function connect() {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`); sockets.push(ws); const inbox = []; const readied = new Set();
+  async function connect(cookie = null) {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`, cookie ? { headers: { cookie } } : {}); sockets.push(ws); const inbox = []; const readied = new Set();
     const send = (type, data = {}) => ws.send(JSON.stringify({ protocolVersion: 1, type, ...data }));
     ws.on('message', raw => {
       const msg = JSON.parse(String(raw)); inbox.push(msg);
@@ -67,7 +67,7 @@ async function fixture(t, { protocol = 'json', restored = false, reply = null } 
     const state = await until(() => inbox.find(m => m.type === 'session_state'));
     return { ws, inbox, send, epoch: state.leaseEpoch };
   }
-  return { requests, connect, dir, get logs() { return logs; } };
+  return { requests, connect, dir, base: `http://127.0.0.1:${port}`, get logs() { return logs; } };
 }
 function requestContext(req) {
   for (const message of req.messages) {
@@ -151,4 +151,20 @@ for (const protocol of ['json', 'tools']) test(`${protocol}: chat-agreed draw en
   assert.equal(finished.board.result.winner, null);
   assert.equal(finished.board.revision, 1);
   assert.equal(JSON.parse(fs.readFileSync(path.join(f.dir, 'data/xiangqi.json'))).status, 'drawn');
+});
+
+for (const protocol of ['json', 'tools']) test(`${protocol}: autonomous chess speech survives page reload under the same owner`, async t => {
+  const speech = '这是一条游戏回合中的公开台词';
+  const f = await fixture(t, { protocol, reply() {
+    const args = { outcome: 'completed', speech };
+    return { name: 'finish', args, json: { type: 'finish_task', ...args } };
+  } });
+  const handshake = await fetch(`${f.base}/api/conversation`);
+  const cookie = handshake.headers.get('set-cookie').split(';')[0];
+  const c = await f.connect(cookie);
+  c.send('xiangqi_start', { requestId: 'event-speech', userSide: 'red', leaseEpoch: c.epoch });
+  const reply = await until(() => c.inbox.find(m => m.type === 'public_reply' && m.speech === speech));
+  const restored = await (await fetch(`${f.base}/api/conversation`, { headers: { cookie } })).json();
+  assert.deepEqual(restored.messages.map(m => m.messageId), [reply.messageId]);
+  assert.equal(restored.messages[0].content, speech);
 });

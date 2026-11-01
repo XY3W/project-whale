@@ -4,6 +4,9 @@
  */
 
 export interface PlanMessage {
+  messageId?: string;
+  createdAt?: number;
+  sequence?: number;
   taskId: string;
   turnId: number;
   generation?: number;
@@ -20,17 +23,21 @@ export interface PlanMessage {
 }
 
 export interface ReplyMessage {
+  messageId?: string;
+  createdAt?: number;
+  sequence?: number;
   taskId: string;
   speech: string;
 }
 
 type Handlers = {
   onTimers?: (timers: unknown[], serverNow: number) => void;
-  onTimerFired?: (name: string, message: string) => void;
+  onTimerFired?: (name: string, message: string, meta?: { messageId?: string; createdAt?: number; sequence?: number }) => void;
   onReasoningStart?: (taskId: string) => void;
   onReasoningDelta?: (taskId: string, text: string) => void;
   onPlan?: (msg: PlanMessage) => void;
   onReply?: (msg: ReplyMessage) => void;
+  onChatMessage?: (message: import('../ui/chatHistory').ChatMessage) => void;
   onTaskState?: (phase: string, taskId?:string) => void;
   onMode?:(mode:unknown)=>void;
   onMemoryUpdated?:(pendingCount:number)=>void;
@@ -109,7 +116,10 @@ export class BrainClient {
           if (Array.isArray(msg.timers)) this.handlers.onTimers?.(msg.timers, typeof msg.serverNow === "number" ? msg.serverNow : Date.now());
           break;
         case "timer_fired":
-          this.handlers.onTimerFired?.(String(msg.name),String(msg.message));
+          this.handlers.onTimerFired?.(String(msg.name),String(msg.message), msg);
+          break;
+        case 'chat_message':
+          this.handlers.onChatMessage?.(msg.message as import('../ui/chatHistory').ChatMessage);
           break;
         case "reasoning_start":
           this.handlers.onReasoningStart?.(String(msg.taskId));
@@ -234,8 +244,8 @@ export class BrainClient {
     return true;
   }
 
-  sendUserMessage(text: string, snapshot: Record<string, unknown>) {
-    return this.send("user_message", { text, snapshot, leaseEpoch: this.leaseEpoch });
+  sendUserMessage(text: string, snapshot: Record<string, unknown>, clientMessageId?: string) {
+    return this.send("user_message", { text, snapshot, clientMessageId, leaseEpoch: this.leaseEpoch });
   }
 
   sendPlanResult(

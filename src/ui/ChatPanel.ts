@@ -1,4 +1,5 @@
 /** A persistent chat overlay. Showing it never pauses the character. */
+import { mergeChatMessages, type ChatMessage } from './chatHistory';
 
 export class ChatPanel {
   readonly root: HTMLDivElement;
@@ -8,11 +9,19 @@ export class ChatPanel {
   private reasoningTask = "";
   private reasoningText = "";
   private reasoningRow: HTMLDivElement | null = null;
+  private messages: ChatMessage[] = [];
+  private readonly olderButton: HTMLButtonElement;
+  private before: string | null = null;
+  private historyLoaded = false;
+  private historyLoading = false;
+  private refreshPending = false;
+  private hasMore = false;
+  readonly ready: Promise<void>;
 
   readonly open = true;
   busy = false;
 
-  onSend: ((text: string) => void) | null = null;
+  onSend: ((text: string, clientMessageId: string) => boolean | void) | null = null;
 
   constructor() {
     injectStyles();
@@ -55,14 +64,89 @@ export class ChatPanel {
         this.submit();
       }
     });
-    // Restore the current owner's recent conversation after a page reload.
-    void fetch('/api/memory').then(r=>r.ok?r.json():null).then(data=>{
-      if(!data||this.list.childElementCount!==0||!Array.isArray(data.recentConversation))return;
-      for(const item of data.recentConversation){
-        if((item.role==='user'||item.role==='assistant')&&typeof item.content==='string')
-          this.addMessage(item.role==='user'?'user':'whale',item.content);
+    this.olderButton = document.createElement('button');
+    this.olderButton.type = 'button';
+    this.olderButton.className = 'chat-load-more';
+    this.olderButton.addEventListener('click', () => { void this.loadHistory(this.historyLoaded && this.hasMore); });
+    this.ready = this.loadHistory(false);
+  }
+
+  refreshHistory() { return this.loadHistory(false); }
+
+  private async loadHistory(older: boolean) {
+    if (this.historyLoading) { if (!older) this.refreshPending = true; return; }
+    this.historyLoading = true;
+    this.olderButton.disabled = true;
+    this.olderButton.textContent = older ? '正在加载更早的对话…' : '正在恢复对话…';
+    this.olderButton.hidden = false;
+    this.list.prepend(this.olderButton);
+    const height = this.list.scrollHeight, top = this.list.scrollTop;
+    try {
+      const known = new Set(this.messages.map(m => m.messageId).filter(Boolean));
+      const query = new URLSearchParams({ limit: '100' });
+      if (older && this.before) query.set('before', this.before);
+      const response = await fetch(`/api/conversation?${query}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('history unavailable');
+      let page = await response.json();
+      if (page.cursorExpired) { this.resetHistoryCursor(); return; }
+      if (!Array.isArray(page.messages)) throw new Error('history unavailable');
+      this.messages = mergeChatMessages(this.messages, page.messages);
+      // A long disconnect can miss more than one page. Fill the gap back to a
+      // known message instead of silently jumping from old chat to the last 100.
+      if (!older && this.historyLoaded && known.size) {
+        while (page.hasMore && !page.messages.some((m: ChatMessage) => known.has(m.messageId))) {
+          const previousCursor = page.before;
+          const next = await fetch(`/api/conversation?${new URLSearchParams({ limit: '100', before: previousCursor })}`, { cache: 'no-store' });
+          if (!next.ok) throw new Error('history unavailable');
+          page = await next.json();
+          if (page.cursorExpired) { this.resetHistoryCursor(); return; }
+          if (!Array.isArray(page.messages) || page.before === previousCursor) throw new Error('history cursor expired');
+          this.messages = mergeChatMessages(this.messages, page.messages);
+        }
       }
-    }).catch(()=>{});
+      if (older || !this.historyLoaded || !known.size) {
+        this.before = page.before ?? null;
+        this.hasMore = !!page.hasMore;
+      }
+      this.historyLoaded = true;
+      this.olderButton.textContent = '加载更早的对话';
+      this.olderButton.hidden = !this.hasMore;
+      this.renderMessages(!older);
+      if (older) this.list.scrollTop = top + this.list.scrollHeight - height;
+    } catch {
+      this.olderButton.textContent = '聊天记录恢复失败，点击重试';
+      this.olderButton.hidden = false;
+    } finally {
+      this.historyLoading = false;
+      this.olderButton.disabled = false;
+      if (this.refreshPending) { this.refreshPending = false; void this.loadHistory(false); }
+    }
+  }
+
+  private resetHistoryCursor() {
+    this.messages = [];
+    this.before = null;
+    this.hasMore = false;
+    this.historyLoaded = false;
+    this.refreshPending = true;
+    this.renderMessages(false);
+  }
+
+  private renderMessages(scrollToBottom: boolean) {
+    const rows = this.messages.map(item => {
+      const row = document.createElement('div');
+      row.className = `chat-msg chat-${item.role === 'assistant' ? 'whale' : item.role}`;
+      row.textContent = item.content;
+      if (item.messageId) row.dataset.messageId = item.messageId;
+      return row;
+    });
+    this.list.replaceChildren(this.olderButton, ...rows, ...(this.reasoningRow ? [this.reasoningRow] : []));
+    if (scrollToBottom) this.list.scrollTop = this.list.scrollHeight;
+  }
+
+  receiveMessage(message: ChatMessage) {
+    this.messages = mergeChatMessages(this.messages, [message]);
+    this.renderMessages(true);
   }
 
   get showReasoning() { return this.root.querySelector<HTMLInputElement>("[data-reasoning]")!.checked; }
@@ -107,25 +191,20 @@ export class ChatPanel {
     const text = this.input.value.trim();
     if (!text) return;
     this.input.value = "";
-    this.addMessage("user", text);
-    this.onSend?.(text);
+    const clientMessageId = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+    this.addMessage("user", text, { clientMessageId });
+    if (this.onSend?.(text, clientMessageId) === false) this.input.value = text;
   }
 
   /** 系统提示行：技能新建/更新/停用这类事件，不占角色台词 */
   addNote(text: string) {
-    const row = document.createElement("div");
-    row.className = "chat-msg chat-note";
-    row.textContent = text;
-    this.list.appendChild(row);
-    this.list.scrollTop = this.list.scrollHeight;
+    const sequence = Math.floor(this.messages.reduce((n, m) => Math.max(n, m.sequence ?? 0), 0)) + 0.5;
+    this.messages.push({ role: 'note', content: text, createdAt: Date.now(), sequence });
+    this.renderMessages(true);
   }
 
-  addMessage(role: "user" | "whale", text: string) {
-    const row = document.createElement("div");
-    row.className = `chat-msg chat-${role}`;
-    row.textContent = text;
-    this.list.appendChild(row);
-    this.list.scrollTop = this.list.scrollHeight;
+  addMessage(role: "user" | "whale", text: string, meta: Partial<ChatMessage> = {}) {
+    this.receiveMessage({ ...meta, role: role === 'whale' ? 'assistant' : 'user', content: text, createdAt: meta.createdAt ?? Date.now() });
   }
 
   setThinking(on: boolean) {
@@ -152,6 +231,8 @@ const CSS = `
 .chat-reasoning-toggle{pointer-events:auto;display:flex;align-items:center;gap:4px;white-space:nowrap;font-size:14px;cursor:pointer}
 .chat-state{color:#a8bad6;margin-left:auto;font-size:14px}
 .chat-list{flex:1;min-height:0;overflow-y:auto;padding:10px 4px;display:flex;flex-direction:column;gap:12px;pointer-events:none;overscroll-behavior:contain}
+.chat-load-more{align-self:center;pointer-events:auto;border:1px solid #6b91c855;border-radius:14px;background:#14243bdb;color:#c4dcff;padding:7px 14px;cursor:pointer;font:14px system-ui}
+.chat-load-more[hidden]{display:none}.chat-load-more:disabled{opacity:.65;cursor:wait}
 .chat-msg{max-width:90%;padding:12px 16px;border-radius:20px;font-size:18px;line-height:1.55;white-space:pre-wrap;word-break:break-word;pointer-events:auto}
 .chat-user{align-self:flex-end;background:linear-gradient(135deg,rgba(72,125,198,.96),rgba(61,92,166,.96));color:#fff;box-shadow:0 4px 18px #07142644}
 .chat-whale{align-self:flex-start;background:rgba(20,38,62,.93);border:1px solid rgba(153,191,239,.14);color:#f4f7ff;box-shadow:0 4px 18px #07142644}

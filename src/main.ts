@@ -292,22 +292,22 @@ async function boot() {
     ],
   });
 
-  chat.onSend = (text) => {
+  chat.onSend = (text, clientMessageId) => {
     if (!client.connected) {
       chat.setError("还没有连上大脑服务");
       chat.setThinking(false);
-      return;
+      return false;
     }
     if (readOnly) {
       chat.setError("另一个页面正在执行角色，这里只读");
       chat.setThinking(false);
-      return;
+      return false;
     }
     errorActive = false;
     setError(false);
     chat.setError(null);
     chat.setThinking(true);
-    client.sendUserMessage(text, snapshot());
+    return client.sendUserMessage(text, snapshot(), clientMessageId);
   };
   // ---- 移动 ----
   const requestMove = (point: THREE.Vector3) => {
@@ -1361,7 +1361,8 @@ async function boot() {
 
   client.on({
     onTimers: (list, serverNow) => timerPanel.update(list, serverNow),
-    onTimerFired: (_name, message) => { chat.addMessage("whale", message); speak(message); },
+    onTimerFired: (_name, message, meta) => { chat.addMessage("whale", message, meta); speak(message); },
+    onChatMessage: message => chat.receiveMessage(message),
     onPlan: (msg) => {
       xiangqiTokenRef = msg.xiangqiToken ?? null;
       chat.endReasoning(msg.taskId);
@@ -1369,7 +1370,7 @@ async function boot() {
       if(msg.planId){seenPlans.add(msg.planId);if(seenPlans.size>200)seenPlans.delete(seenPlans.values().next().value!);}
       chat.setError(null);
       if (msg.speech) {
-        chat.addMessage("whale", msg.speech);
+        chat.addMessage("whale", msg.speech, msg);
         speak(msg.speech);
       }
       // 串行执行：新计划排队，旧计划先被取消钩子快速收尾
@@ -1427,7 +1428,7 @@ async function boot() {
       chat.endReasoning(msg.taskId);
       errorActive = false;
       setError(false);
-      if(msg.speech){chat.addMessage("whale", msg.speech);speak(msg.speech);}
+      if(msg.speech){chat.addMessage("whale", msg.speech, msg);speak(msg.speech);}
     },
     onMode:value=>controls.updateMode(value),
     onSkillEvent:(payload)=>{
@@ -1559,13 +1560,15 @@ async function boot() {
       } else {
         errorActive = false;
         chat.setError(null);
+        void chat.refreshHistory();
         setError(false);
         syncXiangqiButton();
         taskActive = false;
       }
     },
   });
-  client.connect();
+  // The history GET establishes the signed owner cookie before WS upgrade.
+  void chat.ready.then(() => client.connect());
 
   // ---- 主循环 ----
   const clock = new THREE.Clock();
