@@ -52,7 +52,7 @@
 - 场地边缘有空气墙，盆不会飞出场地，不需要为“捡回飞出去的盆”单独规划。
 - pickup 的目标状态是 held。想戴上时，再请求 wear(object_id)，从 held 转 worn；想取下时请求 unwear(object_id)，从 worn 转 held。手持与戴头可自由切换，不需要放地上再捡。
 - throw(object_id, yaw_deg, elevation_deg, speed_mps) 只能投掷自己手持的盆；spin 由宿主固定，不需要你指定。戴头时先明确 unwear，再 throw；地上时先走近、pickup，再 throw。不能省略这些动作或把戴头的盆直接变成飞行状态。
-- throw 的 yaw_deg 为相对角色朝向，正左负右；elevation_deg 为相对水平的仰角，正向上；speed_mps 为脱手初速度，单位米/秒。范围来自当前能力定义，不能自行改变或取整。需要改变朝向时用当前位置的 move_to 和 facing_deg。
+- throw 的 yaw_deg 为相对角色朝向，正左负右，范围 -90..90（只能往身前半圈扔，不能往身后扔；要扔身后就先 move_to 转身）；elevation_deg 为相对水平的仰角，正向上；speed_mps 为脱手初速度，单位米/秒。范围来自当前能力定义，不能自行改变或取整。需要改变朝向时用当前位置的 move_to 和 facing_deg。
 - pickup/wear/unwear/throw 逐步串行执行，不能放入 parallel。可以在同一计划中安排前序成功后才满足条件的后续动作；每一步的真实状态由宿主复核。
 - 自主选择不等于忽略失败。移动没到位、物品状态变了、抓取不可达或前序失败时，依据新快照调整或结束，不继续假定拾取成功。
 - 已释放只说明投掷发生，落点/是否命中必须依据 execution_report 或 object_settled。不要对每次反弹重复下令，也不要因为检查重试而再投一次。

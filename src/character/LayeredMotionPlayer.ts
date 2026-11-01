@@ -412,11 +412,16 @@ export class LayeredMotionPlayer {
     action.setEffectiveWeight(1);
     action.setEffectiveTimeScale(1);
     action.play();
+    // 片段没接管的骨骼必须有兜底姿势，否则会冻在上一个动作的最后一帧。
+    // 典型症状：throw_basin 是 full_except_right_arm，右手空着时还保持上一次"平举"。
     this.perfBody=null;
-    if(['left_arm','right_arm','both_arms'].includes(layer)){
+    {
       const owned=new Set(action.getClip().tracks.map(t=>t.name));
-      const tracks=['idle_stand.lower','idle_stand.upperBase'].flatMap(n=>this.get(n).getClip().tracks).filter(t=>!owned.has(t.name));
-      this.perfBody=new PoseOverlay(this.root,new THREE.AnimationClip('unowned_body',2,tracks));
+      const tracks=['idle_stand.lower','idle_stand.upperBase']
+        .filter(n=>this.actions.has(n))
+        .flatMap(n=>this.get(n).getClip().tracks)
+        .filter(t=>!owned.has(t.name));
+      if(tracks.length)this.perfBody=new PoseOverlay(this.root,new THREE.AnimationClip('unowned_body',2,tracks));
     }
     const sorted = [...events].sort((a, b) => a.time - b.time);
     return new Promise<boolean>((resolve) => {

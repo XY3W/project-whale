@@ -550,7 +550,7 @@ export class ActionExecutor {
         if (typeof elevation !== "number" || !Number.isFinite(elevation) || elevation < 0 || elevation > 45) {
           return done("failed", null, "PRECONDITION_FAILED");
         }
-        if (typeof direction !== "number" || !Number.isFinite(direction) || Math.abs(direction) > 180) {
+        if (typeof direction !== "number" || !Number.isFinite(direction) || Math.abs(direction) > 90) {
           return done("failed", null, "PRECONDITION_FAILED");
         }
         if (typeof speed !== "number" || !Number.isFinite(speed) || speed < 1 || speed > 6) {

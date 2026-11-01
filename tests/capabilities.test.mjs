@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CAPABILITY_VERSION, describeCapabilities, outputContract, validatePlan, validateStep } from "../server/capabilities.mjs";
+import { CAPABILITY_VERSION, CAPABILITIES, describeCapabilities, outputContract, validatePlan, validateStep } from "../server/capabilities.mjs";
 import { createEventDeduper } from "../server/events.mjs";
 
 test("注册表：enabled 清单与 disabled 落盘一致", () => {
@@ -104,4 +104,17 @@ test("move_to 只接受地面世界坐标和可选朝向", () => {
   assert.deepEqual(validateStep({ action:"move_to",x:1,y:0,z:-1,facing_deg:90 }), {action:"move_to",x:1,y:0,z:-1,facing_deg:90});
   assert.throws(() => validateStep({action:"move_to",x:1,y:1,z:1}), /坐标无效/);
   assert.throws(() => validateStep({action:"move_to",x:1,y:0,z:1,facing_deg:181}), /facing_deg/);
+});
+
+test("投掷方向只允许身前半圈：±90 以内", () => {
+  const base = { action: "throw", object_id: "basin", elevation_deg: 10, speed_mps: 3 };
+  assert.equal(validateStep({ ...base, yaw_deg: 0 }).yaw_deg, 0);
+  assert.equal(validateStep({ ...base, yaw_deg: 90 }).yaw_deg, 90);
+  assert.equal(validateStep({ ...base, yaw_deg: -90 }).yaw_deg, -90);
+  assert.throws(() => validateStep({ ...base, yaw_deg: 91 }), /yaw_deg/);
+  assert.throws(() => validateStep({ ...base, yaw_deg: -100 }), /yaw_deg/);
+  assert.throws(() => validateStep({ ...base, yaw_deg: 180 }), /yaw_deg/, "不能往正后方扔");
+  const cap = CAPABILITIES.find((c) => c.id === "throw");
+  assert.equal(cap.params.yaw_deg.min, -90);
+  assert.equal(cap.params.yaw_deg.max, 90);
 });

@@ -113,7 +113,7 @@ export const CAPABILITIES = [
     channels: ["item"],
     params: {
       object_id: { enum: HAND_OBJECTS },
-      yaw_deg: { type: "number", min: -180, max: 180, note: "相对角色朝向，正=左" },
+      yaw_deg: { type: "number", min: -90, max: 90, note: "相对角色朝向，正=左；只能投身前半圈，不允往身后扔" },
       elevation_deg: { type: "number", min: 0, max: 45 },
       speed_mps: { type: "number", min: 1, max: 6 },
     },
@@ -363,7 +363,7 @@ export function validateStep(step, id = "step") {
       return {
         action: "throw",
         object_id: step.object_id,
-        yaw_deg: num(step.yaw_deg, -180, 180, "yaw_deg"),
+        yaw_deg: num(step.yaw_deg, -90, 90, "yaw_deg"),
         elevation_deg: num(step.elevation_deg, 0, 45, "elevation_deg"),
         speed_mps: num(step.speed_mps, 1, 6, "speed_mps"),
       };

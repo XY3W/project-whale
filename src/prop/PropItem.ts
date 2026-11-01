@@ -339,8 +339,10 @@ export class PropItem {
 
   private launch() {
     const spec = this.throwSpec ?? { directionDeg: 0, speed: 2.6, spin: 120 };
+    // 兜底：无论上层怎么传，都只往身前半圈扔（|yaw|<=90）
     const elevation = (spec.elevationDeg ?? 12) * (Math.PI / 180);
-    const yaw = this.charRoot.rotation.y + (spec.directionDeg * Math.PI) / 180;
+    const directionDeg = Math.min(90, Math.max(-90, Number(spec.directionDeg) || 0));
+    const yaw = this.charRoot.rotation.y + (directionDeg * Math.PI) / 180;
     const flat = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
     const velocity = flat.clone().multiplyScalar(spec.speed * Math.cos(elevation)).setY(spec.speed * Math.sin(elevation));
     const axis = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize();
