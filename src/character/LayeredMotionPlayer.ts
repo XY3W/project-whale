@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PoseOverlay } from './PoseOverlay.ts';
 import { BlinkController } from './BlinkController.ts';
+import { buildTrackOwnership, regionClip } from './TrackOwnership.ts';
 
 
 export interface PerformanceEvent {
@@ -62,7 +63,7 @@ export const RUN_DISTANCES = Array.from({ length: 11 }, (_, i) => Math.round((0.
 const CARRY_BASES = ['chess_hold', 'chess_carry_start', 'chess_carry_walk', 'chess_carry_stop',
   'chess_carry_adjust_01', 'chess_carry_adjust_02', 'chess_carry_adjust_04', 'chess_carry_adjust_06', 'chess_carry_adjust_08', ...Object.keys(CARRY_RUN_SOURCE)];
 const BASE_CLIPS = ['idle_stand','walk_start','walk','walk_stop','run_start','run','run_stop',
-  'walk_adjust_02','walk_adjust_04','walk_adjust_06','walk_adjust_08', ...CARRY_BASES];
+  'walk_adjust_01','walk_adjust_02','walk_adjust_04','walk_adjust_06','walk_adjust_08', ...CARRY_BASES];
 const adjustName = (carry: boolean, meters: number) =>
   `${carry ? 'chess_carry_adjust' : 'walk_adjust'}_${String(Math.round(meters * 100)).padStart(2, '0')}`;
 type MoveKind = 'walk' | 'run' | 'adjust';
@@ -93,8 +94,10 @@ export class LayeredMotionPlayer {
   private soloLoop = false;
   /** 互动片段暂停：落到等待点后先停住，等服务端确认再继续（棋步提交对账） */
   private perfPaused = false;
-  /** 抱棋模式：基底层换成 chess_* 一套，走路不再摆臂 */
+  /** 抱棋姿态独立于移动基底；双臂由持棋层占用。 */
   private carryMode = false;
+  private chessPose: PoseOverlay | null = null;
+  private headGestures = new Map<string, THREE.AnimationAction>();
   private carryRunHandInverse: THREE.Matrix4 | null = null;
   private carryRunHand: THREE.Object3D | null = null;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
@@ -117,8 +120,55 @@ export class LayeredMotionPlayer {
     }
     this.registerCarryBases();
     this.registerCarryRuns();
+    this.registerComposition(clips);
     this.weights(); this.mixer.update(0);
   }
+
+  private registerComposition(clips: THREE.AnimationClip[]) {
+    // Some isolated performance previews deliberately provide only idle/tail
+    // clips; leave their existing playback intact when no partition is present.
+    if (!['walk.lower', 'walk.upperBase', 'tail_idle'].every(name => this.actions.has(name))) return;
+    const ownership = buildTrackOwnership(clips);
+    const hold = this.actions.get('chess_hold')?.getClip();
+    if (hold) this.chessPose = new PoseOverlay(this.root, regionClip(hold, 'chess.pose', ownership,
+      new Set(['torso', 'leftArm', 'rightArm'])));
+    // The 1 cm step is authored only in the original carry asset. Reuse only
+    // its lower-body tracks and pair them with the ordinary idle upper body.
+    const step = this.actions.get('chess_carry_adjust_01.lower')?.getClip();
+    const idle = this.actions.get('idle_stand.upperBase')?.getClip();
+    if (step && idle) {
+      for (const [suffix, clip] of [['lower', step], ['upperBase', idle]] as const) {
+        const copy = clip.clone(); copy.name = `walk_adjust_01.${suffix}`; copy.duration = step.duration;
+        const action = this.mixer.clipAction(copy).setEffectiveWeight(0); action.play();
+        this.actions.set(copy.name, action);
+      }
+      MOVE_CLIPS.walk_adjust_01 = MOVE_CLIPS.chess_carry_adjust_01;
+    }
+    for (const base of BASE_CLIPS) {
+      const source = this.actions.get(`${base}.upperBase`)?.getClip();
+      if (!source) continue;
+      for (const [suffix, regions] of [
+        ['head', new Set(['head'] as const)],
+        ['body', new Set(['torso', 'leftArm', 'rightArm'] as const)],
+      ] as const) {
+        const clip = regionClip(source, `${base}.upperBase.${suffix}`, ownership, regions);
+        if (!clip.tracks.length) continue;
+        const action = this.mixer.clipAction(clip).setEffectiveWeight(0); action.play();
+        this.actions.set(clip.name, action);
+      }
+    }
+    for (const name of ['notice', 'nod', 'look_left', 'look_right']) {
+      const clip = this.actions.get(name)?.getClip();
+      if (!clip) continue;
+      const part = regionClip(clip, `${name}.head`, ownership, new Set(['head']));
+      if (!part.tracks.length) continue;
+      const action = this.mixer.clipAction(part).setEffectiveWeight(0);
+      action.setLoop(THREE.LoopOnce, 1); action.clampWhenFinished = true; action.play();
+      this.headGestures.set(name, action);
+    }
+  }
+
+  private gestureAction(name: string) { return this.headGestures.get(name) ?? this.get(name); }
 
   /**
    * 抱棋动作在素材里是整段全身动画（含尾巴）。按 walk.lower 的骨骼分区切成
@@ -188,7 +238,7 @@ export class LayeredMotionPlayer {
   private get(name: string) { const a = this.actions.get(name); if (!a) throw new Error(`Missing baked clip: ${name}`); return a; }
   private setBase(base: string) {
     this.base = base; this.baseTime = 0;
-    for (const suffix of ['lower','upperBase']) this.actions.get(`${base}.${suffix}`)?.reset().play();
+    for (const suffix of ['lower','upperBase','upperBase.head','upperBase.body']) this.actions.get(`${base}.${suffix}`)?.reset().play();
   }
   private baseDistance(time: number): number {
     const spec = MOVE_CLIPS[this.base];
@@ -201,23 +251,26 @@ export class LayeredMotionPlayer {
 
   get moving(): boolean { return this.moveKind !== null; }
 
-  /** 站定静姿：普通是 idle_stand，抱棋是 chess_hold。等"走完了"的地方都该看这个。 */
+  /** 静止状态与是否持棋相互独立。 */
   private get atRest(): boolean { return this.base === 'idle_stand' || this.base === 'chess_hold'; }
   get carrying(): boolean { return this.carryMode; }
 
   /**
-   * 切换抱棋模式。只在站定时切，避免半途换基底把脚步打断。
-   * 抱棋期间手势由上层继续接管上臂，与素材的"双手占住"不冲突（手势本就只在站定时触发）。
+   * 切换双手抱棋姿态。只在站定时切，避免半步中姿态突变。
+   * 头部手势仍可使用，双手占用时拒绝需要手臂的手势。
    */
   setCarrying(on: boolean): boolean {
     if (this.carryMode === on) return true;
     if (this.moveKind) return false; // 走步中途不换基底
+    if (on && !this.chessPose?.trackCount) return false;
     this.carryMode = on;
     // 互动片段（含被取消后的淡出）还在播时只记状态，等它收完再落基底
     if (this.perf) return true;
-    this.setBase(on ? 'chess_hold' : 'idle_stand');
+    this.setBase('idle_stand');
     this.weights();
     this.mixer.update(0);
+    this.applyHolds(0);
+    this.carryRunHandInverse = on ? this.carryHandFrame()?.invert() ?? null : null;
     return true;
   }
 
@@ -233,7 +286,7 @@ export class LayeredMotionPlayer {
     this.halted = false;
     // n 是完整步周期数：起步之后要真的走满 n 圈，n=0（0.09m）直接收步
     this.cyclesLeft = n;
-    this.setBase(this.carryMode ? 'chess_carry_start' : 'walk_start');
+    this.setBase('walk_start');
     return true;
   }
 
@@ -245,12 +298,10 @@ export class LayeredMotionPlayer {
     const n = Math.round((meters - 0.144) / 0.32);
     if (n < 1 || n > 11) return false;
     if (Math.abs(0.144 + 0.32 * n - meters) > 1e-6) return false;
-    if (this.carryMode && !this.actions.has('chess_carry_run.lower')) return false;
-    this.carryRunHandInverse = this.carryMode ? this.carryHandFrame()?.invert() ?? null : null;
     this.moveKind = 'run';
     this.halted = false;
     this.cyclesLeft = n;
-    this.setBase(this.carryMode ? 'chess_carry_run_start' : 'run_start');
+    this.setBase('run_start');
     return true;
   }
 
@@ -264,7 +315,7 @@ export class LayeredMotionPlayer {
     this.moveKind = 'adjust';
     this.halted = false;
     this.cyclesLeft = 0;
-    this.setBase(adjustName(this.carryMode, match));
+    this.setBase(adjustName(false, match));
     return true;
   }
 
@@ -278,14 +329,16 @@ export class LayeredMotionPlayer {
   setWalking(value: boolean) {
     if (this.perf) return;
     if (!value) this.haltMovement();
-    else if (!this.moveKind && this.atRest) { this.moveKind = 'walk'; this.cyclesLeft = Infinity; this.setBase(this.carryMode ? 'chess_carry_start' : 'walk_start'); }
+    else if (!this.moveKind && this.atRest) { this.moveKind = 'walk'; this.cyclesLeft = Infinity; this.setBase('walk_start'); }
   }
-  gesture(name: string) {
-    if (this.perf) return;
+  gesture(name: string): boolean {
+    if (this.perf) return false;
     if (!['greet','notice','nod','look_left','look_right','think'].includes(name)) throw new Error('Unknown upper action');
-    if (this.upper && this.upper !== name) { this.queuedUpper=name; this.upperEnding=true; return; }
-    if (this.upper === name) return;
-    this.upper=name; this.upperEnding=false; this.get(name).reset().play().setEffectiveWeight(0);
+    if (this.carryMode && !this.headGestures.has(name)) return false;
+    if (this.upper && this.upper !== name) { this.queuedUpper=name; this.upperEnding=true; return true; }
+    if (this.upper === name) return true;
+    this.upper=name; this.upperEnding=false; this.gestureAction(name).reset().play().setEffectiveWeight(0);
+    return true;
   }
   clearGesture() { this.queuedUpper=null; this.upperEnding=true; }
   setTail(big: boolean) { this.tail=big?'tail_swish':'tail_idle'; }
@@ -317,7 +370,7 @@ export class LayeredMotionPlayer {
     const chess = (name: string | null) => (name && name.startsWith('chess_') ? name : null);
     const perfName = chess(this.perf?.name ?? null);
     if (perfName) return { clip: perfName, time: this.perf!.action.time };
-    if (this.carryMode && this.base in CARRY_RUN_SOURCE) {
+    if (this.carryMode) {
       const hand = this.carryHandFrame();
       return { clip: 'chess_hold', time: 0,
         handTransform: hand && this.carryRunHandInverse ? hand.multiply(this.carryRunHandInverse) : undefined };
@@ -345,12 +398,13 @@ export class LayeredMotionPlayer {
     const action = this.actions.get(name);
     if (!action) return Promise.resolve(false);
     if (this.perf) return Promise.resolve(false);
+    if (this.carryMode && !['chess_place', 'chess_capture_place'].includes(name)) return Promise.resolve(false);
     if (this.soloAction) this.stopSolo();
     this.clearGesture();
     this.moveKind = null;
     this.halted = false;
     for (const base of BASE_CLIPS) {
-      for (const suffix of ['lower','upperBase']) this.actions.get(`${base}.${suffix}`)?.setEffectiveWeight(0);
+      for (const suffix of ['lower','upperBase','upperBase.head','upperBase.body']) this.actions.get(`${base}.${suffix}`)?.setEffectiveWeight(0);
     }
     action.reset();
     action.setLoop(THREE.LoopOnce, 1);
@@ -432,9 +486,9 @@ export class LayeredMotionPlayer {
       running.resolve(false);
     }
     for (const base of BASE_CLIPS) {
-      for (const suffix of ['lower','upperBase']) this.actions.get(`${base}.${suffix}`)?.setEffectiveWeight(0);
+      for (const suffix of ['lower','upperBase','upperBase.head','upperBase.body']) this.actions.get(`${base}.${suffix}`)?.setEffectiveWeight(0);
     }
-    if (this.upper) this.get(this.upper).setEffectiveWeight(0);
+    if (this.upper) this.gestureAction(this.upper).setEffectiveWeight(0);
     this.get('tail_idle').setEffectiveWeight(0);
     this.get('tail_swish').setEffectiveWeight(0);
     this.upper = null;
@@ -524,11 +578,14 @@ export class LayeredMotionPlayer {
       const upperBase = this.actions.get(`${base}.upperBase`);
       const timeScale = base === 'idle_stand' || base === 'chess_hold' ? 1 : this.rate;
       lower?.setEffectiveWeight(w).setEffectiveTimeScale(timeScale);
-      upperBase?.setEffectiveWeight(w * (1 - this.upperWeight)).setEffectiveTimeScale(timeScale);
+      const headOnly = !!this.upper && this.headGestures.has(this.upper);
+      upperBase?.setEffectiveWeight(headOnly ? 0 : w * (1 - this.upperWeight)).setEffectiveTimeScale(timeScale);
+      this.actions.get(`${base}.upperBase.head`)?.setEffectiveWeight(headOnly ? w * (1 - this.upperWeight) : 0).setEffectiveTimeScale(timeScale);
+      this.actions.get(`${base}.upperBase.body`)?.setEffectiveWeight(headOnly ? w : 0).setEffectiveTimeScale(timeScale);
     }
     if (perf) {
       perf.action.setEffectiveWeight(perf.ending ? perf.fade : 1);
-      if (this.upper) this.get(this.upper).setEffectiveWeight(0);
+      if (this.upper) this.gestureAction(this.upper).setEffectiveWeight(0);
     }
     this.get('tail_idle').setEffectiveWeight(1 - this.tailMix);
     this.get('tail_swish').setEffectiveWeight(this.tailMix);
@@ -553,9 +610,14 @@ export class LayeredMotionPlayer {
     const perf = this.perf;
     const layer = perf?.layer ?? null;
     if(perf && this.perfBody)this.perfBody.apply(perf.action.time);
+    if (this.carryMode && (!perf || perf.ending)) this.chessPose?.apply(0);
     this.holdStats = { applied: [], skipped: [], layer };
     for (const [slot, hold] of this.holds) {
       if (!hold.enabled) continue;
+      if (this.carryMode && (slot === 'left_hand' || slot === 'right_hand')) {
+        this.holdStats.skipped.push(slot);
+        continue;
+      }
       // 收尾淡出阶段把手臂交回持仓层，避免 0.15s 淡出把持物姿势拉回 idle
       if (this.perfOwnsArm(layer, slot) && !perf!.ending) {
         this.holdStats.skipped.push(slot);
@@ -570,7 +632,7 @@ export class LayeredMotionPlayer {
   private advance(dt: number) {
     const approach=(v:number,target:number,duration=.25)=>v+Math.sign(target-v)*Math.min(Math.abs(target-v),dt/duration);
     if(this.upper){
-      const a=this.get(this.upper);
+      const a=this.gestureAction(this.upper);
       if(a.loop===THREE.LoopOnce && a.time>=a.getClip().duration-.25)this.upperEnding=true;
       this.upperWeight=approach(this.upperWeight,this.upperEnding?0:1);a.setEffectiveWeight(this.upperWeight);
       if(this.upperEnding && this.upperWeight<=1e-8){a.setEffectiveWeight(0);this.upper=null;this.upperWeight=0;this.upperEnding=false;const next=this.queuedUpper;this.queuedUpper=null;if(next)this.gesture(next);}
@@ -584,12 +646,11 @@ export class LayeredMotionPlayer {
 
   /** 基础片段结束时的状态转移 */
   private completeBase() {
-    const c = this.carryMode;
     const base = this.base;
-    const start = c ? 'chess_carry_start' : 'walk_start';
-    const loop = c ? 'chess_carry_walk' : 'walk';
-    const stop = c ? 'chess_carry_stop' : 'walk_stop';
-    const rest = c ? 'chess_hold' : 'idle_stand';
+    const start = 'walk_start';
+    const loop = 'walk';
+    const stop = 'walk_stop';
+    const rest = 'idle_stand';
     if (base === start) { this.setBase(this.cyclesLeft > 0 ? loop : stop); return; }
     if (base === 'run_start' || base === 'chess_carry_run_start') {
       const prefix = base === 'run_start' ? '' : 'chess_carry_';
@@ -645,9 +706,11 @@ export class LayeredMotionPlayer {
         this.perf = null;
         this.perfPaused = false;
         // 片段期间改过抱棋状态：收尾时落到对应的静姿
-        if (!this.moveKind) this.setBase(this.carryMode ? 'chess_hold' : 'idle_stand');
+        if (!this.moveKind) this.setBase('idle_stand');
         this.weights();
         this.mixer.update(0);
+        this.applyHolds(0);
+        this.carryRunHandInverse = this.carryMode ? this.carryHandFrame()?.invert() ?? null : null;
         resolve(!cancelled);
       }
     }

@@ -119,11 +119,11 @@ function run(player, seconds, onFrame) {
   return moved;
 }
 
-test('抱棋时走路换成 chess_* 一套，位移与片段同钟，落地回到 chess_hold', () => {
+test('抱棋姿态和普通走路独立组合，位移与片段同钟', () => {
   const player = new LayeredMotionPlayer(makeRig(), makeClips());
   assert.equal(player.state.base, 'idle_stand');
   assert.equal(player.setCarrying(true), true);
-  assert.equal(player.state.base, 'chess_hold');
+  assert.equal(player.state.base, 'idle_stand');
   assert.equal(player.state.resting, true);
   assert.equal(player.state.carrying, true);
 
@@ -134,10 +134,10 @@ test('抱棋时走路换成 chess_* 一套，位移与片段同钟，落地回�
   assert.equal(player.walkDistance(0.27), true);
   const moved = run(player, 10, () => bases.add(player.state.base));
   assert.ok(Math.abs(moved - 0.27) < 1e-6, `位移 ${moved} 应等于 0.27`);
-  assert.ok(!bases.has('walk'), '抱棋时不该出现普通走路');
-  const allowed = new Set(['chess_carry_start', 'chess_carry_walk', 'chess_carry_stop', 'chess_hold']);
+  assert.ok(bases.has('walk'), '抱棋时复用普通走路');
+  const allowed = new Set(['walk_start', 'walk', 'walk_stop', 'idle_stand']);
   for (const b of bases) assert.ok(allowed.has(b), `意外基底 ${b}`);
-  assert.equal(player.state.base, 'chess_hold');
+  assert.equal(player.state.base, 'idle_stand');
   assert.equal(player.moving, false);
 });
 
@@ -150,10 +150,10 @@ test('抱棋微调多一档 1cm，非抱棋时不接受 1cm', () => {
   const carry = new LayeredMotionPlayer(makeRig(), makeClips());
   carry.setCarrying(true);
   assert.equal(carry.adjustDistance(0.01), true);
-  assert.equal(carry.state.base, 'chess_carry_adjust_01');
+  assert.equal(carry.state.base, 'walk_adjust_01');
   const moved = run(carry, 5);
   assert.ok(Math.abs(moved - 0.01) < 1e-6, `位移 ${moved} 应等于 0.01`);
-  assert.equal(carry.state.base, 'chess_hold');
+  assert.equal(carry.state.base, 'idle_stand');
   assert.equal(carry.adjustDistance(0.05), false, '0.05 没有对应片段');
 });
 
@@ -161,10 +161,10 @@ test('抱棋允许跑，收步回到托棋；移动中不能切换抱棋模式',
   const player = new LayeredMotionPlayer(makeRig(), makeClips());
   player.setCarrying(true);
   assert.equal(player.runDistance(0.464), true);
-  assert.equal(player.state.base, 'chess_carry_run_start');
+  assert.equal(player.state.base, 'run_start');
   assert.equal(player.setCarrying(false), false);
   assert.ok(Math.abs(run(player, 10) - 0.464) < 1e-6);
-  assert.equal(player.state.base, 'chess_hold');
+  assert.equal(player.state.base, 'idle_stand');
 
   assert.equal(player.walkDistance(0.27), true);
   assert.equal(player.setCarrying(false), false, '走步中途不允许换基底');
@@ -179,6 +179,8 @@ test('抱棋跑动：真实跑步下肢、固定托棋上身，位移与时长�
     for (const speed of [0.75, 1, 1.25]) {
       const root = makeRig();
       const clips = makeClips();
+      clips.find(c => c.name === 'walk.upperBase').tracks.push(
+        new THREE.VectorKeyframeTrack('hand.l.position', [0, 1.6], [0, 0, 0, 0, 0, 0]));
       const hold = clips.find(c => c.name === 'chess_hold');
       hold.tracks = hold.tracks.map(t => t.name === UPPER
         ? new THREE.VectorKeyframeTrack('hand.l.position', [0, 1.6], [0.2, 0.5, 0.3, 0.2, 0.5, 0.3]) : t);
@@ -191,7 +193,7 @@ test('抱棋跑动：真实跑步下肢、固定托棋上身，位移与时长�
       const p = new LayeredMotionPlayer(root, clips); p.speed = speed; p.setCarrying(true);
       assert.equal(p.runDistance(1.744), true);
       let moved = 0, elapsed = 0, legsMoved = false;
-      const allowed = new Set(['chess_carry_run_start', 'chess_carry_run', 'chess_carry_run_stop', 'chess_hold']);
+      const allowed = new Set(['run_start', 'run', 'run_stop', 'idle_stand']);
       while (p.moving && elapsed < 15) {
         p.update(dt); elapsed += dt; moved += p.movementDelta;
         assert.ok(allowed.has(p.state.base));
@@ -205,7 +207,7 @@ test('抱棋跑动：真实跑步下肢、固定托棋上身，位移与时长�
       assert.equal(p.moving, false);
       assert.ok(Math.abs(moved - 1.744) < 1e-6);
       assert.ok(Math.abs(elapsed - 4.8 / speed) <= dt + 1e-6);
-      assert.equal(p.state.base, 'chess_hold');
+      assert.equal(p.state.base, 'idle_stand');
     }
   }
 });
@@ -231,7 +233,7 @@ test('互动片段播放期间切抱棋：先记状态，片段收尾才落到 c
   assert.equal(player.state.base, 'idle_stand', '片段没结束前不换基底');
   for (let t = 0; t < 2; t += 1 / 60) player.update(1 / 60);
   assert.equal(await done, true);
-  assert.equal(player.state.base, 'chess_hold');
+  assert.equal(player.state.base, 'idle_stand');
   assert.equal(player.state.carrying, true);
   assert.equal(player.state.resting, true);
 });

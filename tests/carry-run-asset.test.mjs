@@ -52,7 +52,39 @@ test('真实模型抱棋跑：双手相对棋子的距离稳定，起伏随手�
       assert.ok(relative(hands[i]).distanceTo(baseline[i]) < 0.002, `hand ${i} lost its grip at frame ${frames}`);
     }
   }
-  assert.equal(player.state.base, 'chess_hold');
+  assert.equal(player.state.base, 'idle_stand');
   assert.ok(Math.abs(moved - 1.744) < 1e-6);
   assert.ok(frames <= 290, '1.744m should take about 4.8 seconds, not slow-walk duration');
+});
+
+test('真实模型组合抱棋：走、跑、微调和点头都保持双手抓握', async () => {
+  const { root, player } = await rig();
+  player.setCarrying(true);
+  const board = new XiangqiBoard(new THREE.Scene());
+  board.curves = JSON.parse(fs.readFileSync('public/models/xiangqi-v1/prop_motion.json')).clips;
+  const piece = new THREE.Group(); root.add(piece);
+  board.instances.set('piece', piece); board.carried.add('piece');
+  const hands = [];
+  root.traverse(node => { if (['handl', 'handr'].includes(node.name.replace(/[^a-z0-9]/gi, '').toLowerCase())) hands.push(node); });
+  assert.equal(hands.length, 2);
+  const follow = () => {
+    const sample = player.carrySample;
+    assert.ok(board.followCarry(sample.clip, sample.time, sample.handTransform));
+    root.updateMatrixWorld(true);
+  };
+  const relative = hand => piece.getWorldPosition(new THREE.Vector3()).applyMatrix4(hand.matrixWorld.clone().invert());
+  follow(); const baseline = hands.map(relative);
+  assert.equal(player.gesture('greet'), false, '双手被占用时不能假装挥手成功');
+  for (const [method, distance] of [['walkDistance', .27], ['adjustDistance', .01], ['adjustDistance', .08], ['runDistance', .464]]) {
+    assert.equal(player[method](distance), true);
+    let frames = 0, moved = 0;
+    while (player.moving && frames++ < 500) {
+      if (frames === 10) assert.equal(player.gesture('nod'), true);
+      player.update(1 / 60); moved += player.movementDelta; root.position.z += player.movementDelta;
+      follow();
+      hands.forEach((hand, i) => assert.ok(relative(hand).distanceTo(baseline[i]) < .002, `${method}: hand ${i}, frame ${frames}`));
+    }
+    assert.ok(frames < 500);
+    assert.ok(Math.abs(moved - distance) < 1e-6);
+  }
 });

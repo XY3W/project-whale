@@ -561,7 +561,7 @@ async function boot() {
       return turnTravel*180/Math.PI;
     },
     play: async (id) => {
-      player.gesture(id);
+      if (!player.gesture(id)) throw new Error('ACTION_CONFLICT: 当前持物或互动动作占用了所需部位');
       await waitForProgress(() => player.state.upper === null, () => performance.now(), { idleMs: 60000, maxMs: 60000 });
     },
     /**
@@ -1174,8 +1174,8 @@ async function boot() {
       });
       if (!picked) return { ok: false, reason: aborted() ? "CANCELLED" : "PICKUP_FAILED" };
       if (aborted()) return { ok: false, reason: "CANCELLED" };
-      // 棋子已经在手上：换成抱棋基底层，之后走路不再摆臂
-      player.setCarrying(true);
+      // 双手姿态与行走独立；缺少姿态时回滚棋子，不能假装抱起成功。
+      if (!player.setCarrying(true)) return { ok: false, reason: "CARRY_POSE_UNAVAILABLE" };
       // 抱到目标旁：仍站在距目标 0.85m 的位置
       const dx2 = root.position.x - to.x;
       const dz2 = root.position.z - to.z;
@@ -1227,6 +1227,7 @@ async function boot() {
       // 抢占/取消/异常：不提交棋步，棋子放回原格，退出抱棋（安全放置）
       if (carried || released) {
         xiangqiBoard.endCarry(piece.id, { row: piece.row, col: piece.col });
+        if (player.moving) player.haltMovement();
         player.setCarrying(false);
       }
     }
