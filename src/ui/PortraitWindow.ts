@@ -17,6 +17,7 @@ export class PortraitWindow {
   private readonly position = new THREE.Vector3();
   private readonly look = new THREE.Vector3();
   private first = true;
+  private dockObserver: ResizeObserver | null = null;
 
   constructor() {
     this.frame = document.createElement('div');
@@ -29,16 +30,34 @@ export class PortraitWindow {
     document.body.appendChild(this.frame);
     this.resize();
     window.addEventListener('resize', () => this.resize());
+    // 侧栏高度会随内容变（定时任务展开/收起），布局变化时重新排小窗，避免压到边栏底下
+    const dock = document.querySelector('.left-dock');
+    if (dock && typeof ResizeObserver !== 'undefined') {
+      this.dockObserver = new ResizeObserver(() => this.resize());
+      this.dockObserver.observe(dock);
+    }
+    // 首帧布局稳定后再算一次（构造时侧栏可能还没排版）
+    requestAnimationFrame(() => this.resize());
   }
 
+  /**
+   * 宽度与左侧边栏对齐（读 .left-dock 的实际宽度，窄屏自动跟着变），
+   * 高度取 0.78 竖构图；如果边栏把下半屏占得太满，就压到剩下的空间里。
+   */
   resize() {
-    const vh = window.innerHeight || 720;
-    const h = Math.max(132, Math.min(208, Math.round(vh * 0.24)));
-    const w = Math.round(h * 0.78);
-    const margin = 16;
+    const dock = document.querySelector('.left-dock') as HTMLElement | null;
+    const box = dock?.getBoundingClientRect();
+    const width = box && box.width > 0 ? Math.round(box.width) : 220;
+    const margin = box ? Math.max(8, Math.round(box.left)) : 16;
+    const topLimit = box ? Math.round(box.bottom + 12) : 0;
+    const available = Math.max(150, (window.innerHeight || 720) - margin - Math.max(margin, topLimit));
+    const w = width;
+    // 高度取 0.78 竖构图，但必须让开侧栏：顶部不能压到边栏底下
+    const h = Math.max(150, Math.min(Math.round(w / 0.78), available));
     this.rect = { x: margin, y: margin, w, h };
     this.frame.style.width = `${w}px`;
     this.frame.style.height = `${h}px`;
+    this.frame.style.left = `${margin}px`;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     // 状态条别压在小窗上

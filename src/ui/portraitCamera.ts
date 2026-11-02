@@ -5,11 +5,11 @@ export const PORTRAIT = {
   fov: 32,
   /** 宽高比（竖构图），与 PortraitWindow 的 DOM 比例一致 */
   aspect: 0.78,
-  distance: 2.15,
+  distance: 3,
   /** 相机比注视点高一点，稍稍俯看 */
   eyeLift: 0.16,
   /** 注视点高度（从脚底算起） */
-  lookHeight: 0.58,
+  lookHeight: 0.6,
 } as const;
 
 /**

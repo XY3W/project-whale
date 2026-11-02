@@ -364,10 +364,13 @@ canvas { display: block; touch-action: none; -webkit-tap-highlight-color: transp
 .portrait-label {
   position: absolute;
   top: 7px;
-  left: 9px;
+  right: 9px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: rgba(8, 16, 30, 0.55);
   font: 600 9px/1 system-ui, sans-serif;
   letter-spacing: 0.18em;
-  color: rgba(170, 205, 240, 0.72);
+  color: rgba(190, 218, 248, 0.85);
 }
 @media (max-width: 819px) {
   .portrait-window { left: 8px; bottom: 8px; border-radius: 11px; }
