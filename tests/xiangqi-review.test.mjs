@@ -415,6 +415,11 @@ test('落子：到等待点先暂停，提交回执回来后才继续下降收�
   assert.ok(commitAt > ok.events.findIndex((e) => e.type === 'release'), '先到位（release）再提交');
   assert.ok(commitAt < completeAt, '提交要在整段动画结束之前，不是等它播完');
   assert.ok(!ok.events.some((e) => e.type === 'endCarry' && e.target && e.target.row === 0), '成功之后不能再把棋子拉回原格');
+  // 放下就立刻退出抱棋：不能等片段收尾，否则持棋层会在淡出里把双臂再罩回去
+  const releaseAt = ok.events.findIndex((e) => e.type === 'release');
+  const carryOffAt = ok.events.findIndex((e) => e.type === 'carrying' && e.on === false);
+  assert.ok(carryOffAt > releaseAt, 'release 之后要退出抱棋');
+  assert.ok(carryOffAt < completeAt, `退出抱棋应该在片段结束前（carryOff=${carryOffAt}, complete=${completeAt}）`);
   assert.equal(ok.outcome.ok, true);
 
   const denied = await runBridge({ commitReply: { committed: false, reason: 'STALE_REVISION' } });

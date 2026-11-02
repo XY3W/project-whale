@@ -1175,6 +1175,9 @@ async function boot() {
         if (type === "release") {
           xiangqiBoard.endCarry(piece.id, { row: step.to_row, col: step.to_col });
           released = true;
+          // 棋子已经出手：立刻退出抱棋姿态。否则片段的 0.15s 收尾里持棋层会重新
+          // 罩回双臂，看起来像放下之后又"端"了一下。
+          player.setCarrying(false);
           return;
         }
         if (type !== "placement_gate" && type !== "capture_commit_gate") return;

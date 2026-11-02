@@ -102,6 +102,8 @@ export class LayeredMotionPlayer {
   private carryRunHand: THREE.Object3D | null = null;
   /** Distance in metres advanced by the most recent update. Apply along character forward. */
   movementDelta = 0;
+  /** 调试用：持棋姿态层被应用的次数（淡出阶段不应该再涨） */
+  carryPoseApplies = 0;
   /** 调试用：这一帧持仓层实际作用/让位了哪些槽位 */
   holdStats: { applied: string[]; skipped: string[]; layer: string | null } = { applied: [], skipped: [], layer: null };
   get speed() { return this.rate; }
@@ -615,7 +617,7 @@ export class LayeredMotionPlayer {
     const perf = this.perf;
     const layer = perf?.layer ?? null;
     if(perf && this.perfBody)this.perfBody.apply(perf.action.time);
-    if (this.carryMode && (!perf || perf.ending)) this.chessPose?.apply(0);
+    if (this.carryMode && (!perf || perf.ending)) { this.chessPose?.apply(0); this.carryPoseApplies++; }
     this.holdStats = { applied: [], skipped: [], layer };
     for (const [slot, hold] of this.holds) {
       if (!hold.enabled) continue;
