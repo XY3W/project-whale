@@ -20,6 +20,7 @@ import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { Hud } from "./ui/Hud";
+import { PortraitWindow } from "./ui/PortraitWindow";
 import { PropItem } from "./prop/PropItem";
 import { PICKUP_RANGE_M, pickupRange } from "./prop/pickupRange";
 import { loadBasinAssets } from "./prop/catalog";
@@ -43,6 +44,7 @@ type Phase = "idle" | "stopping" | "turning" | "walking";
 
 async function boot() {
   const stage = new Stage(document.getElementById("app")!);
+  const portrait = new PortraitWindow();
 
   const loading = document.getElementById("loading")!;
   const bar = loading.querySelector(".loading-bar i") as HTMLElement;
@@ -1720,6 +1722,8 @@ async function boot() {
     player.setHoldEnabled("right_hand", scoop.mode === "hand");
 
     stage.update();
+    portrait.update(root, dt);
+    portrait.render(stage.renderer, stage.scene);
   });
 
   window.addEventListener("pagehide", () => { if (!readOnly) client.sendStateSnapshot(snapshot()); });
@@ -1741,7 +1745,7 @@ async function boot() {
   setTimeout(() => loading.remove(), 900);
 
   (window as unknown as Record<string, unknown>).whale = {
-    stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE, stepPropWorld, xiangqiBoard,
+    stage, root, player, meshes, chat, requestMove, tapCharacter, client, basin, scoop, basinBridge, alignInfo, board, audio, THREE, stepPropWorld, xiangqiBoard, portrait,
     stowScoop: loco.stowScoop, unstowScoop: loco.unstowScoop,
     getXiangqi: () => xiangqiView,
     getGame: () => gameBoard,
