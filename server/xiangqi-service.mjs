@@ -71,10 +71,11 @@ export class XiangqiService {
     return this.game ? publicGame(this.game) : null;
   }
 
-  /** 仅供模型上下文：棋谱来自权威已提交走子，进行中包含从开局到现在的全部记录。 */
+  /** 仅供模型上下文：棋谱来自权威已提交走子。只要棋局还没收摊/换局就一直带着，
+   *  已分胜负也要保留，方便复盘和回答"刚才怎么走的"；收摊后 public() 为 null，自然没有了。 */
   promptView() {
     const view = this.public();
-    if (!view || view.status !== "playing") return view;
+    if (!view) return view;
     return { ...view, moveHistory: this.game.moves.map(m => ({
       revision: m.revision, side: m.side, pieceId: m.pieceId,
       from: { ...m.from }, to: { ...m.to }, captured: m.captured ?? null,

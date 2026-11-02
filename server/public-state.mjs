@@ -288,7 +288,7 @@ export function xiangqiContext(view, character = null, slots = null, pending = n
     check: view.check,
     result: view.result,
     lastMove: view.lastMove ? { pieceId: view.lastMove.pieceId, from: view.lastMove.from, to: view.lastMove.to, captured: view.lastMove.captured } : null,
-    ...(view.status === "playing" && Array.isArray(view.moveHistory) ? { moveHistory: view.moveHistory } : {}),
+    ...(Array.isArray(view.moveHistory) ? { moveHistory: view.moveHistory } : {}),
     pieces: (view.pieces ?? []).map((p) => ({ id: p.id, side: p.side, kind: p.kind, row: p.row, col: p.col })),
     legalMoves: legal,
     pendingMove: pending,

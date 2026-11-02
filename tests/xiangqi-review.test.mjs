@@ -160,12 +160,18 @@ test('棋谱：从开局到当前的已提交走子按顺序进入所有模型�
     assert.ok(user.includes('"moveHistory"'));
     assert.ok(user.includes('"captured":"black_soldier_1"'));
   }
+  // 分出胜负但还没收摊：棋谱必须一直留在上下文里，方便复盘
   svc.game.status = 'won'; svc.game.result = {winner:'red',reason:'checkmate'};
-  assert.equal(svc.promptView().moveHistory, undefined);
+  assert.equal(svc.promptView().moveHistory.length, 3, '终局仍保留棋谱');
   for (const render of [toolStartMessages, planningMessages, reviewMessages]) {
-    const messages = render({ xiangqi:xiangqiContext(svc.promptView()), skills:{index:[]} });
-    assert.ok(messages.every(m => !m.content.includes('moveHistory')), '终局不发送棋谱');
+    const user = render({ xiangqi:xiangqiContext(svc.promptView()), skills:{index:[]} }).find(m => m.role === 'user').content;
+    assert.ok(user.includes('"moveHistory"'), '终局提示里仍有棋谱');
+    assert.ok(user.includes('"captured":"black_soldier_1"'));
+    assert.ok(!user.includes('legalMoves'), '终局不再给候选着法');
   }
+  // 收摊之后才没有
+  svc.clear();
+  assert.equal(svc.promptView(), null, '收摊后没有棋局');
   svc.start({userSide:'red', requestId:'new-game'});
   assert.deepEqual(svc.promptView().moveHistory, [], '换局不能带上旧棋谱');
 });
@@ -446,4 +452,19 @@ test('片段暂停：暂停期间动作时钟不推进', async () => {
   for (let i = 0; i < 120; i++) player.update(1 / 60);
   await done;
   assert.equal(seen, 1);
+});
+
+test('提示词：终局后不再注入完整棋规，但会说明棋谱仍在、别继续走子', () => {
+  const view = xiangqiContext({
+    gameId: 'g', ruleset: 'CCA2020', revision: 9, status: 'won', turn: 'red', userSide: 'red', characterSide: 'black',
+    check: false, result: { winner: 'red', reason: 'checkmate' }, lastMove: null,
+    pieces: [{ id: 'red_soldier_1', side: 'red', kind: 'pawn', row: 5, col: 0 }],
+    legalMoves: [], moveHistory: [{ revision: 1, side: 'red', pieceId: 'red_soldier_1', from: { row: 6, col: 0 }, to: { row: 5, col: 0 }, captured: null, check: false }],
+  });
+  const system = toolStartMessages({ xiangqi: view, skills: { index: [] } })[0].content;
+  assert.ok(!system.includes('【中国象棋】'), '终局不该再加载整套棋规');
+  assert.ok(system.includes('这盘棋已经分出结果'), '要说明棋局已结束');
+  assert.ok(system.includes('moveHistory'), '要说明棋谱仍然保留');
+  const user = toolStartMessages({ xiangqi: view, skills: { index: [] } }).find((m) => m.role === 'user').content;
+  assert.ok(user.includes('"moveHistory"'));
 });

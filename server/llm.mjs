@@ -60,7 +60,7 @@ export const PROTOCOL = (process.env.LLM_PROTOCOL ?? "json").trim() === "tools" 
  */
 export function renderSections(text, flags = {}) {
   return text
-    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku|xiangqi)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gm, (_, name, body) =>
+    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku|xiangqi|xiangqiended)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gmi, (_, name, body) =>
       flags[name.toLowerCase()] ? body : "",
     )
     .replace(/\n{3,}/g, "\n\n");
@@ -116,22 +116,25 @@ const OUTPUT_CONTRACT = outputContract();
  * 不把整套规则和旧合法着法一直挂在提示词里。
  */
 const xiangqiLive = (view) => !!view && view.status === "playing";
+/** 棋局还没收摊但已经分出胜负：只注入一小段说明，让模型别继续走子、按棋谱复盘 */
+const xiangqiEnded = (view) => !!view && view.status !== "playing";
 
-/** 终局后只留最小结果（谁赢、怎么结束、最后一手），不再给整套盘面与候选着法 */
+/** 终局后只留最小结果（谁赢、怎么结束、最后一手）+ 棋谱，不再给整套盘面与候选着法。
+ *  棋谱要一直留到用户收摊或换局。 */
 function slimXiangqi(view) {
   if (!view || view.status === "playing") return view;
-  const { rows, legalMoves, pieces, slots, currentCell, moveHistory, ...rest } = view;
+  const { rows, legalMoves, pieces, slots, currentCell, ...rest } = view;
   return rest;
 }
 
-/** 棋谱只保留最新快照的一份；结束或换局后不再发送旧棋谱。 */
+/** 棋谱只保留最新快照的一份；棋局还在（含已分胜负）就保留，收摊/换局后不再发送。 */
 export function filterXiangqiHistory(messages, liveGameId, currentView) {
-  let retained = currentView?.status === 'playing' && Array.isArray(currentView.moveHistory);
+  let retained = !!currentView && Array.isArray(currentView.moveHistory);
   const clean = (value) => {
     if (!value || typeof value !== 'object') return;
     if (Array.isArray(value)) { for (const child of value) clean(child); return; }
     if (value.xiangqi && typeof value.xiangqi === 'object' && Array.isArray(value.xiangqi.moveHistory)) {
-      if (!liveGameId || value.xiangqi.gameId !== liveGameId || value.xiangqi.status !== 'playing' || retained)
+      if (!liveGameId || value.xiangqi.gameId !== liveGameId || retained)
         delete value.xiangqi.moveHistory;
       else retained = true;
     }
@@ -165,7 +168,7 @@ function contextBlock(ctx) {
 }
 
 function render(templateName, ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), xiangqiended: xiangqiEnded(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
   // 索引已经写进 system prompt，就别在上下文 JSON 里再付一遍
   const base = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
   const contextForJson = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;
@@ -181,7 +184,7 @@ function render(templateName, ctx) {
  * 之后的轮次只追加 assistant(tool_calls) / tool(result)，前缀保持稳定以便命中缓存。
  */
 export function toolStartMessages(ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
+  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), xiangqiended: xiangqiEnded(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
   const { index, ...restSkills } = ctx.skills ?? {};
   const base = ctx.skills ? { ...ctx, skills: restSkills } : ctx;
   const clean = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;

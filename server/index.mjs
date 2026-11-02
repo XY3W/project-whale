@@ -1150,7 +1150,8 @@ async function runToolLoop(task, ws) {
         return;
       }
       if (turn === MAX_TOOL_TURNS) task.messages.push({role:"user", content:"已达到动作次数上限，请根据最后结果结束并说明情况，不要再执行动作。"});
-      const liveChessId = xiangqi.status === 'playing' ? xiangqi.game?.gameId : null;
+      // 棋局只要还没收摊就一直算"当前棋局"（终局也算），棋谱因此能留在上下文里
+      const liveChessId = xiangqi.public()?.gameId ?? null;
       const currentChess = xiangqiContext(xiangqi.promptView(), character, slotsOf(props), session.pendingXiangqi ?? null);
       const modelMessages = filterXiangqiHistory(task.messages, liveChessId, currentChess);
       const budget = estimateRequest({messages: [...modelMessages, {role: "system", content: JSON.stringify(TOOLS)}], maxInputTokens: MAX_INPUT_TOKENS});
