@@ -2,12 +2,12 @@ import * as THREE from 'three';
 
 /** 正面小窗的取景参数：相机站在她正前方，看向胸口略上方 */
 export const PORTRAIT = {
-  fov: 32,
+  fov: 26,
   /** 宽高比（竖构图），与 PortraitWindow 的 DOM 比例一致 */
   aspect: 0.78,
-  distance: 3,
+  distance: 2.8,
   /** 相机比注视点高一点，稍稍俯看 */
-  eyeLift: 0.16,
+  eyeLift: 0.15,
   /** 注视点高度（从脚底算起） */
   lookHeight: 0.6,
 } as const;
