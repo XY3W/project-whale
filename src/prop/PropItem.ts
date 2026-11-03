@@ -332,12 +332,23 @@ export class PropItem {
   setWaistTarget(bone: THREE.Bone, matrix: THREE.Matrix4) { this.waistBone = bone; this.waistAttach = matrix.clone(); }
   get waistReady(): boolean { return !!this.waistAttach; }
 
+  /**
+   * 直接把手上的/头上的东西朝身前扔出去（不播动画）。
+   * 用于"躺下之前先把盆勺丢开"这类宿主自己决定的清理动作。
+   */
+  tossAway(directionDeg = 0, speed = 2.4) {
+    if (this.state === "resting" || this.state === "flying") return false;
+    this.throwSpec = { directionDeg, speed, spin: 140, elevationDeg: 18 };
+    this.launch(true);
+    return true;
+  }
+
   cancel(){
     if(this.actionId)this.finish(false);
     if(this.mode==="uprighting"){this.mode="world";this.state="resting";this.bump();}
   }
 
-  private launch() {
+  private launch(fromCurrent = false) {
     const spec = this.throwSpec ?? { directionDeg: 0, speed: 2.6, spin: 120 };
     // 兜底：无论上层怎么传，都只往身前半圈扔（|yaw|<=90）
     const elevation = (spec.elevationDeg ?? 12) * (Math.PI / 180);
@@ -347,7 +358,8 @@ export class PropItem {
     const velocity = flat.clone().multiplyScalar(spec.speed * Math.cos(elevation)).setY(spec.speed * Math.sin(elevation));
     const axis = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), flat).normalize();
     const angularVelocity = axis.multiplyScalar((spec.spin * Math.PI) / 180);
-    this.followBone(this.bone, this.attach);
+    // 从当前位置抛出（手上的、头上的、腰间的都行）：不要先吸到手上
+    if (!fromCurrent) this.followBone(this.bone, this.attach);
     this.physics.launch({
       position: this.object.position.clone(),
       quaternion: this.object.quaternion.clone(),

@@ -45,3 +45,11 @@ export function canRoamNow(input: RoamGateInput): boolean {
     input.furnitureWeight === 0
   );
 }
+
+/** 坐/躺的休息时长：到点自动起身，避免"躺着过日子"。 */
+export const FURNITURE_REST_MS = 60_000;
+
+/** 休息是否结束（restUntil 为 0 表示没在休息）。 */
+export function shouldEndFurnitureRest(now: number, restUntil: number): boolean {
+  return restUntil > 0 && now >= restUntil;
+}

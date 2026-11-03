@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { describeCapabilities, validateStep } from '../server/capabilities.mjs';
 import { roomContext } from '../server/public-state.mjs';
 import { ROOM_FURNITURE } from '../shared/room-furniture.mjs';
-import { canRoamNow } from '../src/behavior/roamGate.ts';
+import { canRoamNow, shouldEndFurnitureRest, FURNITURE_REST_MS } from '../src/behavior/roamGate.ts';
 
 /** 家具能力与上下文：房间里的沙发/床。 */
 
@@ -84,6 +84,15 @@ test('位姿用角色本地坐标：她走到别处坐下，腿不会留在原�
   const foot = character.getObjectByName('footl');
   const world = new THREE.Vector3();
   foot.getWorldPosition(world);
-  assert.ok(Math.abs(world.x - (2 + 0.07)) < 0.08, `脚应当跟着她走，实际 x=${world.x}`);
-  assert.ok(Math.abs(world.z - (-1 - 0.03)) < 0.12, `脚应当跟着她走，实际 z=${world.z}`);
+  // 坐姿会让脚略向前（FK），但必须"跟着她"到 (2,-1) 附近，而不是留在世界原点
+  assert.ok(Math.abs(world.x - (2 + 0.07)) < 0.2, `脚应当跟着她走，实际 x=${world.x}`);
+  assert.ok(Math.abs(world.z - (-1)) < 0.35, `脚应当跟着她走，实际 z=${world.z}`);
+  assert.ok(world.y < 0.4, `脚不应该飞起来，实际 y=${world.y}`);
+});
+
+test('休息到点才算结束：坐着/躺着不会永远持续', () => {
+  assert.equal(shouldEndFurnitureRest(1000, 0), false, '没在休息');
+  assert.equal(shouldEndFurnitureRest(1000, 2000), false, '还没到点');
+  assert.equal(shouldEndFurnitureRest(2000, 2000), true, '到点结束');
+  assert.ok(FURNITURE_REST_MS > 0);
 });

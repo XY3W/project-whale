@@ -26,7 +26,7 @@ import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
-import { canRoamNow } from "./behavior/roamGate.ts";
+import { canRoamNow, shouldEndFurnitureRest, FURNITURE_REST_MS } from "./behavior/roamGate.ts";
 import { Hud } from "./ui/Hud";
 import { PortraitWindow } from "./ui/PortraitWindow";
 import { PropItem } from "./prop/PropItem";
@@ -179,10 +179,25 @@ async function boot() {
   furniturePose.capture();
   /** 坐下/躺下时身体平移到家具上的补间 */
   let furnitureTween: { from: THREE.Vector3; to: THREE.Vector3; t: number; dur: number } | null = null;
+  /** 休息到什么时候结束；到点自动起身，避免一直躺着 */
+  let furnitureRestUntil = 0;
   const furnitureState = () => ({
     state: (furniturePose.activeName === "sit" ? "sitting" : furniturePose.activeName === "lie" ? "lying" : "standing") as "standing" | "sitting" | "lying",
     furnitureId: furniturePose.activeFurniture,
   });
+  /** 结束坐/躺：起身并回到该家具的使用点（否则会站在床垫上）。 */
+  const leaveFurniture = () => {
+    if (!furniturePose.activeName) return;
+    const id = furniturePose.activeFurniture;
+    furniturePose.standUp();
+    const spec = id ? furnitureById(id) : null;
+    if (spec) {
+      root.position.x = spec.use.x;
+      root.position.z = spec.use.z;
+      root.rotation.y = spec.use.yaw;
+    }
+    furnitureRestUntil = 0;
+  };
   const furnitureBridge: FurnitureBridge = {
     snapshot: furnitureState,
     perform: async (step) => {
@@ -196,14 +211,30 @@ async function boot() {
       if (scenes.active !== "room" || scenes.transitioning) return { ok: false, error: "NOT_IN_ROOM", state: furnitureState() };
       const spec = furnitureById(step.furniture_id);
       if (!spec || !scenes.furniture.some((item) => item.id === step.furniture_id)) return { ok: false, error: "UNKNOWN_FURNITURE", state: furnitureState() };
-      if (basin.state === "held" || scoop.state === "held") return { ok: false, error: "HANDS_BUSY", state: furnitureState() };
+      if (spec.interact === "lie") {
+        // 躺下之前先把盆和勺扔出去：不播动画，直接朝身前抛，落地交给物理
+        if (basin.state !== "resting" && basin.state !== "flying") basin.tossAway(0, 2.2);
+        if (scoop.state !== "resting" && scoop.state !== "flying") scoop.tossAway(0, 2.2);
+        updateBasinHold();
+      } else if (basin.state === "held" || scoop.state === "held") {
+        return { ok: false, error: "HANDS_BUSY", state: furnitureState() };
+      }
       const dx = root.position.x - spec.use.x;
       const dz = root.position.z - spec.use.z;
       const distance = Math.hypot(dx, dz);
       if (distance > FURNITURE_USE_RANGE_M) return { ok: false, error: "OUT_OF_RANGE", state: furnitureState(), distance: Math.round(distance * 1000) / 1000 };
       root.rotation.y = spec.use.yaw;
-      furniturePose.sitOn(spec.id, spec.interact, spec.surfaceY);
-      furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.rest.x, root.position.y, spec.rest.z), t: 0, dur: 0.45 };
+      if (spec.interact === "lie") {
+        // 站在床边→瞬间躺到床上：位置直接对齐，位姿不做过渡
+        root.position.x = spec.rest.x;
+        root.position.z = spec.rest.z;
+        furnitureTween = null;
+        furniturePose.sitOn(spec.id, "lie", spec.surfaceY, { instant: true });
+      } else {
+        furniturePose.sitOn(spec.id, spec.interact, spec.surfaceY);
+        furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.rest.x, root.position.y, spec.rest.z), t: 0, dur: 0.45 };
+      }
+      furnitureRestUntil = Date.now() + FURNITURE_REST_MS;
       return { ok: true, state: furnitureState() };
     },
   };
@@ -1551,6 +1582,8 @@ async function boot() {
     },
     onMemoryUpdated:count=>controls.updatePending(count),
     onTaskState: (phase,taskId) => {
+      // 有新的思考/执行就开始新行为：先结束坐/躺
+      if (phase === "thinking" || phase === "executing") leaveFurniture();
       if((phase==='thinking'||phase==='checking')&&motionOwner==='roaming'){currentExecutor?.cancel();}
       if(phase==='thinking'&&taskId){void waitBodySettled().then(ok=>{if(ok)client.ready(taskId,snapshot());});}
       if(phase==='stopping'){
@@ -1734,6 +1767,21 @@ async function boot() {
     (window as unknown as { __sceneInfo: unknown }).__sceneInfo = () => ({ active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress });
     (window as unknown as { __debug: unknown }).__debug = () => ({ connected: client.connected, epoch: client.leaseEpoch, active: scenes.active });
     (window as unknown as { __stage: unknown }).__stage = stage;
+    (window as unknown as { __poseInfo: unknown }).__poseInfo = () => {
+      const read = (name: string) => {
+        const bone = root.getObjectByName(name.replace(/\./g, ""));
+        if (!bone) return "missing";
+        const v = new THREE.Vector3();
+        bone.getWorldPosition(v);
+        return [v.x, v.y, v.z].map((n) => +n.toFixed(2)).join(",");
+      };
+      return {
+        root: [root.position.x, root.position.y, root.position.z].map((n) => +n.toFixed(2)).join(","),
+        hip: read("thigh_twist.l"), knee: read("leg_stretch.l"), foot: read("foot.l"), toe: read("toes_01.l"), head: read("head.x"), rootBone: read("root.x"),
+        pose: furniturePose.activeName, weight: furniturePose.currentWeight,
+        basin: basin.state, scoop: scoop.state,
+      };
+    };
     (window as unknown as { __sit: unknown }).__sit = async (id: "sofa" | "bed" | "none") => {
       if (id !== "none") {
         const spec = furnitureById(id);
@@ -1757,7 +1805,8 @@ async function boot() {
       root.position.addScaledVector(forward, player.movementDelta);
     }
 
-    if (furniturePose.activeName && phase !== "idle") furniturePose.standUp();
+    if (furniturePose.activeName && phase !== "idle") leaveFurniture();
+    if (shouldEndFurnitureRest(Date.now(), furnitureRestUntil)) leaveFurniture();
 
     switch (phase) {
       case "stopping":

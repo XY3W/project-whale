@@ -126,12 +126,19 @@ export class FurniturePose {
     return this.weight;
   }
 
-  sitOn(furnitureId: string, name: "sit" | "lie", surfaceY: number) {
+  sitOn(furnitureId: string, name: "sit" | "lie", surfaceY: number, opts: { instant?: boolean } = {}) {
     this.capture();
     this.targetId = furnitureId;
     this.targetName = name;
     this.params = poseForSeat(name, surfaceY, this.restHipY);
     this.targetWeight = 1;
+    if (opts.instant) {
+      // 躺下不做过渡：直接到位，避免半程里身体和腿各转各的
+      this.weight = 1;
+      this.characterRoot.updateMatrixWorld(true);
+      this.applyPose(this.params, 1);
+      this.characterRoot.updateMatrixWorld(true);
+    }
   }
 
   standUp() {
@@ -155,6 +162,21 @@ export class FurniturePose {
   }
 
   private applyPose(params: PoseTarget, weight: number) {
+    // 整体变换 T：绕骨架根节点后仰 + 下沉/前移。腿的目标也要过一遍 T，
+    // 否则 root.x 转了、腿却被写回站立坐标，就成了"上半身躺下、脚还在原地"。
+    const rootRest = this.restOf("root.x");
+    const lean = new THREE.Quaternion().setFromAxisAngle(AXIS_X, params.leanDeg * DEG);
+    const pivot = rootRest ? rootRest.pos.clone() : new THREE.Vector3();
+    const offset = new THREE.Vector3(0, params.dropY, params.offsetZ);
+    const wholeBody = (local: THREE.Vector3) =>
+      local.clone().sub(pivot).applyQuaternion(lean).add(pivot).add(offset);
+
+    // 先摆根节点并刷新世界矩阵：腿的目标是相对"已经躺好/坐好的身体"换算的
+    if (this.rootBone && rootRest) {
+      this.blendBone("root.x", wholeBody(rootRest.pos), lean.clone().multiply(rootRest.quat), weight);
+      this.characterRoot.updateMatrixWorld(true);
+    }
+
     for (const side of ["l", "r"] as const) {
       const hipName = `thigh_twist.${side}`;
       const kneeName = `leg_stretch.${side}`;
@@ -164,30 +186,23 @@ export class FurniturePose {
       const ankleRest = this.restOf(ankleName);
       if (!hipRest || !kneeRest || !ankleRest) continue;
       const solved = solveSeatedLeg(hipRest.pos, kneeRest.pos, ankleRest.pos, params);
-
-      this.blendSegment([`thigh_twist.${side}`, `thigh_stretch.${side}`, `thigh_twist_2.${side}`], hipRest.pos, solved.hipPivot, solved.R1, weight);
-      this.blendSegment([`leg_stretch.${side}`, `leg_twist.${side}`, `leg_twist_2.${side}`], kneeRest.pos, solved.kneeNow, solved.R2, weight);
-      this.blendSegment([`foot.${side}`, `toes_01.${side}`], ankleRest.pos, solved.ankleNow, solved.R3, weight);
+      // 先按坐姿 FK 摆好，再过整体变换
+      this.blendSegment([`thigh_twist.${side}`, `thigh_stretch.${side}`, `thigh_twist_2.${side}`], hipRest.pos, solved.hipPivot, solved.R1, weight, lean, wholeBody);
+      this.blendSegment([`leg_stretch.${side}`, `leg_twist.${side}`, `leg_twist_2.${side}`], kneeRest.pos, solved.kneeNow, solved.R2, weight, lean, wholeBody);
+      this.blendSegment([`foot.${side}`, `toes_01.${side}`], ankleRest.pos, solved.ankleNow, solved.R3, weight, lean, wholeBody);
     }
 
-    // 骨架整体下沉/后仰：作用在 root.x 上，已摆好的腿跟着一起走
-    const rootRest = this.restOf("root.x");
-    if (this.rootBone && rootRest) {
-      const lean = new THREE.Quaternion().setFromAxisAngle(AXIS_X, params.leanDeg * DEG);
-      const localQuat = lean.clone().multiply(rootRest.quat);
-      const localPos = rootRest.pos.clone();
-      localPos.y += params.dropY;
-      localPos.z += params.offsetZ;
-      this.blendBone("root.x", localPos, localQuat, weight);
-    }
   }
 
-  private blendSegment(names: string[], anchorRest: THREE.Vector3, anchorNow: THREE.Vector3, R: THREE.Quaternion, weight: number) {
+  private blendSegment(
+    names: string[], anchorRest: THREE.Vector3, anchorNow: THREE.Vector3, R: THREE.Quaternion,
+    weight: number, whole: THREE.Quaternion, transform: (local: THREE.Vector3) => THREE.Vector3,
+  ) {
     for (const name of names) {
       const base = this.restOf(name);
       if (!base) continue;
-      const pos = base.pos.clone().sub(anchorRest).applyQuaternion(R).add(anchorNow);
-      this.blendBone(name, pos, R.clone().multiply(base.quat), weight);
+      const posed = base.pos.clone().sub(anchorRest).applyQuaternion(R).add(anchorNow);
+      this.blendBone(name, transform(posed), whole.clone().multiply(R).multiply(base.quat), weight);
     }
   }
 
