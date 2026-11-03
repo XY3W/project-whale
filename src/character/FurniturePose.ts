@@ -5,10 +5,14 @@ import * as THREE from "three";
  *
  * 这套骨架是"扁平烘焙"的：每条骨骼都直接挂在 root.x 下，位置+旋转逐帧烘焙，
  * 腿没有父子链。所以不能只转根骨，必须自己算 FK：给定髋/膝/踝角度，
- * 算出膝和踝的新世界坐标，再把「大腿段 / 小腿段 / 脚段」整组刚性搬过去。
+ * 算出膝和踝的新坐标，再把「大腿段 / 小腿段 / 脚段」整组刚性搬过去。
+ *
+ * 关键：所有静止姿态都存成"角色本地坐标"（相对角色根节点）。
+ * 位姿只跟身体有关、跟站在哪儿无关；否则她走到沙发再坐下时，
+ * 腿会被按旧世界坐标拽到别处——躺下时整个模型就散架。
  *
  * 位姿在 mixer 之后逐帧覆盖（LayeredMotionPlayer.setPoseOverride），
- * 站起时按 weight 插值回 idle，不会跳变。
+ * 起身按 weight 插值回 idle，不会跳变。
  */
 
 const DEG = Math.PI / 180;
@@ -20,7 +24,7 @@ export interface LegAngles {
   ankleDeg: number;
 }
 
-/** 给定三个关节的静止世界坐标，返回旋转后的膝/踝位置与三段旋转。 */
+/** 给定三个关节的静止坐标，返回旋转后的膝/踝位置与三段旋转。 */
 export function solveSeatedLeg(hip: THREE.Vector3, knee: THREE.Vector3, ankle: THREE.Vector3, angles: LegAngles) {
   const hipPivot = hip.clone();
   const R1 = new THREE.Quaternion().setFromAxisAngle(AXIS_X, angles.hipDeg * DEG);
@@ -36,9 +40,9 @@ export interface PoseTarget {
   kneeDeg: number;
   ankleDeg: number;
   leanDeg: number;
-  /** 骨架根节点的世界 y 偏移（负数=下沉） */
+  /** 骨架根节点沿身体本地 y 的偏移（负数=下沉） */
   dropY: number;
-  /** 骨架根节点的 z 偏移（躺下时挪到床中间） */
+  /** 身体本地 z 偏移（躺下时往床头/床中挪一点） */
   offsetZ: number;
 }
 
@@ -53,7 +57,9 @@ export function poseForSeat(name: "sit" | "lie", surfaceY: number, restHipY: num
 type Rest = { pos: THREE.Vector3; quat: THREE.Quaternion };
 
 export class FurniturePose {
+  private readonly characterRoot: THREE.Object3D;
   private readonly bones = new Map<string, THREE.Bone>();
+  /** 角色本地坐标下的静止姿态 */
   private readonly rest = new Map<string, Rest>();
   private readonly rootBone: THREE.Bone | null;
   private captured = false;
@@ -66,6 +72,7 @@ export class FurniturePose {
   readonly blendSeconds: number;
 
   constructor(characterRoot: THREE.Object3D, blendSeconds = 0.45) {
+    this.characterRoot = characterRoot;
     this.blendSeconds = blendSeconds;
     characterRoot.traverse((obj) => {
       const bone = obj as THREE.Bone;
@@ -84,17 +91,23 @@ export class FurniturePose {
     return bone ? this.rest.get(bone.name) ?? null : null;
   }
 
-  /** mixer 跑过第一帧（或 idle）之后调用一次，记录静止姿态与世界变换。 */
+  /** mixer 跑过第一帧 idle 之后调用一次；之后角色走到哪里都不影响位姿。 */
   capture() {
     if (this.captured) return;
-    const root = this.bones.values().next().value?.parent;
-    root?.updateMatrixWorld(true);
+    this.characterRoot.updateMatrixWorld(true);
+    const rootWorldInverse = new THREE.Matrix4().copy(this.characterRoot.matrixWorld).invert();
+    const rootWorldQuat = new THREE.Quaternion();
+    this.characterRoot.getWorldQuaternion(rootWorldQuat);
+    const rootWorldQuatInverse = rootWorldQuat.clone().invert();
     for (const [name, bone] of this.bones) {
-      const pos = new THREE.Vector3();
-      const quat = new THREE.Quaternion();
-      bone.getWorldPosition(pos);
-      bone.getWorldQuaternion(quat);
-      this.rest.set(name, { pos, quat });
+      const worldPos = new THREE.Vector3();
+      const worldQuat = new THREE.Quaternion();
+      bone.getWorldPosition(worldPos);
+      bone.getWorldQuaternion(worldQuat);
+      this.rest.set(name, {
+        pos: worldPos.applyMatrix4(rootWorldInverse),
+        quat: rootWorldQuatInverse.clone().multiply(worldQuat),
+      });
     }
     const hip = this.restOf("thigh_twist.l");
     if (hip) this.restHipY = hip.pos.y;
@@ -161,11 +174,11 @@ export class FurniturePose {
     const rootRest = this.restOf("root.x");
     if (this.rootBone && rootRest) {
       const lean = new THREE.Quaternion().setFromAxisAngle(AXIS_X, params.leanDeg * DEG);
-      const worldQ = lean.clone().multiply(rootRest.quat);
-      const worldPos = rootRest.pos.clone();
-      worldPos.y += params.dropY;
-      worldPos.z += params.offsetZ;
-      this.blendBone("root.x", worldPos, worldQ, weight);
+      const localQuat = lean.clone().multiply(rootRest.quat);
+      const localPos = rootRest.pos.clone();
+      localPos.y += params.dropY;
+      localPos.z += params.offsetZ;
+      this.blendBone("root.x", localPos, localQuat, weight);
     }
   }
 
@@ -178,16 +191,22 @@ export class FurniturePose {
     }
   }
 
-  private blendBone(name: string, worldPos: THREE.Vector3, worldQuat: THREE.Quaternion, weight: number) {
+  /** localPos/localQuat 是"角色本地坐标"，这里换算成骨骼本地变换再插值。 */
+  private blendBone(name: string, localPos: THREE.Vector3, localQuat: THREE.Quaternion, weight: number) {
     const bone = this.boneOf(name);
     if (!bone || !bone.parent) return;
-    bone.parent.updateMatrixWorld(true);
-    const inverse = new THREE.Matrix4().copy(bone.parent.matrixWorld).invert();
-    const localPos = worldPos.clone().applyMatrix4(inverse);
+    this.characterRoot.updateMatrixWorld(true);
+    const rootWorldQuat = new THREE.Quaternion();
+    this.characterRoot.getWorldQuaternion(rootWorldQuat);
+    const worldPos = localPos.clone().applyMatrix4(this.characterRoot.matrixWorld);
+    const worldQuat = rootWorldQuat.multiply(localQuat);
+
+    const parentInverse = new THREE.Matrix4().copy(bone.parent.matrixWorld).invert();
+    const localToBone = worldPos.clone().applyMatrix4(parentInverse);
     const parentQuat = new THREE.Quaternion();
     bone.parent.getWorldQuaternion(parentQuat);
-    const localQuat = parentQuat.invert().multiply(worldQuat);
-    bone.position.lerp(localPos, weight);
-    bone.quaternion.slerp(localQuat, weight);
+    const boneQuat = parentQuat.invert().multiply(worldQuat);
+    bone.position.lerp(localToBone, weight);
+    bone.quaternion.slerp(boneQuat, weight);
   }
 }

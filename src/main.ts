@@ -26,6 +26,7 @@ import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
+import { canRoamNow } from "./behavior/roamGate.ts";
 import { Hud } from "./ui/Hud";
 import { PortraitWindow } from "./ui/PortraitWindow";
 import { PropItem } from "./prop/PropItem";
@@ -173,6 +174,9 @@ async function boot() {
   // ---- 房间家具：沙发坐下 / 床躺下 ----
   const furniturePose = new FurniturePose(root);
   player.setPoseOverride(furniturePose);
+  // 先让 mixer 落一次 idle，再记录本地静止姿态；坐/躺只跟身体有关，跟站哪儿无关
+  player.update(0);
+  furniturePose.capture();
   /** 坐下/躺下时身体平移到家具上的补间 */
   let furnitureTween: { from: THREE.Vector3; to: THREE.Vector3; t: number; dur: number } | null = null;
   const furnitureState = () => ({
@@ -1807,9 +1811,13 @@ async function boot() {
     // 有进行中的扫雷局时不启动机械漫游：那是她的“棋盘时间”，
     // 模型在思考/退避时也该待在盘边，而不是走开去闲逛。
     const gameInProgress = gameBoard?.status === "playing";
-    const canRoam =
-      stateApplied && !errorActive && !readOnly && client.connected && motionOwner === "none" && !destination && !roamBusy && !taskActive &&
-      !gameInProgress && phase === "idle" && !player.state.walking && player.state.resting;
+    const canRoam = canRoamNow({
+      stateApplied, errorActive, readOnly, connected: client.connected, motionOwner,
+      hasDestination: !!destination, roamBusy, taskActive, gameInProgress,
+      phase, walking: player.state.walking, resting: player.state.resting,
+      // 坐着/躺着是持续状态：不许漫游把她从沙发/床上拽走
+      furniturePoseActive: !!furniturePose.activeName, furnitureWeight: furniturePose.currentWeight,
+    });
 
     if (canRoam) {
       roamTimer -= dt;

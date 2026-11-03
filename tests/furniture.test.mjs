@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { describeCapabilities, validateStep } from '../server/capabilities.mjs';
 import { roomContext } from '../server/public-state.mjs';
 import { ROOM_FURNITURE } from '../shared/room-furniture.mjs';
+import { canRoamNow } from '../src/behavior/roamGate.ts';
 
 /** 家具能力与上下文：房间里的沙发/床。 */
 
@@ -45,4 +46,44 @@ test('坐姿求解：大腿前摆、小腿向下，脚落在座面下方', async
   assert.ok(sit.dropY < 0, '坐下要下沉');
   const lie = poseForSeat('lie', 0.16, 0.3);
   assert.equal(lie.leanDeg, -90, '躺下整体后仰 90°');
+});
+
+test('坐着/躺着时禁止自主漫游，起身过渡期间也不许', () => {
+  const base = {
+    stateApplied: true, errorActive: false, readOnly: false, connected: true, motionOwner: 'none',
+    hasDestination: false, roamBusy: false, taskActive: false, gameInProgress: false,
+    phase: 'idle', walking: false, resting: true, furniturePoseActive: false, furnitureWeight: 0,
+  };
+  assert.equal(canRoamNow(base), true, '站着待机可以漫游');
+  assert.equal(canRoamNow({ ...base, furniturePoseActive: true }), false, '坐着/躺着不能漫游');
+  assert.equal(canRoamNow({ ...base, furnitureWeight: 0.4 }), false, '起身过渡中也不能漫游');
+  assert.equal(canRoamNow({ ...base, taskActive: true }), false, '任务中不漫游');
+});
+
+test('位姿用角色本地坐标：她走到别处坐下，腿不会留在原地', async () => {
+  const THREE = await import('three');
+  const { FurniturePose } = await import('../src/character/FurniturePose.ts');
+  const character = new THREE.Object3D();
+  const rootBone = new THREE.Bone(); rootBone.name = 'rootx'; rootBone.position.set(0, 0.34, 0);
+  character.add(rootBone);
+  const add = (name, x, y, z) => { const b = new THREE.Bone(); b.name = name; b.position.set(x, y, z); rootBone.add(b); return b; };
+  for (const side of ['l', 'r']) {
+    const sign = side === 'l' ? 1 : -1;
+    add(`thigh_twist${side}`, 0.066 * sign, -0.039, 0);
+    add(`leg_stretch${side}`, 0.066 * sign, -0.171, 0.01);
+    add(`foot${side}`, 0.07 * sign, -0.269, -0.033);
+  }
+  const pose = new FurniturePose(character, 0.2);
+  pose.capture();
+  // 她先走到沙发边（世界坐标变了），再坐下
+  character.position.set(2, 0, -1);
+  character.updateMatrixWorld(true);
+  pose.sitOn('sofa', 'sit', 0.2);
+  for (let i = 0; i < 40; i++) pose.update(1 / 60);
+  assert.equal(pose.currentWeight, 1);
+  const foot = character.getObjectByName('footl');
+  const world = new THREE.Vector3();
+  foot.getWorldPosition(world);
+  assert.ok(Math.abs(world.x - (2 + 0.07)) < 0.08, `脚应当跟着她走，实际 x=${world.x}`);
+  assert.ok(Math.abs(world.z - (-1 - 0.03)) < 0.12, `脚应当跟着她走，实际 z=${world.z}`);
 });
