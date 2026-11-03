@@ -179,10 +179,7 @@ async function boot() {
     document.body.classList.toggle("scene-room", to === "room");
     syncSceneButtons(to);
   };
-  const sceneTrace: string[] = [];
-  (window as unknown as { __sceneTrace: string[] }).__sceneTrace = sceneTrace;
   function switchScene(to: "playground" | "room") {
-    sceneTrace.push(`call to=${to} active=${scenes.active} transitioning=${scenes.transitioning} games=${!!(gameBoard || gomokuView || xiangqiView)} connected=${client.connected}`);
     if (scenes.transitioning || scenes.active === to) return;
     if (gameBoard || gomokuView || xiangqiView) {
       chat.setError("先把棋局收起来再换场地");
