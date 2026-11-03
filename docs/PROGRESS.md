@@ -11,7 +11,10 @@
 - **道具**：盆勺跨场景始终存在，held/worn 跟着走，resting 落到新场景锚点。
 - **模型**：`world.scene`、`{{#room}}` 段落（"在房间里、不能开局"）。
 - **家具互动**：`use_furniture{furniture_id}`（sofa 坐下 / bed 躺下 / none 起身）。运行时位姿由 `src/character/FurniturePose.ts` 在 mixer 之后按权重覆盖：先算腿的 FK（髋/膝/踝三段整体搬移），再让骨架下沉/后仰；坐下 0.45s 混合，身体同时补间到座面/床面。校验：必须在房间、双手没拿东西、离使用点 ≤1.2m；失败返回 `NOT_IN_ROOM / HANDS_BUSY / OUT_OF_RANGE / UNKNOWN_FURNITURE`。家具位置与使用点是 `shared/room-furniture.mjs` 单一来源，客户端和服务端共用。
-- **验证**：`tests/scene-protocol.test.mjs` 4 项、`tests/furniture.test.mjs` 3 项；真实浏览器（本地 brain）确认点击→服务端确认→转场→按钮隐藏，以及沙发坐下 / 床躺下的画面。
+- **修复（2026-11-04）**：
+  - 坐着/躺着被机械漫游拖走 —— 新增 `src/behavior/roamGate.ts` 的 `canRoamNow()`，把"家具姿态激活"和"起身过渡中（weight>0）"都算作阻塞条件。
+  - 躺下模型散架 —— `FurniturePose.capture()` 改为记录**角色本地坐标**（相对角色根节点），应用时再换算回世界；基准在角色出生后采一次，不再用坐下那一刻的世界姿态（原来她走到沙发/床前再坐下，腿会被按旧世界坐标拽走）。
+- **验证**：`tests/scene-protocol.test.mjs` 4 项、`tests/furniture.test.mjs` 5 项（含漫游闸门与位姿本地坐标回归）；真实浏览器（本地 brain）确认点击→服务端确认→转场→按钮隐藏，以及沙发坐下 / 床躺下的画面。
 
 未完成：沙发坐下 / 床躺下的运行时位姿（`sitlab.html` 实验已完成，等接进执行器），家具美术仍是程序化几何体。
 
