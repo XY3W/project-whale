@@ -11,6 +11,8 @@
 - **道具**：盆勺跨场景始终存在，held/worn 跟着走，resting 落到新场景锚点。
 - **模型**：`world.scene`、`{{#room}}` 段落（"在房间里、不能开局"）。
 - **家具互动**：`use_furniture{furniture_id}`（sofa 坐下 / bed 躺下 / none 起身）。运行时位姿由 `src/character/FurniturePose.ts` 在 mixer 之后按权重覆盖：先算腿的 FK（髋/膝/踝三段整体搬移），再让骨架下沉/后仰；坐下 0.45s 混合，身体同时补间到座面/床面。校验：必须在房间、双手没拿东西、离使用点 ≤1.2m；失败返回 `NOT_IN_ROOM / HANDS_BUSY / OUT_OF_RANGE / UNKNOWN_FURNITURE`。家具位置与使用点是 `shared/room-furniture.mjs` 单一来源，客户端和服务端共用。
+- **持续动作机制（2026-11-04）**：动作可以标 `persistent: true`（目前是 `use_furniture`）。持续动作生效期间主循环不跑随机游走；移动类动作、新任务、休息到点都会结束它。名单在 `shared/persistent-actions.mjs`，客户端与服务端共用。
+- **躺下流程交还给模型（2026-11-04）**：宿主不再替她扔东西。躺下/坐下前身上有东西（手、头、腰）会返回 `HANDS_BUSY`；提示词只写"睡觉需要把身上的东西丢出去"，具体是先 unwear、unstow_scoop 还是直接 throw，由她自己排步骤。
 - **修复 2（2026-11-04）**：
   - 躺下改为**瞬间到位**：站在床边直接躺到床上，不做位姿过渡（过渡期里身体和腿各转各的，容易看成"脚飞了"）。
   - 躺下前宿主会先把手里的/头上的盆和勺朝身前扔开（`PropItem.tossAway`，从当前位置抛出、不播动画），再躺下。

@@ -20,10 +20,10 @@ export interface RoamGateInput {
   phase: string;
   walking: boolean;
   resting: boolean;
-  /** 是否处于坐/躺姿态 */
-  furniturePoseActive: boolean;
-  /** 坐/躺插值权重：起身过渡期间也还不允许漫游 */
-  furnitureWeight: number;
+  /** 当前是否处于"持续动作"状态（坐下/躺下等，见 shared/persistent-actions.mjs） */
+  persistentActionActive: boolean;
+  /** 持续动作的退出过渡权重：起身过程里也还不允许漫游 */
+  persistentWeight: number;
 }
 
 export function canRoamNow(input: RoamGateInput): boolean {
@@ -40,9 +40,9 @@ export function canRoamNow(input: RoamGateInput): boolean {
     input.phase === "idle" &&
     !input.walking &&
     input.resting &&
-    // 持续状态：坐着、躺着、或者正在起身的过程里都不许漫游
-    !input.furniturePoseActive &&
-    input.furnitureWeight === 0
+    // 持续动作：坐/躺/以后的状态类动作，以及退出的过渡里都不许漫游
+    !input.persistentActionActive &&
+    input.persistentWeight === 0
   );
 }
 

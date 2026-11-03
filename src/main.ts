@@ -27,6 +27,7 @@ import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
 import { canRoamNow, shouldEndFurnitureRest, FURNITURE_REST_MS } from "./behavior/roamGate.ts";
+import { PERSISTENT_ACTIONS } from "../shared/persistent-actions.mjs";
 import { Hud } from "./ui/Hud";
 import { PortraitWindow } from "./ui/PortraitWindow";
 import { PropItem } from "./prop/PropItem";
@@ -181,12 +182,15 @@ async function boot() {
   let furnitureTween: { from: THREE.Vector3; to: THREE.Vector3; t: number; dur: number } | null = null;
   /** 休息到什么时候结束；到点自动起身，避免一直躺着 */
   let furnitureRestUntil = 0;
+  /** 当前生效的"持续动作"（坐下/躺下…）：非空时不跑随机游走 */
+  let persistentAction: string | null = null;
   const furnitureState = () => ({
     state: (furniturePose.activeName === "sit" ? "sitting" : furniturePose.activeName === "lie" ? "lying" : "standing") as "standing" | "sitting" | "lying",
     furnitureId: furniturePose.activeFurniture,
   });
   /** 结束坐/躺：起身并回到该家具的使用点（否则会站在床垫上）。 */
   const leaveFurniture = () => {
+    persistentAction = null;
     if (!furniturePose.activeName) return;
     const id = furniturePose.activeFurniture;
     furniturePose.standUp();
@@ -211,12 +215,11 @@ async function boot() {
       if (scenes.active !== "room" || scenes.transitioning) return { ok: false, error: "NOT_IN_ROOM", state: furnitureState() };
       const spec = furnitureById(step.furniture_id);
       if (!spec || !scenes.furniture.some((item) => item.id === step.furniture_id)) return { ok: false, error: "UNKNOWN_FURNITURE", state: furnitureState() };
-      if (spec.interact === "lie") {
-        // 躺下之前先把盆和勺扔出去：不播动画，直接朝身前抛，落地交给物理
-        if (basin.state !== "resting" && basin.state !== "flying") basin.tossAway(0, 2.2);
-        if (scoop.state !== "resting" && scoop.state !== "flying") scoop.tossAway(0, 2.2);
-        updateBasinHold();
-      } else if (basin.state === "held" || scoop.state === "held") {
+      // 躺下/坐下之前，身上不能拿着东西：模型要用 throw（戴头上的先 unwear）把它们扔出去。
+      // 这里只做校验，不替她抛——抛投动作必须由她自己执行。
+      const basinBusy = basin.state !== "resting" && basin.state !== "flying";
+      const scoopBusy = (scoop.state !== "resting" && scoop.state !== "flying") || scoop.mode === "waist";
+      if (basinBusy || scoopBusy) {
         return { ok: false, error: "HANDS_BUSY", state: furnitureState() };
       }
       const dx = root.position.x - spec.use.x;
@@ -235,6 +238,7 @@ async function boot() {
         furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.rest.x, root.position.y, spec.rest.z), t: 0, dur: 0.45 };
       }
       furnitureRestUntil = Date.now() + FURNITURE_REST_MS;
+      persistentAction = "use_furniture";
       return { ok: true, state: furnitureState() };
     },
   };
@@ -1479,6 +1483,10 @@ async function boot() {
   };
 
   const runOwned = async (owner: Owner, plan: Plan) => {
+    // 坐/躺是持续状态：只有计划里真的要动位置/转身时才打断它。
+    // 不能按 phase 判断——执行 use_furniture 的那一帧 phase 还是 stopping，会把她立刻拉起来。
+    const moves = plan.steps.some((step) => ["move_to", "walk", "run", "walk_adjust", "walk_to", "turn"].includes(step.action));
+    if (moves) leaveFurniture();
     if (motionOwner !== "none") {
       currentExecutor?.cancel();
       player.clearGesture();
@@ -1494,6 +1502,14 @@ async function boot() {
     const ex = makeExecutor();
     try {
       const result = await ex.run(plan);
+      // 持续动作：成功执行后进入"不游走"状态；移动类动作会先 leaveFurniture 清掉
+      if (result && moves) {
+        persistentAction = null;
+      } else if (result) {
+        const persistentStep = [...(result.steps ?? [])].reverse()
+          .find((step) => step.status === "succeeded" && PERSISTENT_ACTIONS.has(step.action));
+        if (persistentStep) persistentAction = persistentStep.action;
+      }
       return epoch === motionEpoch && currentExecutor === ex ? result : null; // 过期结果不回报
     } finally {
       if (epoch === motionEpoch) motionOwner = "none";
@@ -1760,13 +1776,27 @@ async function boot() {
     // 无头浏览器会节流 requestAnimationFrame，转场推进不动；调试时手动步进。
     (window as unknown as { __advance: unknown }).__advance = (seconds: number) => {
       const step = 1 / 60;
-      for (let t = 0; t < seconds; t += step) { advanceScene(step); player.update(step); }
+      for (let t = 0; t < seconds; t += step) {
+        advanceScene(step);
+        player.update(step);
+        basin.update(step, player.performanceTime);
+        scoop.update(step, player.performanceTime);
+        stepPropWorld(step);
+      }
       stage.renderer.render(stage.scene, stage.camera);
       return { active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress };
     };
     (window as unknown as { __sceneInfo: unknown }).__sceneInfo = () => ({ active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress });
     (window as unknown as { __debug: unknown }).__debug = () => ({ connected: client.connected, epoch: client.leaseEpoch, active: scenes.active });
     (window as unknown as { __stage: unknown }).__stage = stage;
+    (window as unknown as { __plan: unknown }).__plan = (steps: unknown) => runOwned("plan", { steps } as Plan);
+    (window as unknown as { __hold: unknown }).__hold = (id: "basin" | "rice_scoop") => basinBridge.pickupInstant(id);
+    (window as unknown as { __teleport: unknown }).__teleport = (x: number, z: number) => { root.position.x = x; root.position.z = z; };
+    (window as unknown as { __resetProps: unknown }).__resetProps = () => { basinBridge.reset("basin"); basinBridge.reset("rice_scoop"); };
+    (window as unknown as { __propPos: unknown }).__propPos = () => ({
+      basin: { state: basin.state, x: +basin.position.x.toFixed(2), y: +basin.position.y.toFixed(2), z: +basin.position.z.toFixed(2) },
+      scoop: { state: scoop.state, x: +scoop.position.x.toFixed(2), y: +scoop.position.y.toFixed(2), z: +scoop.position.z.toFixed(2) },
+    });
     (window as unknown as { __poseInfo: unknown }).__poseInfo = () => {
       const read = (name: string) => {
         const bone = root.getObjectByName(name.replace(/\./g, ""));
@@ -1805,7 +1835,6 @@ async function boot() {
       root.position.addScaledVector(forward, player.movementDelta);
     }
 
-    if (furniturePose.activeName && phase !== "idle") leaveFurniture();
     if (shouldEndFurnitureRest(Date.now(), furnitureRestUntil)) leaveFurniture();
 
     switch (phase) {
@@ -1864,8 +1893,8 @@ async function boot() {
       stateApplied, errorActive, readOnly, connected: client.connected, motionOwner,
       hasDestination: !!destination, roamBusy, taskActive, gameInProgress,
       phase, walking: player.state.walking, resting: player.state.resting,
-      // 坐着/躺着是持续状态：不许漫游把她从沙发/床上拽走
-      furniturePoseActive: !!furniturePose.activeName, furnitureWeight: furniturePose.currentWeight,
+      // 持续动作（坐下/躺下/以后的睡觉…）期间不许漫游把她拽走
+      persistentActionActive: persistentAction !== null, persistentWeight: furniturePose.currentWeight,
     });
 
     if (canRoam) {

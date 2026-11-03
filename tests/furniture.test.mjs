@@ -11,6 +11,7 @@ test('use_furniture 已注册，参数只认 sofa / bed / none', () => {
   const cap = describeCapabilities().find((item) => item.id === 'use_furniture');
   assert.ok(cap, '能力表里要有 use_furniture');
   assert.ok(cap.params.furniture_id.enum.includes('sofa'));
+  assert.equal(cap.persistent, true, '坐下/躺下是持续动作，要标 persistent');
   assert.deepEqual(validateStep({ action: 'use_furniture', furniture_id: 'sofa' }), { action: 'use_furniture', furniture_id: 'sofa' });
   assert.throws(() => validateStep({ action: 'use_furniture', furniture_id: 'fridge' }), /furniture_id|枚举|enum/i, '不认识的家具要拒绝');
 });
@@ -52,11 +53,11 @@ test('坐着/躺着时禁止自主漫游，起身过渡期间也不许', () => {
   const base = {
     stateApplied: true, errorActive: false, readOnly: false, connected: true, motionOwner: 'none',
     hasDestination: false, roamBusy: false, taskActive: false, gameInProgress: false,
-    phase: 'idle', walking: false, resting: true, furniturePoseActive: false, furnitureWeight: 0,
+    phase: 'idle', walking: false, resting: true, persistentActionActive: false, persistentWeight: 0,
   };
   assert.equal(canRoamNow(base), true, '站着待机可以漫游');
-  assert.equal(canRoamNow({ ...base, furniturePoseActive: true }), false, '坐着/躺着不能漫游');
-  assert.equal(canRoamNow({ ...base, furnitureWeight: 0.4 }), false, '起身过渡中也不能漫游');
+  assert.equal(canRoamNow({ ...base, persistentActionActive: true }), false, '持续动作期间不能漫游');
+  assert.equal(canRoamNow({ ...base, persistentWeight: 0.4 }), false, '退出过渡中也不能漫游');
   assert.equal(canRoamNow({ ...base, taskActive: true }), false, '任务中不漫游');
 });
 

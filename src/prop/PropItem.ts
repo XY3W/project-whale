@@ -332,17 +332,6 @@ export class PropItem {
   setWaistTarget(bone: THREE.Bone, matrix: THREE.Matrix4) { this.waistBone = bone; this.waistAttach = matrix.clone(); }
   get waistReady(): boolean { return !!this.waistAttach; }
 
-  /**
-   * 直接把手上的/头上的东西朝身前扔出去（不播动画）。
-   * 用于"躺下之前先把盆勺丢开"这类宿主自己决定的清理动作。
-   */
-  tossAway(directionDeg = 0, speed = 2.4) {
-    if (this.state === "resting" || this.state === "flying") return false;
-    this.throwSpec = { directionDeg, speed, spin: 140, elevationDeg: 18 };
-    this.launch(true);
-    return true;
-  }
-
   cancel(){
     if(this.actionId)this.finish(false);
     if(this.mode==="uprighting"){this.mode="world";this.state="resting";this.bump();}

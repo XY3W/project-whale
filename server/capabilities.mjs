@@ -123,6 +123,8 @@ export const CAPABILITIES = [
   {
     id: "use_furniture",
     enabled: true,
+    // 持续动作：坐下/躺下期间宿主不跑随机游走；见 shared/persistent-actions.mjs
+    persistent: true,
     changesPosition: true,
     channels: ["body_locomotion"],
     params: {
@@ -141,6 +143,7 @@ export function describeCapabilities() {
   return CAPABILITIES.filter((c) => c.enabled && !c.legacy).map((c) => ({
     id: c.id,
     changesPosition: c.changesPosition,
+    ...(c.persistent ? { persistent: true } : {}),
     channels: c.channels,
     params: c.params,
   }));
