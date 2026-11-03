@@ -6,7 +6,23 @@ import path from 'node:path';
 import { createGame, move, signature, adjudicateRepeat } from '../server/xiangqi.mjs';
 import { XiangqiService } from '../server/xiangqi-service.mjs';
 import { xiangqiContext } from '../server/public-state.mjs';
-import { toolStartMessages, planningMessages, reviewMessages, filterXiangqiHistory } from '../server/llm.mjs';
+import { toolStartMessages, planningMessages, reviewMessages, filterXiangqiHistory, MOVE_HISTORY_HEADER } from '../server/llm.mjs';
+
+/** 棋谱块固定追加在提示词末尾；这里按块头切出来解析。 */
+function readHistory(content) {
+  const at = content.indexOf(`${MOVE_HISTORY_HEADER}\n`);
+  assert.ok(at >= 0, '提示词里应当有棋谱块');
+  const end = content.indexOf('REQUEST_CONTEXT_JSON:', at);
+  return JSON.parse(content.slice(at + MOVE_HISTORY_HEADER.length + 1, end).trim());
+}
+
+/** 上下文 JSON 现在是提示词最后一段，单独取出来解析。 */
+function readContext(content) {
+  const at = content.lastIndexOf('REQUEST_CONTEXT_JSON:');
+  const start = at + 'REQUEST_CONTEXT_JSON:'.length + 1;
+  const end = content.indexOf('\n', start);
+  return JSON.parse(content.slice(start, end < 0 ? undefined : end));
+}
 
 
 /** 一份完整的公开盘面（用于棋盘类回归） */
@@ -124,8 +140,7 @@ test('提示词：终局只留最小结果，不再带盘面和候选着法', ()
     pieces: [{ id: 'red_rook_1', side: 'red', kind: 'rook', row: 9, col: 0 }], legalMoves: [{ pieceId: 'red_rook_1', row: 8, col: 0 }],
   });
   const messages = toolStartMessages({ xiangqi: finished, skills: { index: [] } });
-  const message = messages.find((m) => m.content.startsWith('REQUEST_CONTEXT_JSON'));
-  const ctx = JSON.parse(message.content.split('\n')[1]);
+  const ctx = readContext(messages.find((m) => m.role === 'user').content);
   assert.equal(ctx.xiangqi.status, 'drawn');
   assert.equal(ctx.xiangqi.result.reason, 'repetition');
   assert.equal(ctx.xiangqi.rows, undefined, '终局不该再带盘面');
@@ -157,7 +172,9 @@ test('棋谱：从开局到当前的已提交走子按顺序进入所有模型�
   for (const render of [toolStartMessages, planningMessages, reviewMessages]) {
     const messages = render({ xiangqi:view, skills:{index:[]} });
     const user = messages.find(m => m.role === 'user').content;
-    assert.ok(user.includes('"moveHistory"'));
+    assert.equal(user.includes('"moveHistory"'), false, '棋谱不再塞进上下文 JSON');
+    assert.deepEqual(readHistory(user).map(m => m.revision), [1,2,3], '棋谱按顺序追加在尾部大块');
+    assert.ok(user.trimEnd().endsWith('}'), '本轮上下文 JSON 收尾在最后');
     assert.ok(user.includes('"captured":"black_soldier_1"'));
   }
   // 分出胜负但还没收摊：棋谱必须一直留在上下文里，方便复盘
@@ -165,7 +182,7 @@ test('棋谱：从开局到当前的已提交走子按顺序进入所有模型�
   assert.equal(svc.promptView().moveHistory.length, 3, '终局仍保留棋谱');
   for (const render of [toolStartMessages, planningMessages, reviewMessages]) {
     const user = render({ xiangqi:xiangqiContext(svc.promptView()), skills:{index:[]} }).find(m => m.role === 'user').content;
-    assert.ok(user.includes('"moveHistory"'), '终局提示里仍有棋谱');
+    assert.equal(readHistory(user).length, 3, '终局提示里仍有棋谱');
     assert.ok(user.includes('"captured":"black_soldier_1"'));
     assert.ok(!user.includes('legalMoves'), '终局不再给候选着法');
   }
@@ -176,29 +193,44 @@ test('棋谱：从开局到当前的已提交走子按顺序进入所有模型�
   assert.deepEqual(svc.promptView().moveHistory, [], '换局不能带上旧棋谱');
 });
 
-test('工具多轮：结束或换局后过滤之前注入的棋谱，不修改原始消息', () => {
-  const context = {xiangqi:{gameId:'old', status:'playing', moveHistory:[{pieceId:'red_soldier_1'}]}};
+test('工具多轮：棋谱只在末尾留一份，历史工具结果与收摊后的请求都不再携带', () => {
+  const context = {xiangqi:{gameId:'old', status:'playing', revision:1}};
+  const starter = toolStartMessages({
+    xiangqi: {...context.xiangqi, moveHistory:[{revision:1,pieceId:'red_soldier_1'}]},
+    skills:{index:[]},
+  });
   const messages = [
-    {role:'user', content:`REQUEST_CONTEXT_JSON:\n${JSON.stringify(context)}\n\n工具说明`},
-    {role:'tool', content:JSON.stringify({world:{xiangqi:{...context.xiangqi, moveHistory:[...context.xiangqi.moveHistory,{pieceId:'black_soldier_1'}]}}})},
+    ...starter,
+    {role:'tool', content:JSON.stringify({world:{xiangqi:{...context.xiangqi, moveHistory:[{revision:1,pieceId:'red_soldier_1'},{revision:2,pieceId:'black_soldier_1'}]}}})},
   ];
+  const original = JSON.stringify(messages);
   const live = filterXiangqiHistory(messages, 'old');
-  assert.ok(!live[0].content.includes('moveHistory'), '较旧快照不重复发送棋谱');
-  assert.ok(live[1].content.includes('red_soldier_1'), '保留最新快照的完整棋谱');
-  assert.ok(live[1].content.includes('black_soldier_1'), '包含刚提交的最新一步');
-  const newest = {...context.xiangqi, revision:3, moveHistory:[{pieceId:'red_soldier_1'},{pieceId:'black_soldier_1'},{pieceId:'red_soldier_2'}]};
+  assert.equal(original, JSON.stringify(messages), '不修改原始消息');
+  assert.equal(live[2].content.includes('moveHistory'), false, '工具结果不再携带棋谱');
+  assert.deepEqual(readHistory(live[1].content).map(m => m.pieceId), ['red_soldier_1'], '末尾棋谱保留');
+
+  const newest = {...context.xiangqi, revision:3, moveHistory:[
+    {revision:1,pieceId:'red_soldier_1'},
+    {revision:2,pieceId:'black_soldier_1'},
+    {revision:3,pieceId:'red_soldier_2'},
+  ]};
   const refreshed = filterXiangqiHistory(messages, 'old', newest);
-  assert.ok(refreshed[0].content.includes('red_soldier_2'), '每轮以当前权威棋谱刷新上下文');
-  assert.ok(!refreshed[1].content.includes('moveHistory'), '旧工具结果不重复发送');
-  assert.ok(filterXiangqiHistory(messages, null, null).every(m => !m.content.includes('moveHistory')));
+  assert.equal(readContext(refreshed[1].content).xiangqi.revision, 3, '上下文 JSON 跟随当前权威盘面');
+  assert.deepEqual(readHistory(refreshed[1].content).map(m => m.pieceId), ['red_soldier_1','black_soldier_1','red_soldier_2'], '末尾棋谱刷新为最新一份');
+  assert.equal(refreshed[2].content.includes('moveHistory'), false, '刷新后工具结果仍不重复携带');
+
+  for (const cleared of [filterXiangqiHistory(messages, null, null), filterXiangqiHistory(messages, null)]) {
+    const payload = cleared.filter(m => m.role !== 'system');
+    assert.ok(payload.every(m => !m.content.includes('moveHistory')), '收摊后不再发送棋谱');
+    assert.ok(!cleared[1].content.includes(MOVE_HISTORY_HEADER), '收摊后末尾棋谱块被移除');
+  }
   assert.equal(filterXiangqiHistory([{role:'tool', content:'{"world":{"xiangqi":{"moveHistory":[...'}], null)[0].content,
     '[过期棋局的压缩快照已移除]');
   for (const id of [null, 'new-game']) {
     const filtered = filterXiangqiHistory(messages, id);
-    assert.ok(filtered.every(m => !m.content.includes('moveHistory')));
-    assert.ok(filtered[0].content.endsWith('\n\n工具说明'));
+    assert.equal(filtered[1].content.includes(MOVE_HISTORY_HEADER), id !== null, '没有棋局时不保留末尾块');
   }
-  assert.ok(messages[0].content.includes('red_soldier_1'));
+  assert.ok(messages[1].content.includes('red_soldier_1'), '原始消息不被修改');
 });
 
 test('盘面编码：红方大写、黑方小写，同一行能分清敌我', () => {
@@ -471,5 +503,6 @@ test('提示词：终局后不再注入完整棋规，但会说明棋谱仍在�
   assert.ok(system.includes('这盘棋已经分出结果'), '要说明棋局已结束');
   assert.ok(system.includes('moveHistory'), '要说明棋谱仍然保留');
   const user = toolStartMessages({ xiangqi: view, skills: { index: [] } }).find((m) => m.role === 'user').content;
-  assert.ok(user.includes('"moveHistory"'));
+  assert.deepEqual(readHistory(user).map((m) => m.pieceId), ['red_soldier_1'], '终局仍带完整棋谱');
+  assert.equal(user.includes('"moveHistory"'), false, '棋谱不进上下文 JSON');
 });

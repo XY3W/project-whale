@@ -119,48 +119,101 @@ const xiangqiLive = (view) => !!view && view.status === "playing";
 /** 棋局还没收摊但已经分出胜负：只注入一小段说明，让模型别继续走子、按棋谱复盘 */
 const xiangqiEnded = (view) => !!view && view.status !== "playing";
 
-/** 终局后只留最小结果（谁赢、怎么结束、最后一手）+ 棋谱，不再给整套盘面与候选着法。
- *  棋谱要一直留到用户收摊或换局。 */
+/** 终局后只留最小结果（谁赢、怎么结束、最后一手），不再给整套盘面与候选着法。
+ *  棋谱不在这里：它单独成块，排在快照之前（见 moveHistoryBlock / composeUserContent）。 */
 function slimXiangqi(view) {
-  if (!view || view.status === "playing") return view;
-  const { rows, legalMoves, pieces, slots, currentCell, ...rest } = view;
-  return rest;
+  if (!view) return view;
+  const { moveHistory, ...rest } = view;
+  if (rest.status === "playing") return rest;
+  const { rows, legalMoves, pieces, slots, currentCell, ...minimal } = rest;
+  return minimal;
 }
 
-/** 棋谱只保留最新快照的一份；棋局还在（含已分胜负）就保留，收摊/换局后不再发送。 */
-export function filterXiangqiHistory(messages, liveGameId, currentView) {
-  let retained = !!currentView && Array.isArray(currentView.moveHistory);
-  const clean = (value) => {
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) { for (const child of value) clean(child); return; }
-    if (value.xiangqi && typeof value.xiangqi === 'object' && Array.isArray(value.xiangqi.moveHistory)) {
-      if (!liveGameId || value.xiangqi.gameId !== liveGameId || retained)
-        delete value.xiangqi.moveHistory;
-      else retained = true;
-    }
-    for (const child of Object.values(value).reverse()) clean(child);
+/**
+ * 棋谱块：整局棋谱是本局最大的一块，只在末尾追加，旧内容是新一轮的前缀。
+ * 它放在"上下文 JSON 之前"：缓存按 token 前缀匹配，棋谱追加不打断前缀，
+ * 而盘面快照每走一手都变，所以快照必须排在棋谱之后（见 composeUserContent）。
+ */
+export const MOVE_HISTORY_HEADER = "XIANGQI_MOVE_HISTORY_JSON:";
+
+export function moveHistoryBlock(view) {
+  const history = view?.moveHistory;
+  return Array.isArray(history) ? `${MOVE_HISTORY_HEADER}\n${JSON.stringify(history)}` : "";
+}
+
+const CONTEXT_MARKER = "REQUEST_CONTEXT_JSON:";
+
+/**
+ * user 正文的尾部顺序（稳定 → 易变）：
+ *   阶段指令 → 输出契约 / 工具说明 → 棋谱（只追加）→ 本轮上下文 JSON（每轮都变）
+ * 这样 system + 指令 + 契约 + 整局棋谱都能命中前缀缓存，只有最后一小段快照需要重算。
+ */
+function composeUserContent({ instructions, contract, history, context }) {
+  return [instructions, contract, history, context]
+    .map((part) => (typeof part === "string" ? part.trim() : part))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/** 把 user 正文拆成 head（指令/契约）、棋谱块、上下文 JSON 三段。 */
+function splitUserContent(content) {
+  const ctxAt = content.lastIndexOf(CONTEXT_MARKER);
+  if (ctxAt < 0) return null;
+  const histAt = content.lastIndexOf(MOVE_HISTORY_HEADER);
+  const hasHistory = histAt >= 0 && histAt < ctxAt;
+  return {
+    head: (hasHistory ? content.slice(0, histAt) : content.slice(0, ctxAt)).replace(/\s+$/, ""),
+    history: hasHistory ? content.slice(histAt, ctxAt).replace(/\s+$/, "") : "",
+    context: content.slice(ctxAt),
   };
-  return messages.map((_, index) => messages[messages.length - 1 - index]).map(message => {
-    if (typeof message.content !== 'string') return message;
-    const isContext = message.role === 'user' && message.content.startsWith('REQUEST_CONTEXT_JSON:\n');
-    if (!isContext && message.role !== 'tool') return message;
-    const prefix = isContext ? 'REQUEST_CONTEXT_JSON:\n' : '';
-    const end = isContext ? message.content.indexOf('\n', prefix.length) : -1;
-    const raw = isContext ? message.content.slice(prefix.length, end < 0 ? undefined : end) : message.content;
+}
+
+/** 棋谱只在末尾块里出现一次：历史工具结果里的副本全部剥掉，避免重复占位。
+ *  currentView 有值时用它刷新上下文 JSON 与棋谱块（工具循环中途盘面可能已经变化）。 */
+export function filterXiangqiHistory(messages, liveGameId, currentView) {
+  const strip = (value) => {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) { for (const child of value) strip(child); return; }
+    if (value.xiangqi && typeof value.xiangqi === "object") delete value.xiangqi.moveHistory;
+    for (const child of Object.values(value)) strip(child);
+  };
+  const patchContext = (content) => {
+    const parts = splitUserContent(content);
+    if (!parts) return null;
+    const start = CONTEXT_MARKER.length + 1;
+    const end = parts.context.indexOf("\n", start);
+    const lineEnd = end < 0 ? parts.context.length : end;
     try {
-      const value = JSON.parse(raw); clean(value);
-      // Refresh the initial context, so a later model call sees every move
-      // even if the game changed after this tool loop started.
-      if (isContext && currentView !== undefined) value.xiangqi = currentView ? slimXiangqi(currentView) : null;
-      return { ...message, content: prefix + JSON.stringify(value) + (isContext && end >= 0 ? message.content.slice(end) : '') };
+      const value = JSON.parse(parts.context.slice(start, lineEnd));
+      if (currentView !== undefined) value.xiangqi = currentView ? slimXiangqi(currentView) : null;
+      else if (value.xiangqi) delete value.xiangqi.moveHistory;
+      const context = `${CONTEXT_MARKER}\n${JSON.stringify(value)}${parts.context.slice(lineEnd)}`;
+      // 没有当前棋局（currentView 为 null，或调用方明确说没有 live game）就不发棋谱。
+      const history = currentView !== undefined ? moveHistoryBlock(currentView) : (liveGameId ? parts.history : "");
+      return composeUserContent({ instructions: parts.head, history, context });
+    } catch {
+      return null;
+    }
+  };
+  return messages.map((message) => {
+    if (typeof message.content !== "string") return message;
+    if (message.role === "user") {
+      const patched = patchContext(message.content);
+      return patched === null ? message : { ...message, content: patched };
+    }
+    if (message.role !== "tool") return message;
+    try {
+      const value = JSON.parse(message.content);
+      strip(value);
+      return { ...message, content: JSON.stringify(value) };
     } catch {
       // A compacted tool result can be truncated JSON. Do not leak a partial
       // stale chess record into a subsequent request after the game ends.
-      if (message.role === 'tool' && message.content.includes('"moveHistory"'))
-        return { ...message, content: '[过期棋局的压缩快照已移除]' };
-      return message;
+      return message.content.includes('"moveHistory"')
+        ? { ...message, content: '[过期棋局的压缩快照已移除]' }
+        : message;
     }
-  }).reverse();
+  });
 }
 
 function contextBlock(ctx) {
@@ -172,10 +225,19 @@ function render(templateName, ctx) {
   // 索引已经写进 system prompt，就别在上下文 JSON 里再付一遍
   const base = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
   const contextForJson = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;
-  const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", () => contextBlock({ ...contextForJson, phase: ctx.phase ?? templateName.replace(".txt", "") }));
+  const tpl = renderSections(readPrompt(templateName), flags).replace("{{REQUEST_CONTEXT_JSON}}", "");
+  const context = contextBlock({ ...contextForJson, phase: ctx.phase ?? templateName.replace(".txt", "") });
   return [
     { role: "system", content: systemPrompt(flags) },
-    { role: "user", content: tpl + "\n\n" + OUTPUT_CONTRACT },
+    {
+      role: "user",
+      content: composeUserContent({
+        instructions: tpl,
+        contract: OUTPUT_CONTRACT,
+        history: moveHistoryBlock(ctx.xiangqi),
+        context,
+      }),
+    },
   ];
 }
 
@@ -192,7 +254,11 @@ export function toolStartMessages(ctx) {
     { role: "system", content: systemPrompt(flags) },
     {
       role: "user",
-      content: `REQUEST_CONTEXT_JSON:\n${JSON.stringify(clean)}\n\n${toolSummary()}`,
+      content: composeUserContent({
+        contract: toolSummary(),
+        history: moveHistoryBlock(ctx.xiangqi),
+        context: `REQUEST_CONTEXT_JSON:\n${JSON.stringify(clean)}`,
+      }),
     },
   ];
 }
