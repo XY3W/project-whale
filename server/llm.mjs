@@ -103,7 +103,7 @@ export function systemPrompt(flags = {}) {
 
 /** 兼容旧调用：没有对局上下文的静态拼接 */
 export const SYSTEM_PROMPT = systemPrompt({});
-export const PROMPT_VERSION="prompt-20261027-v4-persistent-chat";
+export const PROMPT_VERSION="prompt-20261103-v5-cache-order";
 
 const OUTPUT_CONTRACT = outputContract();
 
