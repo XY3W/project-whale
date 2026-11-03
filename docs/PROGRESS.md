@@ -1,3 +1,21 @@
+# 2026-11-04 房间场景（P0–P2 已上线）
+
+新增第二个场地 `room`，与 `playground` 并列。方案见 [ROOM_SCENE_PLAN.md](ROOM_SCENE_PLAN.md)，提示词分段仍遵守 [PROMPT_CACHE_LAYOUT.md](PROMPT_CACHE_LAYOUT.md)。
+
+- **场景抽象**：`src/scene/` 下 `playground.ts / room.ts / SceneManager.ts / transitionFx.ts`；`Stage` 不再建地面，只留渲染器/相机/灯光，新增 `mount / attachArena / setActiveHalf / applyCameraPreset`。
+- **转场**：1s —— 角色先缩到 12% 消失（粒子+地面光环），两个场景整体平移一个场地间距，500ms 处瞬移，末尾弹出并插值相机。无头浏览器会节流 rAF，调试时用 `?debug` 的 `window.__advance(秒)` 手动步进。
+- **按钮**：左栏「场地 / 房间」；房间内隐藏三个开局按钮与状态条。
+- **协议**：`scene_switch`、`session_state.scene/pendingScene`、`scene_changed`；错误码 `WRONG_SCENE / IN_GAME / NOT_EXECUTOR / STALE_LEASE / INVALID_SCENE`。
+- **任务中切换**：排队（`pendingScene`），任务结束时统一落地；服务重启丢弃队列；客户端等服务端确认后再播转场，避免"人还在做事画面先滑走"。
+- **开局禁止**：客户端三个入口硬拒绝 + 服务端 `*_start` 返回 `WRONG_SCENE`，被拒时不会产生棋局。
+- **道具**：盆勺跨场景始终存在，held/worn 跟着走，resting 落到新场景锚点。
+- **模型**：`world.scene`、`{{#room}}` 段落（"在房间里、不能开局"）；家具目前只是摆设。
+- **验证**：`tests/scene-protocol.test.mjs` 4 项 + 全量 **378 项通过**；真实浏览器（本地 brain）确认点击→服务端确认→转场→按钮隐藏。
+
+未完成：沙发坐下 / 床躺下的运行时位姿（`sitlab.html` 实验已完成，等接进执行器），家具美术仍是程序化几何体。
+
+---
+
 # 当前进度 · 2026-11-03
 
 本页从这里往下都是历史记录。凡与当前代码冲突的旧描述（“本地不开发”“眨眼禁用”“象棋未接入”“Local V4/V8 模型”等）都不再生效，以本节和代码为准。
