@@ -375,3 +375,11 @@ canvas { display: block; touch-action: none; -webkit-tap-highlight-color: transp
 @media (max-width: 819px) {
   .portrait-window { left: 8px; bottom: 8px; border-radius: 11px; }
 }
+
+/* 场地切换：选中态 + 房间内隐藏开局入口（服务端还会再拒一次） */
+.scene-switch .dock-action.active{background:rgba(96,158,235,.62);border-color:rgba(174,215,255,.7);color:#fff;box-shadow:inset 0 0 0 1px rgba(210,235,255,.25)}
+.scene-switch .dock-action:disabled{opacity:.55;cursor:progress}
+body.scene-room #start-minesweeper,
+body.scene-room #start-gomoku,
+body.scene-room #start-xiangqi,
+body.scene-room #xiangqi-rule-note{display:none !important}

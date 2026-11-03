@@ -49,6 +49,8 @@ type Handlers = {
   onGame?: (board: unknown) => void;
   onGomoku?: (board: unknown) => void;
   onXiangqi?: (board: unknown) => void;
+  /** 服务端确认的场地（playground / room） */
+  onScene?: (scene: string, pending: string | null) => void;
   onSkills?: (payload: unknown) => void;
   onSkillEvent?: (payload: unknown) => void;
   onError?: (code: string, message: string) => void;
@@ -158,6 +160,7 @@ export class BrainClient {
             this.handlers.onSnapshot?.(ch);
           }
           if (msg.basin) this.handlers.onBasin?.(msg.basin as Record<string, unknown>);
+          if (typeof msg.scene === "string") this.handlers.onScene?.(msg.scene, (msg.pendingScene as string | null) ?? null);
           if ("game" in msg) this.handlers.onGame?.(msg.game);
           if ("gomoku" in msg) this.handlers.onGomoku?.(msg.gomoku);
           if ("xiangqi" in msg) this.handlers.onXiangqi?.(msg.xiangqi);
@@ -167,6 +170,9 @@ export class BrainClient {
         }
         case "memory_updated":
           this.handlers.onMemoryUpdated?.(Number(msg.pendingCount)||0);
+          break;
+        case "scene_changed":
+          if (typeof msg.scene === "string") this.handlers.onScene?.(msg.scene, null);
           break;
         case "game_state":
           this.handlers.onGame?.(msg.board);
@@ -274,6 +280,11 @@ export class BrainClient {
   }
 
   /** 开局：同一 requestId 幂等 */
+  /** 请求切换场地；服务端在有任务时会排队，确认后再发 scene_changed。 */
+  switchScene(to: "playground" | "room") {
+    return this.send("scene_switch", { to, leaseEpoch: this.leaseEpoch });
+  }
+
   startGame(requestId = `r${Date.now()}`) {
     return this.send("game_start", { requestId, leaseEpoch: this.leaseEpoch });
   }

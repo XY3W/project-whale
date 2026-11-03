@@ -3,6 +3,7 @@ import { fitShadowBounds } from "./shadowBounds";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { configureCameraInput } from "./cameraInput";
+import type { CameraPreset } from "../scene/types";
 
 /**
  * 舞台：渲染器、相机、灯光、地面、环境贴图。
@@ -19,12 +20,8 @@ export class Stage {
   /** 场地半边长（米）；象棋模式会临时放大到 5.75，退出时还原 */
   roomHalf = 4;
   private static readonly ROOM_HALF_DEFAULT = 4;
-  /** 台座（slab），setArena 时要跟着换尺寸 */
-  private slab!: THREE.Mesh;
-  /** 地板顶面（默认 8×8）。扫雷期间棋盘直接换它的贴图，避免多一层悬空平面 */
-  readonly groundTop!: THREE.Mesh;
-  /** 地板原本的装饰网格贴图，棋盘关掉时要还原 */
-  readonly groundMap!: THREE.Texture;
+  /** 场地场景（playground）：尺寸由它自己维护，Stage 只负责在 setArena 时转达 */
+  private arena?: { setHalf(half: number): void };
   /** 主光：阴影范围要跟着场地尺寸重算，否则放大的场角会没有影子 */
   private keyLight!: THREE.DirectionalLight;
 
@@ -64,7 +61,6 @@ export class Stage {
 
     this.buildEnvironment();
     this.buildLights();
-    this.buildGround();
 
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
@@ -123,79 +119,34 @@ export class Stage {
     this.scene.add(face, face.target);
   }
 
-  /** 固定大小的方形场地：整个区域始终完整可见 */
-  private buildGround() {
-    const AREA = this.roomHalf * 2;
-
-    // 台座：给区域一个明确的边界
-    const slab = new THREE.Mesh(
-      new THREE.BoxGeometry(AREA, 0.14, AREA),
-      new THREE.MeshStandardMaterial({ color: 0x0e131d, roughness: 0.95, metalness: 0.0 }),
-    );
-    slab.position.y = -0.07;
-    this.slab = slab;
-    slab.receiveShadow = true;
-    this.scene.add(slab);
-
-    // 顶面网格
-    const size = 1024;
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext("2d")!;
-    ctx.fillStyle = "#131a26";
-    ctx.fillRect(0, 0, size, size);
-    ctx.strokeStyle = "rgba(120, 155, 220, 0.16)";
-    ctx.lineWidth = 2;
-    const cells = 16;
-    for (let i = 0; i <= cells; i++) {
-      const p = Math.round((i / cells) * size) + 0.5;
-      ctx.beginPath(); ctx.moveTo(p, 0); ctx.lineTo(p, size); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(0, p); ctx.lineTo(size, p); ctx.stroke();
-    }
-    // 边框
-    ctx.strokeStyle = "rgba(150, 185, 255, 0.35)";
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, size - 6, size - 6);
-    const gridTex = new THREE.CanvasTexture(canvas);
-    gridTex.colorSpace = THREE.SRGBColorSpace;
-
-    const top = new THREE.Mesh(
-      new THREE.PlaneGeometry(AREA, AREA),
-      new THREE.MeshStandardMaterial({ map: gridTex, roughness: 0.9, metalness: 0.0 }),
-    );
-    top.rotation.x = -Math.PI / 2;
-    top.position.y = 0.002;
-    top.receiveShadow = true;
-    this.scene.add(top);
-    (this as { groundTop: THREE.Mesh }).groundTop = top;
-    (this as { groundMap: THREE.Texture }).groundMap = gridTex;
-  }
-
   /**
    * 切换场地尺寸（米）。象棋 11.5m、其余模式 8m。
    * 台座和地板平面一起重建，相机按新外接圆重新取景；已注册的棋盘会在 update 时换贴图。
    */
   setArena(size: number) {
     const half = size / 2;
+    this.arena?.setHalf(half);
     if (Math.abs(half - this.roomHalf) < 1e-6) return;
     this.roomHalf = half;
-    // 台座
-    if (this.slab) {
-      this.slab.geometry.dispose();
-      this.slab.geometry = new THREE.BoxGeometry(size, 0.14, size);
-    }
-    // 地板平面：扫雷/五子棋会把贴图直接换到这块平面上，尺寸必须跟着变
-    this.groundTop.geometry.dispose();
-    this.groundTop.geometry = new THREE.PlaneGeometry(size, size);
-    for (const child of this.scene.children) {
-      const mesh = child as THREE.Mesh;
-      if (mesh.isMesh && mesh.geometry?.type === "PlaneGeometry" && mesh.position.y > 0 && mesh.position.y < 0.01) {
-        mesh.geometry.dispose();
-        mesh.geometry = new THREE.PlaneGeometry(size, size);
-      }
-    }
     this.applyShadowBounds();
     this.setRoomCamera();
+  }
+
+  /** 场地场景挂上来之后，setArena 才能改它的台座与地板。 */
+  attachArena(arena: { setHalf(half: number): void }) {
+    this.arena = arena;
+  }
+
+  /** 把场景（playground / room）或角色挂到舞台根上。 */
+  mount(root: THREE.Object3D) {
+    this.scene.add(root);
+  }
+
+  /** 只改场地半径与阴影范围，不动相机（切场景时用）。 */
+  setActiveHalf(half: number) {
+    if (Math.abs(half - this.roomHalf) < 1e-6) return;
+    this.roomHalf = half;
+    this.applyShadowBounds();
   }
 
   /**
@@ -226,6 +177,35 @@ export class Stage {
   }
 
   /** 固定房间视角：按场地外接圆反算距离，整个区域完整入画 */
+  /** 预设对应的相机位置（沿固定俯视方向拉距离）。 */
+  cameraPositionFor(preset: CameraPreset): THREE.Vector3 {
+    const target = new THREE.Vector3(...preset.target);
+    const dir = new THREE.Vector3(0.42, 0.92, 0.95).normalize();
+    return target.clone().addScaledVector(dir, preset.distance);
+  }
+
+  /** 套用场景相机预设：位置、朝向、fov 与轨道限制一起换。 */
+  applyCameraPreset(preset: CameraPreset) {
+    this.camera.fov = preset.fov;
+    this.camera.updateProjectionMatrix();
+    const target = new THREE.Vector3(...preset.target);
+    this.camera.position.copy(this.cameraPositionFor(preset));
+    this.camera.lookAt(target);
+    this.camera.updateMatrixWorld(true);
+    this.controls.target.copy(target);
+    this.controls.enabled = true;
+    this.controls.enableRotate = true;
+    this.controls.enableZoom = true;
+    this.controls.zoomSpeed = 0.9;
+    this.controls.minDistance = preset.distance * 0.55;
+    this.controls.maxDistance = preset.distance * 1.7;
+    this.controls.enablePan = false;
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.minPolarAngle = preset.minPolar;
+    this.controls.maxPolarAngle = preset.maxPolar;
+  }
+
   setRoomCamera() {
     const target = new THREE.Vector3(0, 0.42, 0);
     const dir = new THREE.Vector3(0.42, 0.92, 0.95).normalize();

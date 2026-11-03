@@ -60,7 +60,7 @@ export const PROTOCOL = (process.env.LLM_PROTOCOL ?? "json").trim() === "tools" 
  */
 export function renderSections(text, flags = {}) {
   return text
-    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku|xiangqi|xiangqiended)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gmi, (_, name, body) =>
+    .replace(/^[ \t]*\{\{#(mine[Ss]weeper|gomoku|xiangqi|xiangqiended|room)\}\}[ \t]*\n?([\s\S]*?)^[ \t]*\{\{\/\1\}\}[ \t]*\n?/gmi, (_, name, body) =>
       flags[name.toLowerCase()] ? body : "",
     )
     .replace(/\n{3,}/g, "\n\n");
@@ -221,7 +221,7 @@ function contextBlock(ctx) {
 }
 
 function render(templateName, ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), xiangqiended: xiangqiEnded(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
+  const flags = { room: ctx.world?.scene === "room", minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), xiangqiended: xiangqiEnded(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
   // 索引已经写进 system prompt，就别在上下文 JSON 里再付一遍
   const base = ctx.skills ? { ...ctx, skills: (({ index, ...rest }) => rest)(ctx.skills) } : ctx;
   const contextForJson = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;
@@ -246,7 +246,7 @@ function render(templateName, ctx) {
  * 之后的轮次只追加 assistant(tool_calls) / tool(result)，前缀保持稳定以便命中缓存。
  */
 export function toolStartMessages(ctx) {
-  const flags = { minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), xiangqiended: xiangqiEnded(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
+  const flags = { room: ctx.world?.scene === "room", minesweeper: !!ctx.board, gomoku: !!ctx.gomoku, xiangqi: xiangqiLive(ctx.xiangqi), xiangqiended: xiangqiEnded(ctx.xiangqi), skillIndex: ctx.skills?.index ?? [] };
   const { index, ...restSkills } = ctx.skills ?? {};
   const base = ctx.skills ? { ...ctx, skills: restSkills } : ctx;
   const clean = ctx.xiangqi ? { ...base, xiangqi: slimXiangqi(ctx.xiangqi) } : base;

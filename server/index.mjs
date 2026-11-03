@@ -255,6 +255,11 @@ const session = {
 
 
 const store = createStore(path.join(process.cwd(), "data", "brain-state.json"));
+const SCENES = ["playground", "room"];
+/** 当前场地：只有 playground 能开局，room 是生活房间 */
+const sceneOf = (st) => (st.scene === "room" ? "room" : "playground");
+// 排队只活在这一个进程里：任务不跨重启，队列也不该跨
+store.update((st) => { st.scene = sceneOf(st); st.pendingScene = null; });
 const storeSeed = reconcileOnLoad(store.state);
 for (const [planId, entry] of Object.entries(storeSeed.ledger ?? {})) session.ledger.set(planId, entry);
 // 任务号不能和上次进程撞车（否则账本里 t100-p1-g1 会被覆盖）
@@ -325,6 +330,17 @@ function grantLease(ws) {
   return session.leaseEpoch;
 }
 
+/** 真正切换场地并广播；排队路径由 endTask 调用。 */
+function applyScene(next, ws = session.lease) {
+  const to = SCENES.includes(next) ? next : "playground";
+  store.update((st) => { st.scene = to; st.pendingScene = null; });
+  store.flush();
+  console.log(`[scene] -> ${to}`);
+  broadcastState();
+  if (ws) send(ws, "scene_changed", { scene: to });
+  return to;
+}
+
 function statePayload(ws) {
   return {
     sessionId: session.id,
@@ -333,6 +349,8 @@ function statePayload(ws) {
     generation: session.generation,
     leaseEpoch: session.leaseEpoch,
     behaviorMode:modeView(store.state),
+    scene: sceneOf(store.state),
+    pendingScene: store.state.pendingScene ?? null,
     ...propPayload(),
     game: games.public(),
     gomoku: gomoku.public(),
@@ -606,7 +624,10 @@ function endTask(reason, opts = {}) {
   session.task = null;
   session.phase = "idle";
   persist();
-  broadcastState();
+  // 任务进行中点了换场地：在这里统一落地一次
+  const queuedScene = store.state.pendingScene;
+  if (queuedScene && !session.task) applyScene(queuedScene);
+  else broadcastState();
   if (reason) console.log(`[task] ${reason}`);
   // 自主回合按“这一轮有没有真的推进棋盘”决定下一轮的间隔：
   // 挖到了就按正常节奏继续，原地打转就指数退避，避免空转烧 API
@@ -756,6 +777,8 @@ function modelContext(task, phase, extra = {}) {
     disabledCapabilities: [...describeDisabled(),...(RUNTIME_V2.has(task.originWs?.runtimeVersion)?[]:[{id:"set_basin_grip",reason:"执行页面需刷新到playful-v2-count32"},{id:"knock_basin",reason:"执行页面需刷新到playful-v2-count32"}])],
     capabilityVersion: CAPABILITY_VERSION,
     world: {
+      scene: sceneOf(store.state),
+      sceneLabel: sceneOf(store.state) === "room" ? "房间" : "场地",
       walkableHalf: walkableHalf(),
       stageHalf: stageHalf(),
       coordinateSystem: "glTF +Y up, +Z forward; yaw=0 指向 +Z",
@@ -1445,6 +1468,27 @@ wss.on("connection", (ws, req) => {
     }
 
     switch (msg.type) {
+      case "scene_switch": {
+        if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能切换场地" }); break; }
+        if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        const to = msg.to === "room" ? "room" : msg.to === "playground" ? "playground" : null;
+        if (!to) { send(ws, "error", { code: "INVALID_SCENE", message: "没有这个场地" }); break; }
+        if (games.public() || gomoku.public() || xiangqi.public()) {
+          send(ws, "error", { code: "IN_GAME", message: "先把棋局收起来再换场地" });
+          break;
+        }
+        if (to === sceneOf(store.state) && !store.state.pendingScene) break;
+        if (session.task) {
+          // 她正在做事：排队，任务结束统一应用（endTask）
+          store.update((st) => { st.pendingScene = to; });
+          store.flush();
+          broadcastState();
+          break;
+        }
+        applyScene(to, ws);
+        break;
+      }
+
       case "executor_ready":
         if(isLease(ws)&&epochOk(msg)&&session.task?.id===msg.taskId){applyClientSnapshot(msg.snapshot);session.task.ready=true;}break;
       case "mode_set":
@@ -1492,6 +1536,7 @@ wss.on("connection", (ws, req) => {
           send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" });
           break;
         }
+        if (sceneOf(store.state) !== "playground") { send(ws, "error", { code: "WRONG_SCENE", message: "房间里不能开局，先回场地" }); break; }
         if (gomoku.public()) { gomoku.clear(); send(ws, "gomoku_state", { board: null }); console.log("[gomoku] 收起五子棋，改开扫雷"); }
         if (xiangqi.public()) { xiangqi.clear(); send(ws, "xiangqi_state", { board: null }); console.log("[xiangqi] 收起象棋，改开扫雷"); }
         const previous = games.public()?.gameId ?? null;
@@ -1534,6 +1579,7 @@ wss.on("connection", (ws, req) => {
       case "gomoku_start": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能开局" }); break; }
         if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        if (sceneOf(store.state) !== "playground") { send(ws, "error", { code: "WRONG_SCENE", message: "房间里不能开局，先回场地" }); break; }
         // 五子棋与扫雷互斥：开一局就收起另一局
         if (games.public()) { games.clear(); send(ws, "game_state", { board: null }); console.log("[game] 收起扫雷，改开五子棋"); }
         if (xiangqi.public()) { xiangqi.clear(); send(ws, "xiangqi_state", { board: null }); console.log("[xiangqi] 收起象棋，改开五子棋"); }
@@ -1630,6 +1676,7 @@ wss.on("connection", (ws, req) => {
       case "xiangqi_start": {
         if (!isLease(ws)) { send(ws, "error", { code: "NOT_EXECUTOR", message: "只读连接不能开局" }); break; }
         if (!epochOk(msg)) { send(ws, "error", { code: "STALE_LEASE", message: "执行权已过期" }); break; }
+        if (sceneOf(store.state) !== "playground") { send(ws, "error", { code: "WRONG_SCENE", message: "房间里不能开局，先回场地" }); break; }
         // 三种模式互斥：开象棋就收起扫雷/五子棋
         if (games.public()) { games.clear(); send(ws, "game_state", { board: null }); console.log("[game] 收起扫雷，改开象棋"); }
         if (gomoku.public()) { gomoku.clear(); send(ws, "gomoku_state", { board: null }); console.log("[gomoku] 收起五子棋，改开象棋"); }

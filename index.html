@@ -9,6 +9,13 @@
     <div id="app"></div>
     <aside class="left-dock" aria-label="场地功能">
       <div class="dock-heading"><span class="dock-mark">W</span><div><strong>鲸鱼娘的房间</strong><small>场地工具</small></div></div>
+      <section class="dock-section" aria-label="场地">
+        <div class="dock-label">场地 <span>SCENE</span></div>
+        <div class="dock-grid scene-switch">
+          <button id="scene-playground" class="dock-action active" type="button" aria-pressed="true">场地</button>
+          <button id="scene-room" class="dock-action" type="button" aria-pressed="false">房间</button>
+        </div>
+      </section>
       <section class="dock-section" aria-label="游戏">
         <div class="dock-label">游戏 <span>PLAY</span></div>
         <div class="dock-grid"><button id="start-minesweeper" class="dock-action primary" type="button">扫雷开局</button><button id="start-gomoku" class="dock-action primary" type="button">五子棋开局</button><button id="start-xiangqi" class="dock-action primary" type="button">象棋开局</button></div>

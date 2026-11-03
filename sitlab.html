@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project Whale · 坐/躺位姿实验</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0f16; overflow: hidden; }
+      #app { position: fixed; inset: 0; }
+      #hud {
+        position: fixed; left: 12px; top: 12px; padding: 10px 12px;
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #cfe0ff; background: rgba(10, 18, 32, 0.82);
+        border: 1px solid rgba(120, 160, 220, 0.35); border-radius: 8px;
+        white-space: pre; pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="hud"></div>
+    <script type="module" src="/src/sitlab.ts"></script>
+  </body>
+</html>

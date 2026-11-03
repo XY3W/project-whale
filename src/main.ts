@@ -5,6 +5,10 @@ import { PropAudio } from "./audio/PropAudio";
 import { mountControls } from "./ui/Controls";
 import { stepPropWorld, onPropImpact } from "./prop/basinPhysics";
 import { Stage } from "./core/Stage";
+import { buildPlayground, PLAYGROUND_DEF } from "./scene/playground";
+import { buildRoom, ROOM_DEF } from "./scene/room";
+import { SceneManager } from "./scene/SceneManager";
+import { PoofFx } from "./scene/transitionFx";
 import { walkableHalfOf } from "./core/arena";
 import { planWalkLegs } from "./behavior/locomotion";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -44,6 +48,9 @@ type Phase = "idle" | "stopping" | "turning" | "walking";
 
 async function boot() {
   const stage = new Stage(document.getElementById("app")!);
+  // 场地是独立场景对象：地面/台座归它自己管，切场景时整个 group 一起动
+  const playground = buildPlayground();
+  stage.attachArena(playground);
   const portrait = new PortraitWindow();
 
   const loading = document.getElementById("loading")!;
@@ -123,6 +130,74 @@ async function boot() {
   root.updateMatrixWorld(true);
   basin.resetToReference();
   scoop.resetToReference();
+
+  // ---- 场景：playground / room ----
+  const roomScene = buildRoom();
+  const poofFx = new PoofFx(stage.scene);
+  const poofState = { mode: "idle" as "idle" | "out" | "in", t: 0, from: 1, to: 1 };
+  const startPoof = (mode: "out" | "in") => {
+    poofState.mode = mode;
+    poofState.t = 0;
+    poofState.from = root.scale.x;
+    poofState.to = mode === "out" ? 0.12 : 1;
+    if (mode === "in") root.visible = true;
+  };
+  let syncSceneButtons = (_to: "playground" | "room") => {};
+  const scenes = new SceneManager(
+    stage,
+    playground,
+    roomScene,
+    { playground: PLAYGROUND_DEF, room: ROOM_DEF },
+    {
+      onHide: () => {
+        poofFx.burst(new THREE.Vector3(root.position.x, 0.04, root.position.z));
+        startPoof("out");
+      },
+      onSwap: (to) => {
+        const def = to === "room" ? ROOM_DEF : PLAYGROUND_DEF;
+        root.position.x = def.spawn.x;
+        root.position.z = def.spawn.z;
+        root.rotation.y = def.spawn.yaw;
+        if (basin.state === "resting") basin.resetToCenter(def.propAnchors.basin.x, def.propAnchors.basin.z);
+        if (scoop.state === "resting") scoop.resetToCenter(def.propAnchors.rice_scoop.x, def.propAnchors.rice_scoop.z);
+        poofFx.burst(new THREE.Vector3(def.spawn.x, 0.04, def.spawn.z));
+      },
+      onShow: () => startPoof("in"),
+      onDone: (to) => syncSceneButtons(to),
+    },
+  );
+  syncSceneButtons = (to) => {
+    document.getElementById("scene-playground")?.classList.toggle("active", to === "playground");
+    document.getElementById("scene-room")?.classList.toggle("active", to === "room");
+  };
+  document.getElementById("scene-playground")?.addEventListener("click", () => switchScene("playground"));
+  document.getElementById("scene-room")?.addEventListener("click", () => switchScene("room"));
+  /** 真正播放转场（服务端确认后 / 离线调试时直接调用）。 */
+  const runSceneTransition = (to: "playground" | "room") => {
+    if (scenes.transitioning || scenes.active === to) return;
+    if (!scenes.transitionTo(to)) return;
+    document.body.classList.toggle("scene-room", to === "room");
+    syncSceneButtons(to);
+  };
+  const sceneTrace: string[] = [];
+  (window as unknown as { __sceneTrace: string[] }).__sceneTrace = sceneTrace;
+  function switchScene(to: "playground" | "room") {
+    sceneTrace.push(`call to=${to} active=${scenes.active} transitioning=${scenes.transitioning} games=${!!(gameBoard || gomokuView || xiangqiView)} connected=${client.connected}`);
+    if (scenes.transitioning || scenes.active === to) return;
+    if (gameBoard || gomokuView || xiangqiView) {
+      chat.setError("先把棋局收起来再换场地");
+      return;
+    }
+    if (!client.connected) { runSceneTransition(to); return; }
+    // 有连接就等服务端确认：她正在做事时会先排队，确认后才播转场
+    client.switchScene(to);
+    setScenePending(to);
+  }
+  const setScenePending = (to: "playground" | "room" | null) => {
+    for (const [id, key] of [["scene-playground", "playground"], ["scene-room", "room"]] as const) {
+      document.getElementById(id)?.classList.toggle("pending", to === key);
+    }
+  };
   const holdBasinClip = gltf.animations.find((c) => c.name === "hold_basin") ?? null;
   const holdScoopClip = gltf.animations.find((c) => c.name === "hold_scoop") ?? null;
   if (holdBasinClip) player.setHold("left_hand", holdBasinClip);
@@ -131,10 +206,10 @@ async function boot() {
   /** catalog 里盆的拾取参考（旧代码直接读顶层 pickupReference） */
   const basinReference = basinCatalog.props!.basin.pickupReference;
 
-  const board = new MinesweeperBoard(stage.scene, stage.groundTop);
+  const board = new MinesweeperBoard(stage.scene, playground.groundTop);
   let gameBoard: GameView | null = null;
-  const gomokuBoard = new GomokuBoard(stage.scene, stage.groundTop);
-  const xiangqiBoard = new XiangqiBoard(stage.scene, stage.groundTop);
+  const gomokuBoard = new GomokuBoard(stage.scene, playground.groundTop);
+  const xiangqiBoard = new XiangqiBoard(stage.scene, playground.groundTop);
   let gomokuView: GomokuView | null = null;
   let xiangqiView: XiangqiView | null = null;
   let xiangqiArmy: XiangqiView | null = null;
@@ -206,6 +281,12 @@ async function boot() {
    * 进行中 → 结束并揭开雷区；已经结束 → 收起盘面，场地回到正常状态。
    */
   const startButton = document.getElementById("start-minesweeper") as HTMLButtonElement | null;
+  /** 房间里不允许开局：按钮会被隐藏，这里再挡一次，防止快捷键/残留事件/调试入口绕过去。 */
+  const sceneAllowsGame = () => {
+    if (scenes.active === "playground") return true;
+    chat.setError("房间里不能开局，先切回场地");
+    return false;
+  };
   const syncStartButton = () => {
     if (!startButton) return;
     const onField = !!gameBoard;
@@ -274,6 +355,7 @@ async function boot() {
   };
 
   const snapshot = () => ({
+    scene: scenes.active,
     x: +root.position.x.toFixed(3),
     z: +root.position.z.toFixed(3),
     yawDeg: +((root.rotation.y * 180) / Math.PI).toFixed(1),
@@ -1219,6 +1301,7 @@ async function boot() {
 
 
   gomokuButton?.addEventListener("click", () => {
+    if (!sceneAllowsGame()) return;
     if (!client.connected) {
       chat.setError("还没有连上大脑服务，稍等一下再开局");
       return;
@@ -1240,6 +1323,7 @@ async function boot() {
   const sidePicker = document.getElementById("xiangqi-side");
   const closeSidePicker = () => { if (sidePicker) sidePicker.hidden = true; };
   xiangqiButton?.addEventListener("click", () => {
+    if (!sceneAllowsGame()) return;
     if (!client.connected) { chat.setError("还没有连上大脑服务，稍等一下再开局"); return; }
     if (readOnly) { chat.setError("另一个页面正在执行角色，这里只读"); return; }
     chat.setError(null);
@@ -1264,6 +1348,7 @@ async function boot() {
   });
 
   startButton?.addEventListener("click", () => {
+    if (!sceneAllowsGame()) return;
     // 连接还没就绪、或这个页面只是只读镜像时给个提示，而不是静默失败
     if (!client.connected) {
       chat.setError("还没有连上大脑服务，稍等一下再开局");
@@ -1451,6 +1536,12 @@ async function boot() {
       currentExecutor?.cancel();
       chat.setThinking(false);
     },
+    onScene: (scene, pending) => {
+      const target = scene === "room" ? "room" : "playground";
+      setScenePending((pending as "playground" | "room" | null) ?? null);
+      if (pending) return;
+      if (target !== scenes.active && !scenes.transitioning) runSceneTransition(target);
+    },
     onReadOnly: (ro) => {
       readOnly = ro;controls.readOnly(ro);syncXiangqiButton();
       if(ro){currentExecutor?.cancel();stopMotion();}
@@ -1568,9 +1659,41 @@ async function boot() {
   basin.onSettled = reportSettled;
   scoop.onSettled = reportSettled;
 
+  /** 场景/特效的每帧推进：真实循环与无头调试步进共用。 */
+  const advanceScene = (dt: number) => {
+    scenes.update(dt);
+    poofFx.update(dt);
+    if (poofState.mode !== "idle") {
+      poofState.t += dt;
+      const duration = poofState.mode === "out" ? 0.3 : 0.45;
+      const k = Math.min(1, poofState.t / duration);
+      const eased = poofState.mode === "out" ? k * k : 1 - Math.pow(1 - k, 3);
+      root.scale.setScalar(poofState.from + (poofState.to - poofState.from) * eased);
+      if (k >= 1) {
+        poofState.mode = "idle";
+        if (poofState.to < 1) root.visible = false;
+      }
+    }
+  };
+  if (DEBUG) {
+    // 无头浏览器会节流 requestAnimationFrame，转场推进不动；调试时手动步进。
+    (window as unknown as { __advance: unknown }).__advance = (seconds: number) => {
+      const step = 1 / 60;
+      for (let t = 0; t < seconds; t += step) advanceScene(step);
+      stage.renderer.render(stage.scene, stage.camera);
+      return { active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress };
+    };
+    (window as unknown as { __sceneInfo: unknown }).__sceneInfo = () => ({ active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress });
+    (window as unknown as { __debug: unknown }).__debug = () => ({ connected: client.connected, epoch: client.leaseEpoch, active: scenes.active });
+  }
+
+  let loopFrames = 0;
   stage.renderer.setAnimationLoop(() => {
     const dt = Math.min(clock.getDelta(), 0.05);
+    loopFrames += 1;
+    if (DEBUG) (window as unknown as { __frames: number }).__frames = loopFrames;
     client.keepAlive();
+    advanceScene(dt);
     player.update(dt);
 
     forward.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
