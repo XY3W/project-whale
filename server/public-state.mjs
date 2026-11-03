@@ -1,10 +1,4 @@
-/**
- * 公开世界快照：物品注册表 + 只含公开字段的模型上下文。
- *
- * 这里产出的对象会原样进入提示词、客户端消息和日志，所以：
- * - 不含雷表、种子、未揭示格的 value；
- * - 不含 API Key、服务端私有路径或内部执行器字段。
- */
+import { ROOM_FURNITURE } from "../shared/room-furniture.mjs";
 import {digAim} from "../shared/dig-aim.mjs";
 import { OBJECTS } from "./capabilities.mjs";
 import { PICKUP_RANGE_M } from "../shared/pickup-range.mjs";
@@ -299,5 +293,23 @@ export function xiangqiContext(view, character = null, slots = null, pending = n
     currentCell: character && Number.isFinite(character.x) && Number.isFinite(character.z)
       ? { row: Math.round(character.z / 1.15 + 4.5), col: Math.round(character.x / 1.15 + 4) }
       : null,
+  };
+}
+
+/** 房间家具：位置、使用点、能做什么。与 shared/room-furniture.mjs 同源。 */
+export function roomContext(scene) {
+  if (scene !== "room") return null;
+  return {
+    scene: "room",
+    furniture: ROOM_FURNITURE.map((item) => ({
+      id: item.id,
+      label: item.label,
+      action: item.interact,
+      position: { x: item.position[0], z: item.position[1] },
+      use_point: { x: item.use.x, z: item.use.z },
+      surface_y: item.surfaceY,
+      can: ["use_furniture"],
+    })),
+    note: "先 move_to 到 use_point，再 use_furniture{furniture_id}；起身用 furniture_id=none。",
   };
 }

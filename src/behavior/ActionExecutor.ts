@@ -446,6 +446,22 @@ export class ActionExecutor {
       }
 
       // 走到指定坐标：转向/步数由宿主算好，模型只给目标点
+      case "use_furniture": {
+        const bridge = this.loco.furniture;
+        if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");
+        const raced = await this.withTimeout(
+          bridge.perform(step as never, stepId, { isCancelled: () => this.cancelled }),
+          20000,
+        );
+        if (!raced.ok) return done("timeout", { furniture: bridge.snapshot() }, "TIMEOUT");
+        if (this.cancelled) return done("cancelled", { furniture: bridge.snapshot() }, "CANCELLED");
+        const out = raced.value;
+        if (!out.ok) {
+          const code = (["NOT_IN_ROOM", "OUT_OF_RANGE", "HANDS_BUSY", "UNKNOWN_FURNITURE"] as const).find((c) => c === out.error) ?? "PRECONDITION_FAILED";
+          return done("failed", { furniture: bridge.snapshot(), error: out.error, distance: out.distance }, code);
+        }
+        return done("succeeded", { furniture: bridge.snapshot() }, "OK");
+      }
       case "xiangqi_move": {
         const bridge = this.loco.xiangqiMove;
         if (!bridge) return done("unsupported", null, "CAPABILITY_DISABLED");

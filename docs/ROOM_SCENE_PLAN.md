@@ -1,6 +1,6 @@
 # 房间场景（Room）方案
 
-2026-11-03 立项 · 2026-11-04 状态：**P0–P2 已实现并部署，P3 坐/躺待接**（见文末「实现记录」）。
+2026-11-03 立项 · 2026-11-04 状态：**P0–P3 已实现**（坐/躺用运行时位姿，不是素材片段；见文末「实现记录」）。
 
 目标：在现有 playground 之外新增一个"房间"场景，摆放可互动的家具与电器；前端加场地切换按钮，
 切换时两个场地左右滑动换位，角色带消失/出现特效落到新场地。
@@ -316,8 +316,15 @@ Rapier 家具碰撞体、使用点站位。
 | 模型 | `world.scene/sceneLabel`；`system.txt` 的 `{{#room}}` 段落说明"在房间里、不能开局" |
 | 测试 | `tests/scene-protocol.test.mjs` 4 项（默认场地、房间禁开局、只读/棋局拒绝、任务中排队、房间上下文与提示词）；全量 378 项通过 |
 
-未完成（P3）：
+P3 已接（2026-11-04）：
 
-- 沙发「坐下」、床「躺下」的运行时位姿（FK 实验见 `sitlab.html`，参数与截图在 `docs/review-evidence/pose-lab/`）；
-- 家具互动能力 `use_furniture` 与 `sit/lie` 状态机；
-- 房间的美术资产（现在全是程序化几何体）。
+- `use_furniture{furniture_id}`：sofa 坐下、bed 躺下、none 起身；能力注册、`validateStep`、`roomContext` 与 `{{#room}}` 提示词都已就位。
+- `src/character/FurniturePose.ts`：扁平骨架的运行时位姿——先按髋/膝/踝角度算腿的 FK（三段骨骼整体搬移），再把 root.x 下沉/后仰；在 mixer 之后按 weight 覆盖，坐下 0.45s、起身反向，不会跳变。
+- `shared/room-furniture.mjs`：家具位置、使用点、座面高度、可做动作的单一来源，客户端建场景与服务端上下文共用。
+- 失败码：`NOT_IN_ROOM / HANDS_BUSY / OUT_OF_RANGE / UNKNOWN_FURNITURE`。
+
+仍未做：
+
+- 家具美术资产（现在全是程序化几何体）；
+- 裙摆/头发的二次运动没有参与坐躺（从正面看裙摆会盖住腿，个别角度会穿过座面）；
+- 坐下/躺下没有专门的过渡片段，只有线性混合。

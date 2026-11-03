@@ -37,7 +37,7 @@ import { contextBudget, estimateRequest, linkCurrentExecution, MAX_INPUT_TOKENS 
 
 import { createGameEventQueue } from "./events.mjs";
 import { createTimerService } from "./timers.mjs";
-import { boardContext, characterContext, gomokuContext, propIdOf, propsContext, sanitizeProp, slotsOf, trimExecutionReport, xiangqiContext } from "./public-state.mjs";
+import { boardContext, characterContext, gomokuContext, propIdOf, propsContext, roomContext, sanitizeProp, slotsOf, trimExecutionReport, xiangqiContext } from "./public-state.mjs";
 import { CAPABILITY_VERSION, ModelError, PROMPT_VERSION, callModel, describeCapabilities, describeDisabled, hasKey, planningMessages, reviewMessages } from "./llm.mjs";
 import { validatePlan } from "./capabilities.mjs";
 
@@ -776,6 +776,7 @@ function modelContext(task, phase, extra = {}) {
     capabilities: describeCapabilities().filter(cap=>RUNTIME_V2.has(task.originWs?.runtimeVersion)||!["set_basin_grip","knock_basin"].includes(cap.id)).map(cap=>cap.id==='play'&&[...props.values()].some(p=>p.state==='held')?{...cap,params:{action_id:{enum:['nod','look_left','look_right'],note:'持物时禁用未适配双臂的greet/notice/think'}}}:cap),
     disabledCapabilities: [...describeDisabled(),...(RUNTIME_V2.has(task.originWs?.runtimeVersion)?[]:[{id:"set_basin_grip",reason:"执行页面需刷新到playful-v2-count32"},{id:"knock_basin",reason:"执行页面需刷新到playful-v2-count32"}])],
     capabilityVersion: CAPABILITY_VERSION,
+    room: roomContext(sceneOf(store.state)),
     world: {
       scene: sceneOf(store.state),
       sceneLabel: sceneOf(store.state) === "room" ? "房间" : "场地",

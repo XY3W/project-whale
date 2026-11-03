@@ -9,6 +9,9 @@ import { buildPlayground, PLAYGROUND_DEF } from "./scene/playground";
 import { buildRoom, ROOM_DEF } from "./scene/room";
 import { SceneManager } from "./scene/SceneManager";
 import { PoofFx } from "./scene/transitionFx";
+import { FurniturePose } from "./character/FurniturePose";
+import { FURNITURE_USE_RANGE_M, furnitureById } from "../shared/room-furniture.mjs";
+import type { FurnitureBridge } from "./behavior/protocol.ts";
 import { walkableHalfOf } from "./core/arena";
 import { planWalkLegs } from "./behavior/locomotion";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
@@ -158,6 +161,7 @@ async function boot() {
         root.position.x = def.spawn.x;
         root.position.z = def.spawn.z;
         root.rotation.y = def.spawn.yaw;
+        furniturePose.standUp();
         if (basin.state === "resting") basin.resetToCenter(def.propAnchors.basin.x, def.propAnchors.basin.z);
         if (scoop.state === "resting") scoop.resetToCenter(def.propAnchors.rice_scoop.x, def.propAnchors.rice_scoop.z);
         poofFx.burst(new THREE.Vector3(def.spawn.x, 0.04, def.spawn.z));
@@ -166,6 +170,40 @@ async function boot() {
       onDone: (to) => syncSceneButtons(to),
     },
   );
+  // ---- 房间家具：沙发坐下 / 床躺下 ----
+  const furniturePose = new FurniturePose(root);
+  player.setPoseOverride(furniturePose);
+  /** 坐下/躺下时身体平移到家具上的补间 */
+  let furnitureTween: { from: THREE.Vector3; to: THREE.Vector3; t: number; dur: number } | null = null;
+  const furnitureState = () => ({
+    state: (furniturePose.activeName === "sit" ? "sitting" : furniturePose.activeName === "lie" ? "lying" : "standing") as "standing" | "sitting" | "lying",
+    furnitureId: furniturePose.activeFurniture,
+  });
+  const furnitureBridge: FurnitureBridge = {
+    snapshot: furnitureState,
+    perform: async (step) => {
+      if (step.furniture_id === "none") {
+        const leaving = furniturePose.activeFurniture;
+        furniturePose.standUp();
+        const spec = leaving ? furnitureById(leaving) : null;
+        if (spec) furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.use.x, root.position.y, spec.use.z), t: 0, dur: 0.45 };
+        return { ok: true, state: furnitureState() };
+      }
+      if (scenes.active !== "room" || scenes.transitioning) return { ok: false, error: "NOT_IN_ROOM", state: furnitureState() };
+      const spec = furnitureById(step.furniture_id);
+      if (!spec || !scenes.furniture.some((item) => item.id === step.furniture_id)) return { ok: false, error: "UNKNOWN_FURNITURE", state: furnitureState() };
+      if (basin.state === "held" || scoop.state === "held") return { ok: false, error: "HANDS_BUSY", state: furnitureState() };
+      const dx = root.position.x - spec.use.x;
+      const dz = root.position.z - spec.use.z;
+      const distance = Math.hypot(dx, dz);
+      if (distance > FURNITURE_USE_RANGE_M) return { ok: false, error: "OUT_OF_RANGE", state: furnitureState(), distance: Math.round(distance * 1000) / 1000 };
+      root.rotation.y = spec.use.yaw;
+      furniturePose.sitOn(spec.id, spec.interact, spec.surfaceY);
+      furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.rest.x, root.position.y, spec.rest.z), t: 0, dur: 0.45 };
+      return { ok: true, state: furnitureState() };
+    },
+  };
+
   syncSceneButtons = (to) => {
     document.getElementById("scene-playground")?.classList.toggle("active", to === "playground");
     document.getElementById("scene-room")?.classList.toggle("active", to === "room");
@@ -1149,6 +1187,7 @@ async function boot() {
     },
   };
   loco.dig = digBridge;
+  loco.furniture = furnitureBridge;
 
   // ---- 右腰挂勺：bindings.rightWaist 只存在于象棋目录，用到时才拉一次 ----
   let waist: { bone: THREE.Bone; matrix: THREE.Matrix4 } | null = null;
@@ -1658,6 +1697,14 @@ async function boot() {
 
   /** 场景/特效的每帧推进：真实循环与无头调试步进共用。 */
   const advanceScene = (dt: number) => {
+    if (furnitureTween) {
+      furnitureTween.t += dt;
+      const k = Math.min(1, furnitureTween.t / furnitureTween.dur);
+      const e = k * k * (3 - 2 * k);
+      root.position.x = furnitureTween.from.x + (furnitureTween.to.x - furnitureTween.from.x) * e;
+      root.position.z = furnitureTween.from.z + (furnitureTween.to.z - furnitureTween.from.z) * e;
+      if (k >= 1) furnitureTween = null;
+    }
     scenes.update(dt);
     poofFx.update(dt);
     if (poofState.mode !== "idle") {
@@ -1676,12 +1723,20 @@ async function boot() {
     // 无头浏览器会节流 requestAnimationFrame，转场推进不动；调试时手动步进。
     (window as unknown as { __advance: unknown }).__advance = (seconds: number) => {
       const step = 1 / 60;
-      for (let t = 0; t < seconds; t += step) advanceScene(step);
+      for (let t = 0; t < seconds; t += step) { advanceScene(step); player.update(step); }
       stage.renderer.render(stage.scene, stage.camera);
       return { active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress };
     };
     (window as unknown as { __sceneInfo: unknown }).__sceneInfo = () => ({ active: scenes.active, transitioning: scenes.transitioning, progress: scenes.progress });
     (window as unknown as { __debug: unknown }).__debug = () => ({ connected: client.connected, epoch: client.leaseEpoch, active: scenes.active });
+    (window as unknown as { __stage: unknown }).__stage = stage;
+    (window as unknown as { __sit: unknown }).__sit = async (id: "sofa" | "bed" | "none") => {
+      if (id !== "none") {
+        const spec = furnitureById(id);
+        if (spec) { root.position.x = spec.use.x; root.position.z = spec.use.z; }
+      }
+      return furnitureBridge.perform({ furniture_id: id }, "debug");
+    };
   }
 
   let loopFrames = 0;
@@ -1697,6 +1752,8 @@ async function boot() {
     if (player.movementDelta > 0 && phase !== "turning") {
       root.position.addScaledVector(forward, player.movementDelta);
     }
+
+    if (furniturePose.activeName && phase !== "idle") furniturePose.standUp();
 
     switch (phase) {
       case "stopping":

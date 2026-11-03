@@ -33,8 +33,9 @@ test("类型严格：angle_deg 字符串被拒绝", () => {
   assert.equal(validateStep({ action: "turn", angle_deg: -180 }).angle_deg, -180);
 });
 
-test("禁用能力给出 disabled 原因", () => {
-  assert.throws(() => validateStep({ action: "sit" }), /未启用/);
+test("注销的能力按未注册拒绝；enabled 能力缺参数报参数错误", () => {
+  // sit 已升级为 use_furniture（房间家具），注册表里不再有 sit
+  assert.throws(() => validateStep({ action: "sit" }), /不在注册表/);
   // run 已启用：缺参数时报距离不合法，而不是“未启用”
   assert.equal(validateStep({ action: "run", distance_m: 0.464 }).distance_m, 0.464);
   assert.throws(() => validateStep({ action: "run", distance_m: 0.5 }), /run 只支持/);

@@ -23,7 +23,11 @@ export type ReasonCode =
   | "OBJECT_UNAVAILABLE"
   | "NOT_ALIGNED"
   | "BASIN_STATE_MISMATCH"
-  | "OBJECT_POSE_UNSUPPORTED";
+  | "OBJECT_POSE_UNSUPPORTED"
+  | "NOT_IN_ROOM"
+  | "OUT_OF_RANGE"
+  | "HANDS_BUSY"
+  | "UNKNOWN_FURNITURE";
 
 export interface StepResult {
   stepId: string;
@@ -63,6 +67,7 @@ export type Step =
   | { action: "dig"; game_id: string; row: number; col: number; expected_revision: number }
   | { action: "place_stone"; game_id: string; row: number; col: number; expected_revision: number }
   | { action: "xiangqi_move"; game_id: string; piece_id: string; to_row: number; to_col: number; expected_revision: number }
+  | { action: "use_furniture"; furniture_id: "sofa" | "bed" | "none" }
   | { action: "stow_scoop"; object_id: "rice_scoop" }
   | { action: "unstow_scoop"; object_id: "rice_scoop" }
   | { action: "parallel"; items: Step[] };
@@ -72,6 +77,17 @@ export interface Plan {
 }
 
 /** 执行器依赖的运动/表演能力，由主场景实现；测试里用假的实现。 */
+export interface FurnitureView {
+  state: "standing" | "sitting" | "lying";
+  furnitureId: string | null;
+}
+
+export interface FurnitureBridge {
+  snapshot(): FurnitureView;
+  /** 坐下/躺下/起身；失败返回稳定错误码（NOT_IN_ROOM / OUT_OF_RANGE / HANDS_BUSY / UNKNOWN_FURNITURE） */
+  perform(step: { furniture_id: string }, stepId: string, ctx?: { isCancelled?: () => boolean }): Promise<{ ok: boolean; error?: string; state?: FurnitureView; distance?: number }>;
+}
+
 export interface Locomotion {
   yaw(): number;
   position(): { x: number; z: number };
@@ -92,6 +108,8 @@ export interface Locomotion {
   dig?: DigBridge;
   /** 可选：五子棋落子能力 */
   stone?: StoneBridge;
+  /** 可选：房间家具（沙发坐下 / 床躺下 / 起身） */
+  furniture?: FurnitureBridge;
   /** 可选：象棋搬棋：走近 → 魔法吸附 → 抱到目标旁 → 送出 → 带 token 提交 */
   xiangqiMove?(step: { game_id: string; piece_id: string; to_row: number; to_col: number; expected_revision: number }, ctx: { token?: string; isCancelled?: () => boolean }): Promise<{ ok: boolean; committed?: boolean; revision?: number; reason?: string; captured?: string | null; [k: string]: unknown }>;
   /** 可选：把饭勺挂到右腰（stow_scoop，素材 waist_attach@0.9s） */

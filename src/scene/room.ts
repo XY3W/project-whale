@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { SceneDef } from "./types";
+import { ROOM_FURNITURE } from "../../shared/room-furniture.mjs";
 
 /**
  * room：生活房间。家具先程序化搭（纯色块 + 灯光），尺寸按角色身材定
@@ -102,15 +103,7 @@ export function buildRoom(): RoomScene {
   sofa.add(seat, backRest, armL, armR);
   sofa.position.set(-1.7, 0, -3.1);
   root.add(sofa);
-  furniture.push({
-    id: "sofa",
-    kind: "sofa",
-    position: [-1.7, -3.1],
-    yaw: 0,
-    use: { x: -1.7, z: -2.55, yaw: 0 },
-    interact: "sit",
-    surfaceY: 0.2,
-  });
+  furniture.push(...ROOM_FURNITURE.filter((item) => item.id === "sofa".valueOf()) as unknown as FurnitureSpec[]);
 
   // 床：床面 0.12m，床头贴后墙
   const bed = new THREE.Group();
@@ -124,15 +117,7 @@ export function buildRoom(): RoomScene {
   bed.add(mattress, headboard, quilt);
   bed.position.set(1.9, 0, -2.95);
   root.add(bed);
-  furniture.push({
-    id: "bed",
-    kind: "bed",
-    position: [1.9, -2.95],
-    yaw: 0,
-    use: { x: 1.9, z: -2.95, yaw: 0 },
-    interact: "lie",
-    surfaceY: 0.16,
-  });
+  furniture.push(...ROOM_FURNITURE.filter((item) => item.id === "bed") as unknown as FurnitureSpec[]);
 
   // 床边小几 + 台灯
   const table = box(0.4, 0.26, 0.4, 0x7a5c43);

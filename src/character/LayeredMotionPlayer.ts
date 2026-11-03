@@ -725,8 +725,15 @@ export class LayeredMotionPlayer {
     this.applyHolds(dt);
   }
 
+  private poseOverride: { update: (dt: number) => void } | null = null;
+  /** 家具坐/躺这类运行时位姿：在 mixer 求值之后覆盖，保证不被 idle 冲掉。 */
+  setPoseOverride(next: { update: (dt: number) => void } | null) {
+    this.poseOverride = next;
+  }
+
   update(dt: number) {
     this.updateBody(dt);
+    this.poseOverride?.update(dt);
     this.blink.update(dt);
   }
 

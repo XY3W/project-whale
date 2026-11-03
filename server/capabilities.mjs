@@ -120,7 +120,15 @@ export const CAPABILITIES = [
   },
   { id:"set_basin_grip", enabled:true, channels:["body_locomotion","left_arm","item:basin"], params:{object_id:{enum:["basin"]},grip:{enum:["inward","outward"]}} },
   { id:"knock_basin", enabled:true, channels:["body_locomotion","left_arm","right_arm","item:basin","item:rice_scoop"], params:{object_id:{enum:["basin"]},tool_id:{enum:["rice_scoop"]},count:{type:"integer",min:1,max:32},tempo:{enum:["normal"]}} },
-  { id: "sit", enabled: false, disabledReason: "没有坐下片段" },
+  {
+    id: "use_furniture",
+    enabled: true,
+    changesPosition: true,
+    channels: ["body_locomotion"],
+    params: {
+      furniture_id: { enum: ["sofa", "bed", "none"], note: "sofa=去沙发坐下，bed=上床躺下，none=起身；只在房间可用" },
+    },
+  },
 ];
 
 /** 禁用能力清单：给模型解释为什么不能做，但不注册成可执行工具 */
@@ -211,7 +219,7 @@ export function assertDigPlacement(steps) {
 }
 
 /** 需要独占且必须最后一步的动作（dig / place_stone / xiangqi_move）不能进 parallel */
-const EXCLUSIVE_STEPS = new Set(["dig", "place_stone", "xiangqi_move"]);
+const EXCLUSIVE_STEPS = new Set(["dig", "place_stone", "xiangqi_move", "use_furniture"]);
 function digInParallel(steps) {
   return steps.some(
     (s) => s && s.action === "parallel" && Array.isArray(s.items)
@@ -367,6 +375,13 @@ export function validateStep(step, id = "step") {
         elevation_deg: num(step.elevation_deg, 0, 45, "elevation_deg"),
         speed_mps: num(step.speed_mps, 1, 6, "speed_mps"),
       };
+    }
+    case "use_furniture": {
+      const allowed = ["sofa", "bed", "none"];
+      if (!allowed.includes(step.furniture_id)) {
+        throw new ModelError("INVALID_SCHEMA", `${id} furniture_id 只支持 ${allowed.join(" / ")}`, 0);
+      }
+      return { action: "use_furniture", furniture_id: step.furniture_id };
     }
     case "parallel": {
       const items = Array.isArray(step.items) ? step.items : [];

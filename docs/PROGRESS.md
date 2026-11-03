@@ -9,8 +9,9 @@
 - **任务中切换**：排队（`pendingScene`），任务结束时统一落地；服务重启丢弃队列；客户端等服务端确认后再播转场，避免"人还在做事画面先滑走"。
 - **开局禁止**：客户端三个入口硬拒绝 + 服务端 `*_start` 返回 `WRONG_SCENE`，被拒时不会产生棋局。
 - **道具**：盆勺跨场景始终存在，held/worn 跟着走，resting 落到新场景锚点。
-- **模型**：`world.scene`、`{{#room}}` 段落（"在房间里、不能开局"）；家具目前只是摆设。
-- **验证**：`tests/scene-protocol.test.mjs` 4 项 + 全量 **378 项通过**；真实浏览器（本地 brain）确认点击→服务端确认→转场→按钮隐藏。
+- **模型**：`world.scene`、`{{#room}}` 段落（"在房间里、不能开局"）。
+- **家具互动**：`use_furniture{furniture_id}`（sofa 坐下 / bed 躺下 / none 起身）。运行时位姿由 `src/character/FurniturePose.ts` 在 mixer 之后按权重覆盖：先算腿的 FK（髋/膝/踝三段整体搬移），再让骨架下沉/后仰；坐下 0.45s 混合，身体同时补间到座面/床面。校验：必须在房间、双手没拿东西、离使用点 ≤1.2m；失败返回 `NOT_IN_ROOM / HANDS_BUSY / OUT_OF_RANGE / UNKNOWN_FURNITURE`。家具位置与使用点是 `shared/room-furniture.mjs` 单一来源，客户端和服务端共用。
+- **验证**：`tests/scene-protocol.test.mjs` 4 项、`tests/furniture.test.mjs` 3 项；真实浏览器（本地 brain）确认点击→服务端确认→转场→按钮隐藏，以及沙发坐下 / 床躺下的画面。
 
 未完成：沙发坐下 / 床躺下的运行时位姿（`sitlab.html` 实验已完成，等接进执行器），家具美术仍是程序化几何体。
 
