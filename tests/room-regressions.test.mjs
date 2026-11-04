@@ -18,10 +18,16 @@ function furnitureFixture() {
   const tween=src.slice(tweenStart,src.indexOf('    scenes.update(dt)',tweenStart));
   const run=src.slice(src.indexOf('  const runOwned ='),src.indexOf('  client.on({',src.indexOf('  const runOwned =')));
   const ensure=src.slice(src.indexOf('  const ensureStanding ='),src.indexOf('  const loco:'));
+  const stop=src.slice(src.indexOf('  const stopMotion='),src.indexOf('  const basinBridge:'));
+  const taskStart=src.indexOf('    onTaskState:');
+  const task=src.slice(taskStart,src.indexOf('    onError:',taskStart));
+  const support=`let destination=null,postTurn=null,phase='idle',taskActive=false;
+    const chat={setThinking(){},endReasoning(){}},setLlmThinking=()=>{},snapshot=()=>({});
+    const signals=[];const client={ready(id){signals.push('ready:'+id)},acknowledgeStop(id){signals.push('stopped:'+id)}};`;
   const code=ts.transpileModule(block+`\nlet motionOwner='none',motionEpoch=0,currentExecutor=null;\n`+
-    `const waitBodySettled=async()=>{await waitForProgress(()=>!furnitureTween&&furniturePose.currentWeight===0);return true;};\n`+
+    `const waitBodySettled=async()=>{await waitForProgress(()=>!furnitureTween&&(furniturePose.activeName!==null||furniturePose.currentWeight===0));return true;};\n`+
     `function makeExecutor(){const ex={cancel(){},async run(plan){const steps=[];for(const step of plan.steps){const r=await furnitureBridge.perform(step,'s');steps.push({action:step.action,status:r.ok?'succeeded':'failed'});}return {steps}}};currentExecutor=ex;return ex;}\n`+ensure+run+
-    `\nreturn {bridge:furnitureBridge,leave:leaveFurniture,ensure:ensureStanding,run:runOwned,state:()=>({persistentAction,furnitureRestUntil,furnitureTween}),tick(dt){${tween} furniturePose.currentWeight=furniturePose.targetWeight;}};`,
+    support+stop+`const handlers={${task}};\nreturn {stop:stopMotion,task:handlers.onTaskState,signals,bridge:furnitureBridge,leave:leaveFurniture,ensure:ensureStanding,run:runOwned,state:()=>({persistentAction,furnitureTween}),tick(dt){${tween} furniturePose.currentWeight=furniturePose.targetWeight;}};`,
     {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
   const root=new THREE.Group();const use=furnitureById('sofa').use;root.position.set(use.x,0,use.z);
   const pose={activeName:null,activeFurniture:null,currentWeight:0,targetWeight:0,
@@ -29,23 +35,23 @@ function furnitureFixture() {
     standUp(){this.activeName=null;this.activeFurniture=null;this.targetWeight=0;}};
   let f;
   const wait=async check=>{for(let i=0;!check();i++){assert.ok(i<100,'transition did not settle');await new Promise(r=>setTimeout(r,0));f.tick(1/60);}};
-  const make=new Function('THREE','root','furniturePose','scenes','basin','scoop','furnitureById','FURNITURE_USE_RANGE_M','FURNITURE_REST_MS','waitForProgress','bridgeEpoch','player','needsStanding',code);
-  f=make(THREE,root,pose,{active:'room',transitioning:false,furniture:[{id:'sofa'},{id:'bed'}]}, {state:'resting'}, {state:'resting'},furnitureById,1.2,60000,wait,1,{clearGesture(){},setWalking(){}},needsStanding);
+  const make=new Function('THREE','root','furniturePose','scenes','basin','scoop','furnitureById','FURNITURE_USE_RANGE_M','waitForProgress','bridgeEpoch','player','needsStanding',code);
+  f=make(THREE,root,pose,{active:'room',transitioning:false,furniture:[{id:'sofa'},{id:'bed'}]}, {state:'resting',cancel(){}}, {state:'resting',cancel(){}},furnitureById,1.2,wait,1,{clearGesture(){},setWalking(){},haltMovement(){},setTail(){},cancelPerformance(){}},needsStanding);
   return {...f,root,pose};
 }
 
-test('起身即使从未坐下，也不残留持续动作和休息计时',async()=>{
+test('起身即使从未坐下，也不残留持续动作',async()=>{
   assert.equal(needsStanding([{action:'parallel',items:[{action:'move_to'},{action:'tail'}]}]),true);
   assert.equal(needsStanding([{action:'throw'}]),true);
   assert.equal(needsStanding([{action:'use_furniture'}]),false);
   const f=furnitureFixture();
   await f.run('plan',{steps:[{action:'use_furniture',furniture_id:'none'}]});
-  assert.equal(f.state().persistentAction,null);assert.equal(f.state().furnitureRestUntil,0);
+  assert.equal(f.state().persistentAction,null);
   await f.run('plan',{steps:[{action:'use_furniture',furniture_id:'sofa'}]});
   assert.equal(f.state().persistentAction,'use_furniture');assert.equal(f.pose.currentWeight,1);
   await f.run('plan',{steps:[{action:'use_furniture',furniture_id:'none'}]});
   assert.equal(f.state().persistentAction,null);assert.equal(f.state().furnitureTween,null);
-  assert.equal(f.state().furnitureRestUntil,0);assert.equal(f.root.position.z,furnitureById('sofa').use.z);
+  assert.equal(f.root.position.z,furnitureById('sofa').use.z);
   await f.bridge.perform({furniture_id:'sofa'},'s');
   await f.ensure();
   assert.equal(f.pose.currentWeight,0,'同一计划后续移动也必须等起身结束');
@@ -104,4 +110,26 @@ test('家具退出后常量动画轨道也恢复，位姿覆盖不逐帧累积',
  const tick=()=>{pose.beforeUpdate();mixer.update(1/60);pose.update(1/60);};
  for(let i=0;i<60;i++)tick();pose.standUp();for(let i=0;i<60;i++)tick();
  assert.ok(Math.abs(bone.position.y-.34)<1e-6);assert.ok(bone.quaternion.angleTo(new THREE.Quaternion())<1e-6);
+});
+
+test('稳定坐躺跨过一分钟仍保持；停止、思考与新任务握手不强制起身',async()=>{
+ for(const id of ['sofa','bed']){
+  const f=furnitureFixture(),spec=furnitureById(id);f.root.position.set(spec.use.x,0,spec.use.z);
+  await f.run('plan',{steps:[{action:'use_furniture',furniture_id:id}]});
+  const rest=f.root.position.clone();f.tick(600);
+  for(const phase of ['stopping','thinking','executing','checking','idle'])f.task(phase,'new-chat');
+  await new Promise(r=>setTimeout(r,0));
+  assert.ok(f.signals.includes('ready:new-chat'));assert.ok(f.signals.includes('stopped:new-chat'));
+  assert.equal(f.pose.activeName,spec.interact);assert.equal(f.state().persistentAction,'use_furniture');
+  assert.ok(f.root.position.distanceTo(rest)<1e-6);
+  await f.ensure();assert.equal(f.pose.activeName,null);assert.equal(f.pose.currentWeight,0);
+  assert.equal(f.root.position.z,spec.use.z);
+ }
+});
+
+test('停止正在进入的坐姿仍安全退出，不保留半坐状态',async()=>{
+ const f=furnitureFixture();const entering=f.bridge.perform({furniture_id:'sofa'},'s');
+ f.tick(.1);f.stop();await entering;for(let i=0;i<60;i++)f.tick(1/60);
+ assert.equal(f.pose.activeName,null);assert.equal(f.state().persistentAction,null);
+ assert.equal(f.state().furnitureTween,null);
 });

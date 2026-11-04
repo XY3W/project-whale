@@ -27,7 +27,7 @@ import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
-import { canRoamNow, shouldEndFurnitureRest, FURNITURE_REST_MS, needsStanding } from "./behavior/roamGate.ts";
+import { canRoamNow, needsStanding } from "./behavior/roamGate.ts";
 import { Hud } from "./ui/Hud";
 import { PortraitWindow } from "./ui/PortraitWindow";
 import { PropItem } from "./prop/PropItem";
@@ -161,7 +161,6 @@ async function boot() {
       onSwap: (to) => {
         setPropObstacles(to === 'room' ? roomScene.colliders : []);
         furnitureTween = null;
-        furnitureRestUntil = 0;
         persistentAction = null;
         furniturePose.reset();
         const def = to === "room" ? ROOM_DEF : PLAYGROUND_DEF;
@@ -184,11 +183,8 @@ async function boot() {
   furniturePose.capture();
   /** 坐下/躺下时身体平移到家具上的补间 */
   let furnitureTween: { from: THREE.Vector3; to: THREE.Vector3; t: number; dur: number } | null = null;
-  /** 休息到什么时候结束；到点自动起身，避免一直躺着 */
-  let furnitureRestUntil = 0;
   /** 当前生效的"持续动作"（坐下/躺下…）：非空时不跑随机游走 */
   let persistentAction: string | null = null;
-  let furnitureTaskId: string | null = null;
   const furnitureState = () => ({
     state: (furniturePose.activeName === "sit" ? "sitting" : furniturePose.activeName === "lie" ? "lying" : "standing") as "standing" | "sitting" | "lying",
     furnitureId: furniturePose.activeFurniture,
@@ -196,7 +192,6 @@ async function boot() {
   /** 结束坐/躺：起身并回到该家具的使用点（否则会站在床垫上）。 */
   const leaveFurniture = () => {
     persistentAction = null;
-    furnitureRestUntil = 0;
     if (!furniturePose.activeName) return;
     furnitureTween = null;
     const id = furniturePose.activeFurniture;
@@ -242,7 +237,6 @@ async function boot() {
         furniturePose.sitOn(spec.id, spec.interact, spec.surfaceY);
         furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.rest.x, root.position.y, spec.rest.z), t: 0, dur: 0.45 };
       }
-      furnitureRestUntil = Date.now() + FURNITURE_REST_MS;
       persistentAction = "use_furniture";
       await waitForProgress(() => !furnitureTween && furniturePose.currentWeight === 1 || !!ctx?.isCancelled?.() || epoch !== bridgeEpoch,
         () => performance.now(), { maxMs: 15000 });
@@ -993,7 +987,8 @@ async function boot() {
     player.setHold('left_hand',gltf.animations.find(c=>c.name===(basin.grip==='outward'?'hold_basin_outward':'hold_basin'))??null);
   };
   const stopMotion=()=>{
-    leaveFurniture();
+    // Stop an unfinished entrance safely, but retain an established sitting/lying state.
+    if (furniturePose.activeName && (furnitureTween || furniturePose.currentWeight < 1)) leaveFurniture();
     bridgeEpoch++;destination=null;postTurn=null;phase='idle';player.haltMovement();player.clearGesture();player.setTail(false);player.cancelPerformance();basin.cancel();scoop.cancel();
   };
 
@@ -1634,11 +1629,6 @@ async function boot() {
     },
     onMemoryUpdated:count=>controls.updatePending(count),
     onTaskState: (phase,taskId) => {
-      // 有新的思考/执行就开始新行为：先结束坐/躺
-      if ((phase === "thinking" || phase === "executing") && taskId && taskId !== furnitureTaskId) {
-        furnitureTaskId = taskId;
-        leaveFurniture();
-      }
       if((phase==='thinking'||phase==='checking')&&motionOwner==='roaming'){currentExecutor?.cancel();}
       if(phase==='thinking'&&taskId){void waitBodySettled().then(ok=>{if(ok)client.ready(taskId,snapshot());});}
       if(phase==='stopping'){
@@ -1890,8 +1880,6 @@ async function boot() {
       } else root.position.copy(next);
     }
 
-    if (shouldEndFurnitureRest(Date.now(), furnitureRestUntil)) leaveFurniture();
-
     switch (phase) {
       case "stopping":
         if (player.state.resting) phase = "idle";
@@ -2055,7 +2043,7 @@ async function boot() {
   if(DEBUG){
     const tools=document.createElement('div');tools.style.cssText='position:fixed;left:18px;bottom:16px;z-index:100;display:flex;gap:6px;align-items:center;background:white;padding:10px;border-radius:8px';
     const output=document.createElement('span');output.textContent='动作验收';
-    const setup=document.createElement('button');setup.textContent='验收双持准备';setup.onclick=()=>{currentExecutor?.cancel();stopMotion();basin.restore({state:'held',position:[0,1,0],grip:'outward'});scoop.restore({state:'held',position:[0,1,0]});updateBasinHold();output.textContent='双持就绪';};
+    const setup=document.createElement('button');setup.textContent='验收双持准备';setup.onclick=()=>{currentExecutor?.cancel();stopMotion();leaveFurniture();basin.restore({state:'held',position:[0,1,0],grip:'outward'});scoop.restore({state:'held',position:[0,1,0]});updateBasinHold();output.textContent='双持就绪';};
     tools.append(setup);
     for(const count of [1,10,32]){const b=document.createElement('button');b.textContent=`验收敲${count}下`;b.onclick=()=>{output.textContent='执行中';void runOwned('plan',{steps:[{action:'knock_basin',object_id:'basin',tool_id:'rice_scoop',count,tempo:'normal'}]}).then(r=>{output.textContent=JSON.stringify(r?.steps[0]?.actual??r);});};tools.append(b);}
     for (const [label, action] of [['眨眼', () => player.blink.trigger()], ['保持闭眼', () => player.blink.setManual(1)], ['自然眨眼', () => player.blink.setManual(null)]] as const) { const b=document.createElement('button');b.textContent=label;b.onclick=action;tools.append(b); }
