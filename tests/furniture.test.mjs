@@ -43,7 +43,7 @@ test('坐姿求解：大腿前摆、小腿向下，脚落在座面下方', async
   assert.ok(Math.abs(solved.ankleNow.z - solved.kneeNow.z) < 0.12, '小腿基本竖直');
 
   const sit = poseForSeat('sit', 0.2, 0.3);
-  assert.equal(sit.hipDeg, -85);
+  assert.equal(sit.hipDeg, -65);
   assert.ok(sit.dropY < 0, '坐下要下沉');
   const lie = poseForSeat('lie', 0.16, 0.3);
   assert.equal(lie.leanDeg, -90, '躺下整体后仰 90°');

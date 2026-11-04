@@ -51,7 +51,8 @@ export function poseForSeat(name: "sit" | "lie", surfaceY: number, restHipY: num
   if (name === "lie") {
     return { hipDeg: 0, kneeDeg: 0, ankleDeg: 0, leanDeg: -90, dropY: -(restHipY - (surfaceY + 0.06)), offsetZ: 0.1 };
   }
-  return { hipDeg: -85, kneeDeg: 85, ankleDeg: 5, leanDeg: -4, dropY: -(restHipY - (surfaceY + 0.01)), offsetZ: 0 };
+  // Thighs slope down slightly so the lap cloth can drape instead of forming a flat shelf.
+  return { hipDeg: -65, kneeDeg: 65, ankleDeg: 5, leanDeg: -4, dropY: -(restHipY - (surfaceY + 0.01)), offsetZ: 0 };
 }
 
 type Rest = { pos: THREE.Vector3; quat: THREE.Quaternion };
@@ -220,10 +221,10 @@ export class FurniturePose {
         if (!base) continue;
         const radial = new THREE.Vector3(base.pos.x, 0, base.pos.z).normalize();
         const axis = new THREE.Vector3(-radial.z, 0, radial.x);
-        const angle = ([32, 32, 20, 20, 25, 25][panel - 1]) * DEG;
+        const angle = ([12, 14, 12, 16, 22, 25][panel - 1]) * DEG;
         const lift = new THREE.Quaternion().setFromAxisAngle(axis, angle);
         const anchor = base.pos.clone();
-        anchor.y += panel <= 2 ? .035 : .012;
+        anchor.y += panel <= 2 ? .030 : .012;
         this.blendBone(name, wholeBody(anchor), lean.clone().multiply(lift).multiply(base.quat), weight);
       }
     }
