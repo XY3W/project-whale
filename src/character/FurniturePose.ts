@@ -211,6 +211,23 @@ export class FurniturePose {
       this.blendSegment([`foot.${side}`, `toes_01.${side}`], ankleRest.pos, solved.ankleNow, solved.R3, weight, lean, wholeBody);
     }
 
+    // Skirt panels are baked as independent bones under root.x. Lift them around
+    // their waist anchors; this is a seated corrective, blended out on standing.
+    if (Math.abs(params.hipDeg) > 1) {
+      for (let panel = 1; panel <= 6; panel++) for (const side of ["l", "r"] as const) {
+        const name = `Skirt_Physics_${String(panel).padStart(2, "0")}_01.${side}_00`;
+        const base = this.restOf(name);
+        if (!base) continue;
+        const radial = new THREE.Vector3(base.pos.x, 0, base.pos.z).normalize();
+        const axis = new THREE.Vector3(-radial.z, 0, radial.x);
+        const angle = ([32, 32, 20, 20, 25, 25][panel - 1]) * DEG;
+        const lift = new THREE.Quaternion().setFromAxisAngle(axis, angle);
+        const anchor = base.pos.clone();
+        anchor.y += panel <= 2 ? .035 : .012;
+        this.blendBone(name, wholeBody(anchor), lean.clone().multiply(lift).multiply(base.quat), weight);
+      }
+    }
+
   }
 
   private blendSegment(

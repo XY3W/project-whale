@@ -97,3 +97,26 @@ test('休息到点才算结束：坐着/躺着不会永远持续', () => {
   assert.equal(shouldEndFurnitureRest(2000, 2000), true, '到点结束');
   assert.ok(FURNITURE_REST_MS > 0);
 });
+
+test('坐姿同步调整裙片，起身/重置恢复动画基底，躺姿不启用坐裙修正',async()=>{
+  const T=await import('three'); const {FurniturePose}=await import('../src/character/FurniturePose.ts');
+  const root=new T.Group(),pelvis=new T.Bone();pelvis.name='rootx';pelvis.position.set(0,.34,-.018);root.add(pelvis);
+  const panels=[];
+  for(let i=1;i<=6;i++)for(const side of ['l','r']){
+    const b=new T.Bone();b.name=`Skirt_Physics_${String(i).padStart(2,'0')}_01${side}_00`;
+    b.position.set((side==='l'?1:-1)*.04,.01,.06-(i-1)*.016);pelvis.add(b);panels.push(b);
+  }
+  const original=panels.map(b=>({p:b.position.clone(),q:b.quaternion.clone()}));
+  const pose=new FurniturePose(root);pose.capture();
+  const tick=()=>{pose.beforeUpdate();pose.update(1/60)};
+  for(let cycle=0;cycle<3;cycle++){
+    pose.sitOn('sofa','sit',.2);for(let n=0;n<40;n++)tick();
+    assert.ok(panels.every(b=>b.quaternion.angleTo(new T.Quaternion())>.2),'所有裙片随坐姿改变');
+    pose.standUp();for(let n=0;n<40;n++)tick();
+    panels.forEach((b,i)=>{assert.ok(b.position.distanceTo(original[i].p)<1e-6);assert.ok(b.quaternion.angleTo(original[i].q)<1e-6)});
+  }
+  pose.sitOn('bed','lie',.16);for(let n=0;n<40;n++)tick();
+  panels.forEach((b,i)=>assert.ok(b.quaternion.angleTo(original[i].q)<1e-6));
+  pose.reset();pose.sitOn('sofa','sit',.2);for(let n=0;n<15;n++)tick();pose.reset();
+  panels.forEach((b,i)=>{assert.ok(b.position.distanceTo(original[i].p)<1e-6);assert.ok(b.quaternion.angleTo(original[i].q)<1e-6)});
+});
