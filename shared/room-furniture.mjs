@@ -28,7 +28,7 @@ export const ROOM_FURNITURE = [
     label: "床",
     position: [1.9, -2.95],
     yaw: 0,
-    use: { x: 2.75, z: -2.95, yaw: 0 },
+    use: { x: 2.6, z: -2.75, yaw: 0 },
     rest: { x: 1.9, z: -2.95 },
     interact: "lie",
     surfaceY: 0.16,

@@ -40,6 +40,7 @@ export class SceneManager {
   private hidden = false;
   private swapped = false;
   private shown = false;
+  private initialized = false;
   private cameraFrom: { position: THREE.Vector3; target: THREE.Vector3; fov: number } | null = null;
 
   constructor(stage: Stage, playground: PlaygroundScene, room: RoomScene, defs: Record<SceneId, SceneDef>, hooks: SceneManagerHooks = {}) {
@@ -68,6 +69,14 @@ export class SceneManager {
 
   get furniture() {
     return this.active === "room" ? this.room.furniture : [];
+  }
+
+  /** 第一份权威场景只恢复容器和相机，不触发传送/道具重置钩子。 */
+  initialize(id: SceneId): boolean {
+    if (this.initialized) return false;
+    this.initialized = true;
+    this.setActive(id);
+    return true;
   }
 
   /** 立刻切到某个场景（初始化 / 重连对齐用，不播动画）。 */

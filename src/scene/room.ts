@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { SceneDef } from "./types";
 import { ROOM_FURNITURE } from "../../shared/room-furniture.mjs";
+import type { Obstacle, SceneCollider } from './navigation';
 
 /**
  * room：生活房间。家具先程序化搭（纯色块 + 灯光），尺寸按角色身材定
@@ -25,6 +26,8 @@ export interface FurnitureSpec {
 export interface RoomScene {
   root: THREE.Group;
   furniture: FurnitureSpec[];
+  obstacles: Obstacle[];
+  colliders: SceneCollider[];
 }
 
 export const ROOM_DEF: SceneDef = {
@@ -148,5 +151,20 @@ export function buildRoom(): RoomScene {
   const ambience = new THREE.HemisphereLight(0x8fa6cc, 0x3a2e28, 0.35);
   root.add(ambience);
 
-  return { root, furniture };
+  // Derive collision boxes from the rendered meshes rather than maintaining a second set of sizes.
+  root.updateMatrixWorld(true);
+  const obstacles: Obstacle[] = [];
+  const colliders: SceneCollider[] = [];
+  for (const object of [sofa, bed, table, shelf]) {
+    const bounds = new THREE.Box3().setFromObject(object);
+    obstacles.push({minX:bounds.min.x,maxX:bounds.max.x,minZ:bounds.min.z,maxZ:bounds.max.z});
+    object.traverse(node => {
+      const mesh = node as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const box = new THREE.Box3().setFromObject(mesh);
+      const center = box.getCenter(new THREE.Vector3()), halfSize = box.getSize(new THREE.Vector3()).multiplyScalar(.5);
+      colliders.push({x:center.x,y:center.y,z:center.z,hx:halfSize.x,hy:halfSize.y,hz:halfSize.z});
+    });
+  }
+  return { root, furniture, obstacles, colliders };
 }

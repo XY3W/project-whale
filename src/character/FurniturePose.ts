@@ -63,6 +63,7 @@ export class FurniturePose {
   private readonly rest = new Map<string, Rest>();
   private readonly rootBone: THREE.Bone | null;
   private captured = false;
+  private appliedBase = new Map<THREE.Bone, Rest>();
   private targetId: string | null = null;
   private targetName: "sit" | "lie" | null = null;
   private weight = 0;
@@ -147,6 +148,24 @@ export class FurniturePose {
     this.targetId = null;
   }
 
+  /** 场景传送时直接退出位姿，防止旧姿态过渡写入新场景。 */
+  reset() {
+    this.beforeUpdate();
+    this.standUp();
+    this.weight = 0;
+    this.targetWeight = 0;
+    this.params = null;
+  }
+
+  /** Restore the pre-overlay pose before mixer evaluation, including constant tracks. */
+  beforeUpdate() {
+    for (const [bone, base] of this.appliedBase) {
+      bone.position.copy(base.pos);
+      bone.quaternion.copy(base.quat);
+    }
+    this.appliedBase.clear();
+  }
+
   /** 每帧在 mixer 之后调用：把当前（idle）位姿按 weight 拉向目标位姿。 */
   update(dt: number) {
     if (this.weight === this.targetWeight && this.weight === 0) return;
@@ -210,6 +229,7 @@ export class FurniturePose {
   private blendBone(name: string, localPos: THREE.Vector3, localQuat: THREE.Quaternion, weight: number) {
     const bone = this.boneOf(name);
     if (!bone || !bone.parent) return;
+    if (!this.appliedBase.has(bone)) this.appliedBase.set(bone, {pos:bone.position.clone(),quat:bone.quaternion.clone()});
     this.characterRoot.updateMatrixWorld(true);
     const rootWorldQuat = new THREE.Quaternion();
     this.characterRoot.getWorldQuaternion(rootWorldQuat);

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import RAPIER from "@dimforge/rapier3d-compat";
+import type { SceneCollider } from '../scene/navigation';
 
 /** 地面高度（与 Stage 的地板一致） */
 export const FLOOR_Y = 0;
@@ -56,6 +57,18 @@ export interface Impact {id:string;pair:string[];normalSpeed:number;point:{x:num
 type Shared={world:RAPIER.World;queue:RAPIER.EventQueue;ids:Map<number,string>;accumulator:number;sequence:number;last:Map<string,number>;time:number;owner?:BasinPhysics;};
 let shared:Shared|null=null;
 let impactListener:((event:Impact)=>void)|null=null;
+let furnitureBodies: RAPIER.RigidBody[] = [];
+/** Switch scene collision geometry in the same world as both props. */
+export function setPropObstacles(boxes: SceneCollider[]) {
+  if (!shared) return;
+  for (const body of furnitureBodies) shared.world.removeRigidBody(body);
+  furnitureBodies = boxes.map(box => {
+    const body = shared!.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(box.x, box.y, box.z));
+    shared!.world.createCollider(RAPIER.ColliderDesc.cuboid(box.hx, box.hy, box.hz).setFriction(.7).setRestitution(.2), body);
+    return body;
+  });
+  shared.world.bodies.forEach(body => { if (body.isDynamic()) body.wakeUp(); });
+}
 export function onPropImpact(fn:(event:Impact)=>void){impactListener=fn;}
 /** One world step per rendered frame, never once per item. Measure incident point velocities before solving. */
 export function stepPropWorld(dt:number){

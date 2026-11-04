@@ -3,7 +3,8 @@ import "./style.css";
 import { digAim } from "../shared/dig-aim.mjs";
 import { PropAudio } from "./audio/PropAudio";
 import { mountControls } from "./ui/Controls";
-import { stepPropWorld, onPropImpact } from "./prop/basinPhysics";
+import { stepPropWorld, onPropImpact, setPropObstacles } from "./prop/basinPhysics";
+import { navigationPath, segmentBlocked, expandObstacle, recoverPosition } from './scene/navigation';
 import { Stage } from "./core/Stage";
 import { buildPlayground, PLAYGROUND_DEF } from "./scene/playground";
 import { buildRoom, ROOM_DEF } from "./scene/room";
@@ -26,8 +27,7 @@ import { ActionExecutor } from "./behavior/ActionExecutor";
 import type { Locomotion } from "./behavior/protocol.ts";
 import { cyclesFor } from "./behavior/distances.ts";
 import { pickRoamPlan } from "./behavior/roam.ts";
-import { canRoamNow, shouldEndFurnitureRest, FURNITURE_REST_MS } from "./behavior/roamGate.ts";
-import { PERSISTENT_ACTIONS } from "../shared/persistent-actions.mjs";
+import { canRoamNow, shouldEndFurnitureRest, FURNITURE_REST_MS, needsStanding } from "./behavior/roamGate.ts";
 import { Hud } from "./ui/Hud";
 import { PortraitWindow } from "./ui/PortraitWindow";
 import { PropItem } from "./prop/PropItem";
@@ -159,11 +159,15 @@ async function boot() {
         startPoof("out");
       },
       onSwap: (to) => {
+        setPropObstacles(to === 'room' ? roomScene.colliders : []);
+        furnitureTween = null;
+        furnitureRestUntil = 0;
+        persistentAction = null;
+        furniturePose.reset();
         const def = to === "room" ? ROOM_DEF : PLAYGROUND_DEF;
         root.position.x = def.spawn.x;
         root.position.z = def.spawn.z;
         root.rotation.y = def.spawn.yaw;
-        furniturePose.standUp();
         if (basin.state === "resting") basin.resetToCenter(def.propAnchors.basin.x, def.propAnchors.basin.z);
         if (scoop.state === "resting") scoop.resetToCenter(def.propAnchors.rice_scoop.x, def.propAnchors.rice_scoop.z);
         poofFx.burst(new THREE.Vector3(def.spawn.x, 0.04, def.spawn.z));
@@ -184,6 +188,7 @@ async function boot() {
   let furnitureRestUntil = 0;
   /** 当前生效的"持续动作"（坐下/躺下…）：非空时不跑随机游走 */
   let persistentAction: string | null = null;
+  let furnitureTaskId: string | null = null;
   const furnitureState = () => ({
     state: (furniturePose.activeName === "sit" ? "sitting" : furniturePose.activeName === "lie" ? "lying" : "standing") as "standing" | "sitting" | "lying",
     furnitureId: furniturePose.activeFurniture,
@@ -191,26 +196,26 @@ async function boot() {
   /** 结束坐/躺：起身并回到该家具的使用点（否则会站在床垫上）。 */
   const leaveFurniture = () => {
     persistentAction = null;
+    furnitureRestUntil = 0;
     if (!furniturePose.activeName) return;
+    furnitureTween = null;
     const id = furniturePose.activeFurniture;
     furniturePose.standUp();
     const spec = id ? furnitureById(id) : null;
     if (spec) {
-      root.position.x = spec.use.x;
-      root.position.z = spec.use.z;
+      furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.use.x, root.position.y, spec.use.z), t: 0, dur: 0.45 };
       root.rotation.y = spec.use.yaw;
     }
-    furnitureRestUntil = 0;
   };
   const furnitureBridge: FurnitureBridge = {
     snapshot: furnitureState,
-    perform: async (step) => {
+    perform: async (step, _stepId, ctx) => {
+      const epoch = bridgeEpoch;
       if (step.furniture_id === "none") {
-        const leaving = furniturePose.activeFurniture;
-        furniturePose.standUp();
-        const spec = leaving ? furnitureById(leaving) : null;
-        if (spec) furnitureTween = { from: root.position.clone(), to: new THREE.Vector3(spec.use.x, root.position.y, spec.use.z), t: 0, dur: 0.45 };
-        return { ok: true, state: furnitureState() };
+        leaveFurniture();
+        await waitForProgress(() => !furnitureTween && furniturePose.currentWeight === 0 || !!ctx?.isCancelled?.() || epoch !== bridgeEpoch,
+          () => performance.now(), { maxMs: 15000 });
+        return { ok: !ctx?.isCancelled?.() && epoch === bridgeEpoch, state: furnitureState() };
       }
       if (scenes.active !== "room" || scenes.transitioning) return { ok: false, error: "NOT_IN_ROOM", state: furnitureState() };
       const spec = furnitureById(step.furniture_id);
@@ -239,13 +244,19 @@ async function boot() {
       }
       furnitureRestUntil = Date.now() + FURNITURE_REST_MS;
       persistentAction = "use_furniture";
-      return { ok: true, state: furnitureState() };
+      await waitForProgress(() => !furnitureTween && furniturePose.currentWeight === 1 || !!ctx?.isCancelled?.() || epoch !== bridgeEpoch,
+        () => performance.now(), { maxMs: 15000 });
+      const ok = !ctx?.isCancelled?.() && epoch === bridgeEpoch;
+      if (!ok && epoch === bridgeEpoch) leaveFurniture();
+      return { ok, state: furnitureState() };
     },
   };
 
   syncSceneButtons = (to) => {
     document.getElementById("scene-playground")?.classList.toggle("active", to === "playground");
     document.getElementById("scene-room")?.classList.toggle("active", to === "room");
+    document.getElementById('scene-playground')?.setAttribute('aria-pressed', String(to === 'playground'));
+    document.getElementById('scene-room')?.setAttribute('aria-pressed', String(to === 'room'));
   };
   document.getElementById("scene-playground")?.addEventListener("click", () => switchScene("playground"));
   document.getElementById("scene-room")?.addEventListener("click", () => switchScene("room"));
@@ -675,10 +686,19 @@ async function boot() {
       }, 50);
     });
 
+  const ensureStanding = async () => {
+    if (!furniturePose.activeName && !furnitureTween && furniturePose.currentWeight === 0) return;
+    const epoch = bridgeEpoch;
+    leaveFurniture();
+    if (!(await waitBodySettled())) throw new Error('STALLED: 起身未完成');
+    if (epoch !== bridgeEpoch) throw new Error('CANCELLED');
+  };
   const loco: Locomotion = {
     yaw: () => root.rotation.y,
     position: () => ({ x: root.position.x, z: root.position.z }),
     walk: async (meters) => {
+      await ensureStanding();
+      movementBlocked = false;
       if (cyclesFor(meters) === null) return;
       const from = root.position.clone();
       player.walkDistance(meters);
@@ -690,6 +710,8 @@ async function boot() {
       );
     },
     run: async (meters) => {
+      await ensureStanding();
+      movementBlocked = false;
       const from = root.position.clone();
       if (!player.runDistance(meters)) return;
       await waitForProgress(
@@ -699,6 +721,8 @@ async function boot() {
       );
     },
     adjust: async (meters) => {
+      await ensureStanding();
+      movementBlocked = false;
       const from = root.position.clone();
       player.adjustDistance(meters);
       await waitForProgress(
@@ -708,6 +732,7 @@ async function boot() {
       );
     },
     turn: async (deg) => {
+      await ensureStanding();
       const from = root.rotation.y;
       startTurn(from + (deg * Math.PI) / 180, null);
       // 转向只有 0.3–1.15 秒动画；低帧率机器上两帧之间可能隔几秒，
@@ -759,11 +784,12 @@ async function boot() {
           await loco.adjust(leg.meters);
         }
         checkCancelled();
+        if (movementBlocked) break;
         moved += leg.meters;
         rest -= leg.meters;
       }
       rest = Math.max(0, rest);
-      while (rest >= 0.02 - 1e-9) {
+      while (!movementBlocked && rest >= 0.02 - 1e-9) {
         const adj = loco.adjust ? Math.min(0.08, Math.floor(rest / 0.02) * 0.02) : 0;
         if (!adj) break;
         await loco.adjust!(adj);
@@ -776,7 +802,7 @@ async function boot() {
       if (remaining > tolerance + 1e-6) {
         return {
           ok: false,
-          error: "NOT_ALIGNED",
+          error: movementBlocked ? "BLOCKED" : "NOT_ALIGNED",
           distance_m: +remaining.toFixed(3),
           tolerance_m: tolerance,
           position: { x: +after.x.toFixed(3), z: +after.z.toFixed(3) },
@@ -864,6 +890,22 @@ async function boot() {
     isMoving: () => player.moving || phase !== "idle" || player.performing!==null,
   };
   const degYaw = () => (root.rotation.y * 180) / Math.PI;
+  let movementBlocked = false;
+  const walkDirect = loco.walkTo!;
+  loco.walkTo = async (x, z, tolerance = .1, facing) => {
+    await ensureStanding();
+    const obstacles = scenes.active === 'room' ? roomScene.obstacles : [];
+    const path = navigationPath(root.position, {x,z}, obstacles, walkableHalfOf(stage.roomHalf));
+    if (!path) return {ok:false,error:'BLOCKED',position:{x:root.position.x,z:root.position.z}};
+    let moved = 0;
+    for (let i=0;i<path.length;i++) {
+      const last=i===path.length-1;
+      const result = await walkDirect(path[i].x,path[i].z,last?tolerance:.02,last?facing:undefined);
+      moved += Number(result.moved ?? 0);
+      if (!result.ok) return result;
+    }
+    return {ok:true,moved,position:{x:root.position.x,z:root.position.z},distance_m:Math.hypot(x-root.position.x,z-root.position.z)};
+  };
   const items = new Map<string, PropItem>([["basin", basin], ["rice_scoop", scoop]]);
   const itemOf = (objectId: string) => items.get(objectId) ?? null;
   const referenceOf = (objectId: string) => {
@@ -951,6 +993,7 @@ async function boot() {
     player.setHold('left_hand',gltf.animations.find(c=>c.name===(basin.grip==='outward'?'hold_basin_outward':'hold_basin'))??null);
   };
   const stopMotion=()=>{
+    leaveFurniture();
     bridgeEpoch++;destination=null;postTurn=null;phase='idle';player.haltMovement();player.clearGesture();player.setTail(false);player.cancelPerformance();basin.cancel();scoop.cancel();
   };
 
@@ -1475,7 +1518,7 @@ async function boot() {
   // 收步也是按帧推进的：低帧率下 0.8 秒的收步可能占好几秒墙钟，给足时间
   const waitBodySettled = async (timeoutMs = 30000) => {
     const t0 = performance.now();
-    while (player.state.walking || !player.state.resting || phase !== "idle" || player.state.upper !== null || player.performing !== null) {
+    while (furnitureTween || (furniturePose.activeName === null && furniturePose.currentWeight > 0) || player.state.walking || !player.state.resting || phase !== "idle" || player.state.upper !== null || player.performing !== null) {
       if (performance.now() - t0 > timeoutMs) return false;
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -1485,7 +1528,7 @@ async function boot() {
   const runOwned = async (owner: Owner, plan: Plan) => {
     // 坐/躺是持续状态：只有计划里真的要动位置/转身时才打断它。
     // 不能按 phase 判断——执行 use_furniture 的那一帧 phase 还是 stopping，会把她立刻拉起来。
-    const moves = plan.steps.some((step) => ["move_to", "walk", "run", "walk_adjust", "walk_to", "turn"].includes(step.action));
+    const moves = needsStanding(plan.steps);
     if (moves) leaveFurniture();
     if (motionOwner !== "none") {
       currentExecutor?.cancel();
@@ -1497,19 +1540,12 @@ async function boot() {
         return null; // 停不下来就不接管，避免叠加动作
       }
     }
+    if (moves && !(await waitBodySettled())) return null;
     motionOwner = owner;
     const epoch = ++motionEpoch;
     const ex = makeExecutor();
     try {
       const result = await ex.run(plan);
-      // 持续动作：成功执行后进入"不游走"状态；移动类动作会先 leaveFurniture 清掉
-      if (result && moves) {
-        persistentAction = null;
-      } else if (result) {
-        const persistentStep = [...(result.steps ?? [])].reverse()
-          .find((step) => step.status === "succeeded" && PERSISTENT_ACTIONS.has(step.action));
-        if (persistentStep) persistentAction = persistentStep.action;
-      }
       return epoch === motionEpoch && currentExecutor === ex ? result : null; // 过期结果不回报
     } finally {
       if (epoch === motionEpoch) motionOwner = "none";
@@ -1599,7 +1635,10 @@ async function boot() {
     onMemoryUpdated:count=>controls.updatePending(count),
     onTaskState: (phase,taskId) => {
       // 有新的思考/执行就开始新行为：先结束坐/躺
-      if (phase === "thinking" || phase === "executing") leaveFurniture();
+      if ((phase === "thinking" || phase === "executing") && taskId && taskId !== furnitureTaskId) {
+        furnitureTaskId = taskId;
+        leaveFurniture();
+      }
       if((phase==='thinking'||phase==='checking')&&motionOwner==='roaming'){currentExecutor?.cancel();}
       if(phase==='thinking'&&taskId){void waitBodySettled().then(ok=>{if(ok)client.ready(taskId,snapshot());});}
       if(phase==='stopping'){
@@ -1628,6 +1667,17 @@ async function boot() {
     onScene: (scene, pending) => {
       const target = scene === "room" ? "room" : "playground";
       setScenePending((pending as "playground" | "room" | null) ?? null);
+      if (scenes.initialize(target)) {
+        setPropObstacles(target === 'room' ? roomScene.colliders : []);
+        if (target === 'room') {
+          const safe = recoverPosition(root.position, roomScene.obstacles,
+            roomScene.furniture.flatMap(item=>item.use?[item.use]:[]));
+          root.position.x = safe.x; root.position.z = safe.z;
+        }
+        document.body.classList.toggle('scene-room', target === 'room');
+        syncSceneButtons(target);
+        return;
+      }
       if (pending) return;
       if (target !== scenes.active && !scenes.transitioning) runSceneTransition(target);
     },
@@ -1832,7 +1882,12 @@ async function boot() {
 
     forward.set(Math.sin(root.rotation.y), 0, Math.cos(root.rotation.y));
     if (player.movementDelta > 0 && phase !== "turning") {
-      root.position.addScaledVector(forward, player.movementDelta);
+      const next = root.position.clone().addScaledVector(forward, player.movementDelta);
+      if (scenes.active === 'room' && segmentBlocked(root.position, next, roomScene.obstacles.map(o=>expandObstacle(o)))) {
+        movementBlocked = true;
+        destination = null;
+        player.haltMovement();
+      } else root.position.copy(next);
     }
 
     if (shouldEndFurnitureRest(Date.now(), furnitureRestUntil)) leaveFurniture();

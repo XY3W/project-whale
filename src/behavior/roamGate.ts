@@ -6,6 +6,14 @@
  * 这里做成纯函数，方便回归测试；主循环只负责喂状态。
  */
 
+import { resources } from '../../shared/resources.mjs';
+
+interface ActionNode { action: string; items?: ActionNode[] }
+export function needsStanding(steps: ActionNode[]): boolean {
+  return steps.some(step => step.action === 'parallel' ? needsStanding(step.items ?? []) :
+    step.action !== 'use_furniture' && (resources(step).includes('body_locomotion') || ['stow_scoop','unstow_scoop'].includes(step.action)));
+}
+
 export interface RoamGateInput {
   stateApplied: boolean;
   errorActive: boolean;
