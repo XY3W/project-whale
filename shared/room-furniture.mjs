@@ -1,38 +1,39 @@
-/**
- * 房间家具的唯一来源：客户端建场景、服务端写上下文、家具桥校验都用这一份，
- * 避免"模型以为沙发在左边、画面在右边"。
- *
- * 尺寸按角色身材定（她站着约 0.7m、坐着髋高约 0.15m）：
- * 沙发座面 0.20m、床面 0.16m。
- */
-
+/** All floor footprints use complete 0.5 m cells, counted from the back-left corner. */
+export const ROOM_GRID = { cellSize: 0.5, columns: 16, rows: 16, half: 4 };
 export const FURNITURE_USE_RANGE_M = 1.2;
 
-export const ROOM_FURNITURE = [
-  {
-    id: "sofa",
-    kind: "sofa",
-    label: "沙发",
-    position: [-1.7, -3.1],
-    yaw: 0,
-    /** 角色走过来站着的位置 */
-    use: { x: -1.7, z: -2.55, yaw: 0 },
-    /** 坐下之后身体所在的位置 */
-    rest: { x: -1.7, z: -2.95 },
-    interact: "sit",
-    surfaceY: 0.2,
-  },
-  {
-    id: "bed",
-    kind: "bed",
-    label: "床",
-    position: [1.9, -2.95],
-    yaw: 0,
-    use: { x: 2.6, z: -2.75, yaw: 0 },
-    rest: { x: 1.9, z: -2.95 },
-    interact: "lie",
-    surfaceY: 0.16,
-  },
+export function roomCell(col, row) {
+  const { half, cellSize } = ROOM_GRID;
+  return { x: -half + (col + .5) * cellSize, z: -half + (row + .5) * cellSize };
+}
+
+export function roomFootprint(grid) {
+  const { half, cellSize } = ROOM_GRID;
+  const width = grid.cols * cellSize, depth = grid.rows * cellSize;
+  const minX = -half + grid.col * cellSize, minZ = -half + grid.row * cellSize;
+  return { x: minX + width / 2, z: minZ + depth / 2, width, depth, minX, maxX: minX + width, minZ, maxZ: minZ + depth };
+}
+
+const specs = [
+  { id: 'sofa', kind: 'sofa', label: '沙发', grid: { col: 2, row: 1, cols: 3, rows: 2 },
+    useCell: { col: 3, row: 3 }, interact: 'sit', surfaceY: .2, restOffsetZ: .42 },
+  { id: 'bed', kind: 'bed', label: '床', grid: { col: 10, row: 1, cols: 2, rows: 3 },
+    useCell: { col: 13, row: 3 }, interact: 'lie', surfaceY: .16, restOffsetZ: 0 },
+  { id: 'bedside', kind: 'table', label: '床头柜与台灯', grid: { col: 13, row: 1, cols: 1, rows: 1 } },
+  { id: 'shelf', kind: 'shelf', label: '书架', grid: { col: 14, row: 7, cols: 1, rows: 3 } },
+  { id: 'rug', kind: 'rug', label: '地毯', grid: { col: 5, row: 6, cols: 6, rows: 4 } },
 ];
 
-export const furnitureById = (id) => ROOM_FURNITURE.find((item) => item.id === id) ?? null;
+export const ROOM_LAYOUT = specs.map(spec => {
+  const f = roomFootprint(spec.grid);
+  return {
+    ...spec, position: [f.x, f.z], yaw: 0,
+    ...(spec.useCell ? {
+      use: { ...roomCell(spec.useCell.col, spec.useCell.row), yaw: 0 },
+      rest: { x: f.x, z: f.z + spec.restOffsetZ },
+    } : {}),
+  };
+});
+/** Only these pieces currently support character interaction. */
+export const ROOM_FURNITURE = ROOM_LAYOUT.filter(item => item.interact);
+export const furnitureById = id => ROOM_FURNITURE.find(item => item.id === id) ?? null;

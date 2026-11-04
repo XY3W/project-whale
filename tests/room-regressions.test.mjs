@@ -23,7 +23,7 @@ function furnitureFixture() {
     `function makeExecutor(){const ex={cancel(){},async run(plan){const steps=[];for(const step of plan.steps){const r=await furnitureBridge.perform(step,'s');steps.push({action:step.action,status:r.ok?'succeeded':'failed'});}return {steps}}};currentExecutor=ex;return ex;}\n`+ensure+run+
     `\nreturn {bridge:furnitureBridge,leave:leaveFurniture,ensure:ensureStanding,run:runOwned,state:()=>({persistentAction,furnitureRestUntil,furnitureTween}),tick(dt){${tween} furniturePose.currentWeight=furniturePose.targetWeight;}};`,
     {compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}}).outputText;
-  const root=new THREE.Group();root.position.set(-1.7,0,-2.55);
+  const root=new THREE.Group();const use=furnitureById('sofa').use;root.position.set(use.x,0,use.z);
   const pose={activeName:null,activeFurniture:null,currentWeight:0,targetWeight:0,
     sitOn(id,name,_height,options){this.activeFurniture=id;this.activeName=name;this.targetWeight=1;if(options?.instant)this.currentWeight=1;},
     standUp(){this.activeName=null;this.activeFurniture=null;this.targetWeight=0;}};
@@ -45,11 +45,11 @@ test('起身即使从未坐下，也不残留持续动作和休息计时',async(
   assert.equal(f.state().persistentAction,'use_furniture');assert.equal(f.pose.currentWeight,1);
   await f.run('plan',{steps:[{action:'use_furniture',furniture_id:'none'}]});
   assert.equal(f.state().persistentAction,null);assert.equal(f.state().furnitureTween,null);
-  assert.equal(f.state().furnitureRestUntil,0);assert.equal(f.root.position.z,-2.55);
+  assert.equal(f.state().furnitureRestUntil,0);assert.equal(f.root.position.z,furnitureById('sofa').use.z);
   await f.bridge.perform({furniture_id:'sofa'},'s');
   await f.ensure();
   assert.equal(f.pose.currentWeight,0,'同一计划后续移动也必须等起身结束');
-  assert.equal(f.root.position.z,-2.55);
+  assert.equal(f.root.position.z,furnitureById('sofa').use.z);
 });
 
 test('打断坐下后不会被旧补间拉回座面，重复起身也不截断退出过渡',async()=>{
@@ -57,7 +57,7 @@ test('打断坐下后不会被旧补间拉回座面，重复起身也不截断�
   const entering=f.bridge.perform({furniture_id:'sofa'},'s',{isCancelled:()=>f.pose.activeName===null});
   f.tick(.1);f.leave();f.leave();
   await entering;for(let i=0;i<60;i++)f.tick(1/60);
-  assert.equal(f.root.position.z,-2.55);assert.equal(f.state().furnitureTween,null);
+  assert.equal(f.root.position.z,furnitureById('sofa').use.z);assert.equal(f.state().furnitureTween,null);
   assert.equal(f.state().persistentAction,null);
 });
 
@@ -74,11 +74,11 @@ test('家具路径绕行且各线段安全；家具内部目标拒绝，场地�
  const obstacle={minX:-.5,maxX:.5,minZ:-1,maxZ:0};
  const path=navigationPath(from,to,[obstacle],3.7);assert.ok(path.length>1);
  let previous=from;for(const next of path){assert.equal(segmentBlocked(previous,next,[expandObstacle(obstacle,.18)]),false);previous=next;}
- assert.equal(navigationPath(from,{x:-1.7,z:-3.1},room.obstacles,3.7),null);
+ assert.equal(navigationPath(from,{x:furnitureById('sofa').position[0],z:furnitureById('sofa').position[1]},room.obstacles,3.7),null);
  for(const spec of ['sofa','bed'].map(furnitureById))assert.ok(navigationPath(from,spec.use,room.obstacles,3.7),spec.id+' use point must be reachable');
  assert.deepEqual(recoverPosition(from,room.obstacles,[]),from,'valid saved positions are unchanged');
- const safe=recoverPosition({x:-1.7,z:-2.95},room.obstacles,['sofa','bed'].map(furnitureById).map(s=>s.use));
- assert.equal(safe.x,-1.7);assert.equal(safe.z,-2.55);
+ const safe=recoverPosition(furnitureById('sofa').rest,room.obstacles,['sofa','bed'].map(furnitureById).map(s=>s.use));
+ assert.equal(safe.x,furnitureById('sofa').use.x);assert.equal(safe.z,furnitureById('sofa').use.z);
  assert.equal(segmentBlocked({x:-2,z:-.5},{x:2,z:-.5},[obstacle]),true,'large step must not tunnel');
  assert.equal(navigationPath(from,to,[],3.7).length,1);
 });

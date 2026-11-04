@@ -1,4 +1,4 @@
-import { ROOM_FURNITURE } from "../shared/room-furniture.mjs";
+import { ROOM_FURNITURE, ROOM_GRID, ROOM_LAYOUT, roomFootprint } from "../shared/room-furniture.mjs";
 import {digAim} from "../shared/dig-aim.mjs";
 import { OBJECTS } from "./capabilities.mjs";
 import { PICKUP_RANGE_M } from "../shared/pickup-range.mjs";
@@ -301,6 +301,8 @@ export function roomContext(scene) {
   if (scene !== "room") return null;
   return {
     scene: "room",
+    grid: { cell_size_m: ROOM_GRID.cellSize, columns: ROOM_GRID.columns, rows: ROOM_GRID.rows, origin: { x: -ROOM_GRID.half, z: -ROOM_GRID.half } },
+    layout: ROOM_LAYOUT.map(item => ({ id: item.id, label: item.label, cells: item.grid, footprint: roomFootprint(item.grid), blocks_movement: item.kind !== "rug" })),
     furniture: ROOM_FURNITURE.map((item) => ({
       id: item.id,
       label: item.label,
